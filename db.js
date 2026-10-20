@@ -22,6 +22,10 @@
   const tr = (obj, lang) => (obj && (obj[lang] || obj.en)) || '';
   // Display names where the first synonym in the data is not the usual word (data from Open Food Facts).
   const ALLERGEN_LABEL = { bg: { milk: 'мляко' } };
+  // Names missing in the Open Food Facts data (move into build_db.py later).
+  const EXTRA_ALLERGEN_NAMES = { milk: ['краве масло', 'масло от краве мляко'] };
+  // Plant fats called "butter" are not milk: "cocoa butter" -> "cocoa" before the allergen check.
+  const PLANT_BUTTER = / (cocoa|cacao|shea|mango|kokum|illipe|sal|peanut|almond|cashew|hazelnut|nut|seed) butter(?= )/g;
   const allergenName = (al, lang) => (ALLERGEN_LABEL[lang] && ALLERGEN_LABEL[lang][al.id]) || (al.n[lang] || al.n.en)[0];
 
   async function load(base, fetchFn) {
@@ -49,7 +53,8 @@
     foodNames.sort((x, y) => y[0].length - x[0].length);
     allergenNames = [];
     for (const al of FOOD.allergens) {
-      for (const lang of ['en', 'de', 'bg']) for (const n of (al.n[lang] || [])) {
+      const extra = EXTRA_ALLERGEN_NAMES[al.id] || [];
+      for (const n of [...['en', 'de', 'bg'].flatMap(lang => al.n[lang] || []), ...extra]) {
         const t = norm(n);
         if (t.length >= 3) allergenNames.push([t, al]);
       }
@@ -193,8 +198,9 @@
       };
     }).sort((x, y) => (x.pos || 999) - (y.pos || 999));
     const allergens = new Map();
+    const wholeA = whole.replace(PLANT_BUTTER, ' $1');
     for (const [t, al] of allergenNames) {
-      if (!allergens.has(al.id) && whole.includes(' ' + t + ' ')) allergens.set(al.id, { id: al.id, name: allergenName(al, lang), matched: t, pos: posOf(t) });
+      if (!allergens.has(al.id) && wholeA.includes(' ' + t + ' ')) allergens.set(al.id, { id: al.id, name: allergenName(al, lang), matched: t, pos: posOf(t) });
     }
     const rules = [];
     for (const r of FOOD.rules) {
@@ -226,6 +232,39 @@
     return FOOD.allergens.map(a => ({ id: a.id, name: allergenName(a, lang) }));
   }
 
-  const api = { load, norm, splitIngredients, checkCosmetic, checkFood, cosAllergens, foodAllergens, meta: () => META, SEV };
+  // ---------- search one ingredient (name, alias or E-number)
+  let cosKeys = null;
+  function search(q, limit) {
+    limit = limit || 30;
+    const nq = norm(q), kq = nq.replace(/ /g, '');
+    if (kq.length < 2) return [];
+    if (!cosKeys) {
+      cosKeys = COS.items.map(it => [key(it[0]), it[0], it[2] || 'n']);
+      for (const [alias, inci] of Object.entries(COS.aliases)) {
+        const it = cosIndex.get(key(inci));
+        if (it) cosKeys.push([key(alias), it[0], it[2] || 'n']);
+      }
+    }
+    const hits = new Map();
+    const add = (score, id, kind, name, level) => {
+      const k = kind + ':' + id, old = hits.get(k);
+      if (!old || score < old.score) hits.set(k, { score, id, kind, name, level });
+    };
+    const em = kq.match(/^e(\d{3,4}[a-z]?)$/);
+    if (em) { const a = eIndex.get('e' + em[1]); if (a) add(0, a.e, 'food', a.e.toUpperCase(), a.lv); }
+    for (const a of FOOD.additives) {
+      for (const lang of ['en', 'de', 'bg']) for (const n of (a.n[lang] || [])) {
+        const t = norm(n), i = t.indexOf(nq);
+        if (i >= 0) add(t === nq ? 1 : i === 0 ? 2 : 4, a.e, 'food', a.e.toUpperCase(), a.lv);
+      }
+    }
+    for (const [k, name, level] of cosKeys) {
+      const i = k.indexOf(kq);
+      if (i >= 0) add(k === kq ? 1 : i === 0 ? 2 : 4, name, 'cosmetic', name, level);
+    }
+    return [...hits.values()].sort((x, y) => (x.score - y.score) || (x.name.length - y.name.length)).slice(0, limit);
+  }
+
+  const api = { load, norm, splitIngredients, checkCosmetic, checkFood, cosAllergens, foodAllergens, search, meta: () => META, SEV };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.LCDB = api;
 })(typeof window !== 'undefined' ? window : globalThis);

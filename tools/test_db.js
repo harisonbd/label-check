@@ -97,6 +97,21 @@ const ok = (cond, msg) => { if (!cond) { fails++; console.log('  FAIL: ' + msg);
   ok(f.res.rules.some(r => r.id === 'trans-fat'), 'частично хидрогенирани');
   ok(f.al('milk') && f.al('nuts'), 'мляко + лешници');
 
+  console.log('\n8 Plant butters are not milk; Bulgarian cow butter is milk');
+  f = food('sugar, cocoa butter, shea butter, peanut butter', 'en');
+  ok(!f.al('milk') && f.al('peanuts'), 'cocoa/shea butter not milk, peanut butter = peanuts');
+  f = food('захар, какаово масло, краве масло', 'bg');
+  ok(f.al('milk'), 'краве масло = milk');
+  f = food('Zucker, Butter', 'de');
+  ok(f.al('milk'), 'Butter = milk');
+
+  console.log('\n9 Search one ingredient');
+  const hit = (q, kind, name) => LCDB.search(q, 10).some(h => h.kind === kind && h.name === name);
+  ok(hit('phenoxy', 'cosmetic', 'PHENOXYETHANOL'), 'phenoxy -> PHENOXYETHANOL');
+  ok(LCDB.search('e 250', 5)[0].id === 'e250', 'e 250 -> E250 first');
+  ok(hit('natriumnitrit', 'food', 'E250') && hit('аспартам', 'food', 'E951'), 'German and Bulgarian names');
+  ok(LCDB.search('a', 5).length === 0, 'one letter -> no search');
+
   console.log(fails ? `\n${fails} FAILED` : '\nALL PASSED');
   process.exit(fails ? 1 : 0);
 })();

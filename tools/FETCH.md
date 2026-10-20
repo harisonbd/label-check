@@ -1,5 +1,16 @@
 # Update the database sources
 
+## Automatic (since 20 Oct 2026)
+GitHub updates the database by itself on the 2nd of each month: `.github/workflows/update-db.yml` runs
+`tools/fetch_sources.py`, `tools/build_db.py` and `tools/test_db.js`. It publishes only if the EU data changed,
+and then raises `VERSION` in `sw.js` so phones load the new data. If anything fails, nothing is published and
+GitHub sends an e-mail. Run it by hand: repository > Actions > "Monthly database update" > Run workflow.
+
+IARC has no download link a server can use. Its list is kept in `tools/iarc/lc-iarc.csv`
+(date in `tools/iarc/FETCHED.txt`). Update both by hand 1–2 times a year (step 3 below).
+
+## By hand (browser)
+
 The EU sites work only in a normal browser (Claude's built-in browser works). Each step saves a file to Downloads.
 Then move the files to `_sources/` and run:
 
@@ -39,7 +50,8 @@ for (const [k, u] of Object.entries(urls)) { const d = new DOMParser().parseFrom
 const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(out)])); a.download = 'lc-edlists.json'; a.click();
 ```
 
-## 3. IARC – open https://monographs.iarc.who.int/list-of-classifications/ and click "CSV". Rename the file to `lc-iarc.csv`.
+## 3. IARC – open https://monographs.iarc.who.int/list-of-classifications/ and click "CSV". Rename the file to `lc-iarc.csv`,
+put it in `_sources/` and in `tools/iarc/`, and write the date in `tools/iarc/FETCHED.txt`.
 
 ## 4. EU food additives – open https://ec.europa.eu/food/food-feed-portal/screen/food-additives/search and run
 

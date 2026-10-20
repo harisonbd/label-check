@@ -22,11 +22,25 @@
     <!-- SCAN TAB -->
     <section class="tab" id="tab-scan" data-tab="scan">
       <div id="scanner">
+        <div class="startcards">
+          <button class="scard primary" id="cardScan" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M7 12h10"/></svg>
+            <span><strong data-t="card.scan">Scan a barcode</strong><small data-t="card.scanSub"></small></span>
+          </button>
+          <button class="scard" id="cardLabel" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.5-2h6l1.5 2h2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="13" r="3.5"/></svg>
+            <span><strong data-t="card.label">Read a label</strong><small data-t="card.labelSub"></small></span>
+          </button>
+          <button class="scard" id="cardSearch" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>
+            <span><strong data-t="card.search">Find one ingredient</strong><small data-t="card.searchSub"></small></span>
+          </button>
+        </div>
+
         <div class="viewfinder" id="viewfinder">
           <video id="video" playsinline muted hidden></video>
           <div class="scanline" id="scanline" hidden></div>
           <div class="vf-idle" id="vfIdle">
-            <button class="btn btn-primary" id="startCam" type="button" data-t="cam.start">Start camera</button>
             <p class="vf-hint" data-t="cam.hint">Point it at the barcode. The scan starts by itself.</p>
           </div>
           <button class="btn btn-ghost vf-stop" id="stopCam" type="button" hidden data-t="cam.stop">Stop camera</button>
@@ -41,7 +55,11 @@
           <p class="help" id="codeHelp" data-t="manual.help">8 to 14 digits.</p>
         </form>
 
-        <button class="linkbtn" id="openLabel" type="button" data-t="openLabel">No barcode? Read a label instead</button>
+        <section class="checking" id="checking"></section>
+        <section class="recent" id="recent" hidden>
+          <div class="recent-head"><h3 data-t="start.recent">Recent</h3><button class="linkbtn" id="recentAll" type="button" data-t="start.all">All</button></div>
+          <ul class="plainlist prodlist" id="recentList"></ul>
+        </section>
       </div>
 
       <div id="status" class="status" hidden></div>
@@ -51,6 +69,7 @@
 
       <!-- Read a label -->
       <section id="labelPanel" class="panel" hidden>
+        <button class="iconbtn panel-back" type="button" data-back><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span data-t="d.back">Back</span></button>
         <h2 data-t="label.title">Read a label with Claude</h2>
         <p class="lead" id="labelLead"></p>
         <ol class="steps">
@@ -83,6 +102,17 @@
         <button class="btn btn-primary wide" id="checkLabel" type="button" data-t="label.check">Check ingredients</button>
       </section>
 
+      <!-- Find one ingredient (offline) -->
+      <section id="searchPanel" class="panel" hidden>
+        <button class="iconbtn panel-back" type="button" data-back><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span data-t="d.back">Back</span></button>
+        <h2 data-t="search.title">Find one ingredient</h2>
+        <p class="lead" data-t="search.lead"></p>
+        <label class="sr-only" for="searchInput" data-t="search.title"></label>
+        <input id="searchInput" type="search" data-t-ph="search.ph" autocomplete="off" enterkeyhint="search">
+        <p class="minor" id="searchInfo"></p>
+        <ul class="rows searchlist" id="searchList"></ul>
+      </section>
+
       <div class="credit" id="credit"></div>
     </section>
 
@@ -112,6 +142,13 @@
         <label for="fragSwitch" class="grow"><span data-t="frag.label">I avoid fragrance (perfume)</span>
           <span class="sub" data-t="frag.help"></span></label>
         <span class="switch"><input type="checkbox" role="switch" id="fragSwitch"></span>
+      </div>
+
+      <h3 data-t="diet.title">Vegan</h3>
+      <div class="setting">
+        <label for="veganSwitch" class="grow"><span data-t="diet.label">I eat vegan</span>
+          <span class="sub" data-t="diet.help"></span></label>
+        <span class="switch"><input type="checkbox" role="switch" id="veganSwitch"></span>
       </div>
 
       <h3 data-t="alg.title">Allergens</h3>

@@ -510,3 +510,46 @@ details.fold input[type="search"] { margin: 6px 0 10px; }
 .gchip small { color: var(--muted); margin-right: 4px; }
 .gchip.nf { border-style: dashed; color: var(--muted); }
 .chiplist li.flash .gchip { animation: flash 1.4s ease-out; }
+
+/* ---------- Start screen: three cards, what is checked, recent ---------- */
+.startcards { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+.scard {
+  font: inherit; color: var(--ink); text-align: left; cursor: pointer;
+  display: flex; align-items: center; gap: 14px; width: 100%;
+  padding: 16px; border-radius: 16px; border: 1px solid var(--line); background: var(--card);
+}
+.scard svg { width: 30px; height: 30px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.scard strong { display: block; font-size: 1.08rem; }
+.scard small { display: block; color: var(--muted); font-size: 0.86rem; }
+.scard.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; padding: 22px 16px; }
+.scard.primary small { color: inherit; opacity: 0.85; }
+/* The camera view replaces the cards while it runs. */
+#scanner:not(.scanning) .viewfinder { display: none; }
+#scanner.scanning .startcards { display: none; }
+.manual label { font-size: 0.92rem; }
+.checking { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 16px 0 0; }
+.checking .lbl { font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+.cchip { font: inherit; font-size: 0.82rem; font-weight: 600; color: var(--ink); padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); cursor: pointer; }
+.recent { margin-top: 18px; }
+.recent-head { display: flex; align-items: baseline; justify-content: space-between; }
+.recent-head h3 { margin: 0; }
+.recent-head .linkbtn { padding: 6px 0; }
+.recent .plainlist { margin-top: 6px; }
+
+/* ---------- Panels (label, search) open as their own screen ---------- */
+.panel { margin-top: 6px; }
+.panel-back { margin: -6px 0 2px -8px; }
+.searchlist { margin: 6px -16px 0; border-top: 1px solid var(--line); }
+.searchlist .row-btn .dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+#searchInput { margin-top: 4px; }
+
+/* ---------- Result: stays on skin / washed off ---------- */
+.usebar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 10px 2px 0; }
+.usebar .lbl { font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+.usebar .segs { display: flex; flex: 1 1 auto; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--card); }
+.usebar .seg { font: inherit; font-size: 0.82rem; font-weight: 600; flex: 1 1 0; min-height: 36px; padding: 4px 8px; border: 0; background: none; color: var(--muted); cursor: pointer; }
+.usebar .seg + .seg { border-left: 1px solid var(--line); }
+.usebar .seg[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+
+/* ---------- Data age ---------- */
+.dbage.old { color: var(--orange-ink); font-weight: 650; }

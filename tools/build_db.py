@@ -570,12 +570,18 @@ for i, v in iarc_out.items():
 def fetched(d):
     return (d.get('fetched') or '')[:10]
 
+# Dates of the sources that have no date inside the file (written by tools/fetch_sources.py).
+try:
+    FETCHED = json.load(open(P('fetched.json')))
+except (OSError, ValueError):
+    FETCHED = {}
+
 SOURCES = [
     {'id': 'cosing', 'label': 'EU CosIng – cosmetic ingredients and Annexes II–VI (Regulation (EC) 1223/2009)', 'url': 'https://ec.europa.eu/growth/tools-databases/cosing/', 'fetched': fetched(a), 'licence': 'European Commission, reuse with credit'},
     {'id': 'ed', 'label': 'EU endocrine disruptor lists I–III (edlists.org, run by 6 EU national authorities)', 'url': 'https://edlists.org/the-ed-lists', 'fetched': fetched(EDJ)},
-    {'id': 'iarc', 'label': 'IARC Monographs – list of classifications (WHO)', 'url': 'https://monographs.iarc.who.int/list-of-classifications/', 'fetched': '2026-10-20'},
+    {'id': 'iarc', 'label': 'IARC Monographs – list of classifications (WHO)', 'url': 'https://monographs.iarc.who.int/list-of-classifications/', 'fetched': (FETCHED.get('iarc') or '2026-10-20')[:10]},
     {'id': 'fad', 'label': 'EU food additives database (Food and Feed Information Portal)', 'url': 'https://ec.europa.eu/food/food-feed-portal/screen/food-additives/search', 'fetched': fetched(FAD)},
-    {'id': 'off', 'label': 'Open Food Facts taxonomies – additive names (EN/DE/BG), EFSA links, allergens', 'url': 'https://github.com/openfoodfacts/openfoodfacts-server/tree/main/taxonomies', 'fetched': '2026-10-20', 'licence': 'ODbL'},
+    {'id': 'off', 'label': 'Open Food Facts taxonomies – additive names (EN/DE/BG), EFSA links, allergens', 'url': 'https://github.com/openfoodfacts/openfoodfacts-server/tree/main/taxonomies', 'fetched': (FETCHED.get('off') or '2026-10-20')[:10], 'licence': 'ODbL'},
     {'id': 'eu14', 'label': 'EU food allergens – Regulation (EU) 1169/2011, Annex II', 'url': 'https://eur-lex.europa.eu/eli/reg/2011/1169/oj'},
 ]
 

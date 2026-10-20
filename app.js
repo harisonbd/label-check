@@ -30,6 +30,19 @@
     'sodium lauryl sulfate, sodium laureth sulfate, sls, sles'
   ];
 
+  // Vegan check (food): allergens that always come from animals, and animal ingredient words (EN / DE / BG).
+  const ANIMAL_ALLERGENS = ['milk', 'eggs', 'fish', 'crustaceans', 'molluscs'];
+  const ANIMAL_TERMS = [
+    'meat', 'pork', 'beef', 'veal', 'lamb', 'mutton', 'chicken', 'turkey', 'duck', 'bacon', 'ham', 'salami', 'gelatin', 'gelatine',
+    'lard', 'tallow', 'suet', 'honey', 'beeswax', 'anchovy', 'anchovies', 'tuna', 'salmon', 'cod', 'collagen', 'carmine', 'cochineal',
+    'shellac', 'isinglass', 'bone*', 'whey', 'casein*', 'cheese',
+    'fleisch', 'fleisch*', 'schweinefleisch', 'rindfleisch', 'kalbfleisch', 'lammfleisch', 'putenfleisch', 'hühnerfleisch',
+    'geflügelfleisch', 'hackfleisch', 'hähnchen*', 'huhn', 'pute', 'speck', 'schinken', 'schmalz', 'schweineschmalz', 'talg', 'rindertalg',
+    'honig', 'bienenwachs', 'sardelle*', 'thunfisch', 'lachs', 'kollagen', 'schellack', 'karmin', 'molke*', 'käse', 'kase',
+    'месо', 'свинско', 'свинска', 'телешко', 'говеждо', 'пилешко', 'пилешки', 'пуешко', 'агнешко', 'бекон', 'шунка', 'салам',
+    'желатин', 'свинска мас', 'лой', 'пчелен мед', 'пчелен восък', 'аншоа', 'риба тон', 'сьомга', 'колаген', 'кармин', 'суроватка', 'сирене', 'масло краве'
+  ];
+
   // One order and one colour everywhere: tiles, strip and groups.
   const GROUPS = ['red', 'orange', 'info', 'green'];
   const LEVEL_GROUP = { b: 'red', c: 'orange', u: 'orange', r: 'info', n: 'green' };
@@ -58,6 +71,7 @@
     favs: store.get('favs', []),             // [code]
     allergens: Object.assign({ food: [], cos: [] }, store.get('allergens', {})), // ticked ids / annex refs
     avoidFragrance: store.get('avoidFragrance', false),
+    vegan: store.get('vegan', false),
     lang: store.get('lang', 'auto'),
     theme: store.get('theme', 'auto'),
     bigText: store.get('bigText', false),
@@ -163,7 +177,7 @@
   // Every ingredient becomes a row with a level (b c u r n) and a group (red orange info green).
   function analyze(p) {
     const text = p.ingredientsText || '';
-    let rows = p.kind === 'cosmetic' ? analyzeCosmetic(text) : analyzeFood(p, text);
+    let rows = p.kind === 'cosmetic' ? analyzeCosmetic(text, p.use) : analyzeFood(p, text);
 
     // Your list: also look in the other texts (e.g. the "EN:" line from Claude).
     const extraTexts = (p.texts || []).filter(x => x && x !== text);
@@ -205,16 +219,24 @@
     };
   }
 
-  function analyzeCosmetic(text) {
+  // An EU entry that allows the ingredient only in products that are washed off (rinse-off).
+  function rinseOnly(rs) {
+    const d = rs.details || {};
+    const txt = (d.products || '') + ' ' + (d.max || '');
+    return /rinse[- ]?off/i.test(txt) && !/leave[- ]?on|other products|\(b\)|\bb\)/i.test(txt);
+  }
+
+  function analyzeCosmetic(text, use) {
     return LCDB.checkCosmetic(text, LANG).map(r => {
       const mine = matchAvoid([r.text, r.found ? r.name : '']);
       const tickedAllergen = !!(r.allergen && state.allergens.cos.includes(r.allergenRef));
       const fragAvoid = !!(state.avoidFragrance && (r.fragrance || r.allergen));
-      const why = r.level === 'b' ? 'b' : mine ? 'mine' : tickedAllergen ? 'allergen' : fragAvoid ? 'fragrance' : null;
+      const useHit = use === 'leave' && (r.reasons || []).some(rinseOnly);
+      const why = r.level === 'b' ? 'b' : useHit ? 'use' : mine ? 'mine' : tickedAllergen ? 'allergen' : fragAvoid ? 'fragrance' : null;
       const row = {
         pos: r.pos, kind: 'cosmetic', text: r.text,
         label: r.found ? niceName(r.name) : cleanSeg(r.text),
-        level: r.level, group: why ? 'red' : LEVEL_GROUP[r.level] || 'green', why, mine, tickedAllergen, fragAvoid,
+        level: r.level, group: why ? 'red' : LEVEL_GROUP[r.level] || 'green', why, mine, tickedAllergen, fragAvoid, useHit,
         fragrance: r.fragrance, allergen: r.allergen, nano: r.nano, mayContain: r.mayContain, found: r.found, src: r
       };
       row.sub = cosmeticSub(row);
@@ -236,6 +258,7 @@
     const r = row.src, tags = cosmeticTags(row);
     const firstReason = r.reasons && r.reasons[0] ? r.reasons[0].text : '';
     if (row.why === 'b') return { lvl: { text: levelName('b'), g: 'red' }, parts: tags.length ? tags : (r.functions || []).slice(0, 1) };
+    if (row.why === 'use') return { lvl: { text: t('chip.use'), g: 'red' }, parts: [t('use.why')] };
     if (row.why === 'mine') return { lvl: { text: t('tag.mine'), g: 'red' }, parts: tags };
     if (row.why === 'allergen') return { lvl: { text: t('tag.allergenYours'), g: 'red' }, parts: tags };
     if (row.why === 'fragrance') return { lvl: { text: t('tag.fragranceAvoid'), g: 'red' }, parts: tags };
@@ -251,7 +274,9 @@
     const segN = segs.map(nrm);
     const res = LCDB.checkFood(text, LANG);
     const blank = (pos, txt, label) => ({ pos, kind: 'food', text: txt, label, additives: [], rules: [], allergens: [] });
-    const rows = segs.map((s, i) => blank(i + 1, s, cleanSeg(s)));
+    // Name = the part before any bracket ("Nitritpökelsalz (Speisesalz, …)" -> "Nitritpökelsalz"); full text on the detail screen.
+    const shortSeg = s => cleanSeg(s.replace(/\s*[([][^)\]]*[)\]]/g, ' ')) || cleanSeg(s);
+    const rows = segs.map((s, i) => blank(i + 1, s, shortSeg(s)));
     const extra = [];
     const at = pos => (pos && rows[pos - 1]) || null;
 
@@ -294,20 +319,50 @@
       extra.push(x);
     }
 
-    return rows.concat(extra).map(row => {
+    const out = rows.concat(extra).map(row => {
       let level = 'n';
       for (const x of [...row.additives, ...row.rules]) if (SEV[x.level] > SEV[level]) level = x.level;
       const mine = matchAvoid([row.text, ...row.additives.map(a => a.e + ' ' + a.name)]);
       const ticked = row.allergens.filter(a => state.allergens.food.includes(a.id));
-      const why = level === 'b' ? 'b' : mine ? 'mine' : ticked.length ? 'allergen' : null;
+      const vg = veganOf(row);
+      const veganHit = state.vegan && vg.no.length > 0;
+      const why = level === 'b' ? 'b' : mine ? 'mine' : ticked.length ? 'allergen' : veganHit ? 'vegan' : null;
       row.level = level;
       row.mine = mine;
       row.tickedAllergens = ticked;
+      row.vegan = vg;
       row.why = why;
-      row.group = why ? 'red' : level === 'c' || level === 'u' ? 'orange' : level === 'r' || row.allergens.length ? 'info' : 'green';
+      row.group = why ? 'red' : level === 'c' || level === 'u' ? 'orange'
+        : level === 'r' || row.allergens.length || (state.vegan && vg.maybe.length) ? 'info' : 'green';
       row.sub = foodSub(row);
       return row;
     });
+    // Open Food Facts says "not vegan", but no single ingredient showed it.
+    if (state.vegan && (p.analysis || []).includes('en:non-vegan') && !out.some(r => r.vegan && r.vegan.no.length)) {
+      const x = blank(null, '', t('tag.notVeganData'));
+      Object.assign(x, { level: 'n', mine: null, tickedAllergens: [], vegan: { no: [t('tag.fromData')], maybe: [] }, why: 'vegan', group: 'red', fromData: true });
+      x.sub = { lvl: { text: t('chip.vegan'), g: 'red' }, parts: [t('tag.fromData')] };
+      out.push(x);
+    }
+    return out;
+  }
+
+  // What in this row comes from animals (no) or may come from animals (maybe).
+  function veganOf(row) {
+    const no = [], maybe = [];
+    for (const a of row.additives) {
+      if (a.vegan === 'no') no.push(cap(a.name));
+      else if (a.vegan === 'maybe') maybe.push(cap(a.name));
+    }
+    for (const al of row.allergens) if (ANIMAL_ALLERGENS.includes(al.id)) no.push(cap(al.name));
+    if (state.vegan && row.text) {
+      const hay = [nrm(row.text)];
+      for (const term of ANIMAL_TERMS) {
+        const re = termRe(term);
+        if (re && hay.some(h => re.test(h))) { no.push(cap(term.replace(/\*/g, ''))); break; }
+      }
+    }
+    return { no: [...new Set(no)], maybe: [...new Set(maybe)] };
   }
 
   function foodSub(row) {
@@ -318,11 +373,15 @@
     if (row.why === 'b') return { lvl: { text: levelName('b'), g: 'red' }, parts };
     if (row.why === 'mine') return { lvl: { text: t('tag.mine'), g: 'red' }, parts: parts.concat(al) };
     if (row.why === 'allergen') return { lvl: { text: t('tag.allergenYours'), g: 'red' }, parts: row.tickedAllergens.map(a => cap(a.name)).concat(parts) };
+    if (row.why === 'vegan') {
+      const what = row.vegan.no.filter(n => n.toLowerCase() !== row.label.toLowerCase());
+      return { lvl: { text: t('chip.vegan'), g: 'red' }, parts: (what.length ? what : [t('tag.animal')]).concat(parts.filter(x => !row.vegan.no.some(n => x.includes(n)))) };
+    }
     if (row.group === 'orange' || (row.group === 'info' && row.level === 'r')) {
       const reason = !row.additives.length && row.rules[0] && row.rules[0].reasons[0] ? [row.rules[0].reasons[0].text] : [];
       return { lvl: { text: levelName(row.level), g: row.group }, parts: parts.concat(al, reason) };
     }
-    if (row.group === 'info') return { lvl: null, parts: al.concat(parts) };
+    if (row.group === 'info') return { lvl: null, parts: al.concat(parts, state.vegan && row.vegan.maybe.length ? [t('tag.maybeVegan')] : []) };
     const classes = row.additives.flatMap(a => a.classes || []).slice(0, 1);
     return { lvl: null, parts: parts.concat(classes) };
   }
@@ -331,6 +390,7 @@
   function shortName(row) {
     if (row.why === 'mine') return cap(row.mine.name);
     if (row.why === 'allergen' && row.kind === 'food') return cap(row.tickedAllergens[0].name);
+    if (row.why === 'vegan') return row.label;
     if (row.kind === 'food') {
       const a = row.additives.slice().sort((x, y) => SEV[y.level] - SEV[x.level])[0];
       if (a && a.level === row.level) return cap(a.name) + ' (' + a.e + ')';
@@ -343,7 +403,7 @@
     if (verdict === 'avoid') {
       if (counts.red > 1) return t('sum.redN', { n: counts.red });
       const r = rows.find(x => x.group === 'red');
-      const key = { b: 'sum.red1.b', mine: 'sum.red1.mine', allergen: 'sum.red1.allergen', fragrance: 'sum.red1.fragrance' }[r.why];
+      const key = { b: 'sum.red1.b', mine: 'sum.red1.mine', allergen: 'sum.red1.allergen', fragrance: 'sum.red1.fragrance', vegan: 'sum.red1.vegan', use: 'sum.red1.use' }[r.why];
       return t(key, { name: shortName(r) });
     }
     if (verdict === 'check') {
@@ -507,6 +567,7 @@
   function hideAll() {
     $('result').hidden = true;
     $('labelPanel').hidden = true;
+    $('searchPanel').hidden = true;
     $('status').hidden = true;
   }
 
@@ -515,6 +576,21 @@
     $('scanner').hidden = false;
     state.current = null;
     window.scrollTo({ top: 0 });
+  }
+
+  // Label reading and ingredient search open as their own screen (phone Back returns).
+  function showPanel(id) {
+    hideAll();
+    stopCamera();
+    $('scanner').hidden = true;
+    $(id).hidden = false;
+    window.scrollTo({ top: 0 });
+  }
+
+  function closePanel() {
+    const v = history.state && history.state.view;
+    if (v === 'label' || v === 'search') { try { history.back(); return; } catch (e) { /* fall through */ } }
+    showScanner();
   }
 
   function showStatus(text, buttons) {
@@ -564,6 +640,7 @@
     const r = $('result');
     r.replaceChildren(...[
       topCard(a, p),
+      p.kind === 'cosmetic' && a.verdict !== 'unknown' ? useBar(p) : null,
       productChips(p, a),
       el('div', { id: 'groups' }),
       p.ingredientsText
@@ -612,6 +689,28 @@
     card.append(strip, el('div', { class: 'strip-ends', 'aria-hidden': 'true' },
       el('span', { text: t('strip.first') }), el('span', { text: t('strip.last') })));
     return card;
+  }
+
+  // Stays on skin / washed off: some EU limits depend on it.
+  function useBar(p) {
+    const cur = p.use || '';
+    return el('div', { class: 'usebar', role: 'group', 'aria-label': t('use.q') },
+      el('span', { class: 'lbl', text: t('use.q') }),
+      el('div', { class: 'segs' }, ['leave', 'rinse', ''].map(v => el('button', {
+        type: 'button', class: 'seg', 'aria-pressed': String(cur === v), text: t('use.' + (v || 'unsure')),
+        onclick: () => setUse(p, v)
+      }))));
+  }
+
+  function setUse(p, v) {
+    if (v) p.use = v; else delete p.use;
+    if (state.products[p.code]) saveProduct(p);
+    verdictCache.delete(p.code);
+    const a = renderResult(p);
+    state.history.forEach(h => { if (h.code === p.code) h.verdict = a.verdict; });
+    store.set('history', state.history);
+    renderHistory();
+    renderFavs();
   }
 
   function productHead(p, a) {
@@ -666,8 +765,18 @@
       p.code && !String(p.code).startsWith('label-') ? t('data.barcode', { code: p.code }) + ' ' : null,
       (t('data.from', { src: sourceName }) +
         (p.updated ? t('data.updated', { date: fmtDate(p.updated) }) : (p.source === 'label' ? t('data.saved', { date: fmtDate(p.fetchedAt) }) : ''))).replace(/\.?$/, '. '),
-      p.url ? link(p.url, t('data.open')) : null
+      p.url ? link(p.url, t('data.open')) : null,
+      dbAge()
     );
+  }
+
+  // "EU data from …", with a warning after 6 months.
+  function dbAge() {
+    const built = META() && Date.parse(META().built);
+    if (!built) return null;
+    const old = Date.now() - built > 183 * 864e5;
+    return el('span', { class: 'dbage' + (old ? ' old' : '') },
+      ' ' + t('data.eu', { date: fmtDate(built) }) + (old ? ' ' + t('data.euOld') : ''));
   }
 
   function setFilter(g) {
@@ -718,15 +827,17 @@
 
   // Short coloured tag on the right of a row.
   function chipOf(r) {
-    const k = r.why === 'b' ? 'chip.b' : r.why === 'mine' ? 'chip.mine' : r.why === 'allergen' ? 'chip.yourAlg' : r.why === 'fragrance' ? 'chip.frag'
+    const k = r.why === 'b' ? 'chip.b' : r.why === 'use' ? 'chip.use' : r.why === 'mine' ? 'chip.mine' : r.why === 'allergen' ? 'chip.yourAlg'
+      : r.why === 'fragrance' ? 'chip.frag' : r.why === 'vegan' ? 'chip.vegan'
       : r.group === 'orange' ? (r.level === 'u' ? 'chip.u' : 'chip.c')
-      : r.group === 'info' ? (r.allergen || (r.allergens && r.allergens.length && r.level !== 'r') ? 'chip.alg' : 'chip.r') : null;
+      : r.group === 'info' ? (r.level === 'r' ? 'chip.r' : r.allergen || (r.allergens && r.allergens.length) ? 'chip.alg' : 'chip.maybeVegan') : null;
     return k ? t(k) : null;
   }
   // One short line: why this row has its colour.
   function whyOf(r) {
     if (r.kind === 'cosmetic') {
       const s = r.src, tags = cosmeticTags(r), fn = (s.functions || [])[0];
+      if (r.why === 'use') return t('use.why');
       if (r.group === 'orange' && !r.why) return (s.reasons[0] || {}).text || '';
       if (r.group === 'info') {
         if (r.allergen) return t('tag.allergen');
@@ -775,20 +886,20 @@
   function showNotFound(code) {
     hideAll();
     showStatus(t('status.notFound', { code }));
-    openLabel({ code });
+    openLabel({ code }, true);
   }
 
   function showOffline(code) {
     hideAll();
     showStatus(t('status.offline'), [
       el('button', { class: 'btn btn-primary', type: 'button', text: t('btn.tryAgain'), onclick: () => lookup(code) }),
-      el('button', { class: 'btn btn-ghost', type: 'button', text: t('btn.readLabel'), onclick: () => openLabel({ code }) })
+      el('button', { class: 'btn btn-ghost', type: 'button', text: t('btn.readLabel'), onclick: () => openLabel({ code }, true) })
     ]);
   }
 
   // From a result: go back to the scanner (the state below a result is always the scanner).
   function scanNext() {
-    if (history.state && history.state.view === 'result') { try { history.back(); } catch (e) { /* ignore */ } }
+    try { history.replaceState({ tab: 'scan' }, ''); } catch (e) { /* ignore */ }
     showScanner();
     startCamera();
   }
@@ -874,6 +985,22 @@
     $('historyList').replaceChildren(...state.history.map(h => productListItem(h, { time: h.time })));
     $('historyEmpty').hidden = state.history.length > 0;
     $('clearHistory').hidden = state.history.length === 0;
+    renderStart();
+  }
+
+  // Start screen: what is being checked, and the last 3 products.
+  function renderStart() {
+    const chips = [t('start.eu')];
+    if (state.avoid.length) chips.push(t('start.list', { n: state.avoid.length }));
+    const alg = state.allergens.food.length + state.allergens.cos.length;
+    if (alg) chips.push(t('start.alg', { n: alg }));
+    if (state.avoidFragrance) chips.push(t('start.frag'));
+    if (state.vegan) chips.push(t('start.vegan'));
+    $('checking').replaceChildren(el('span', { class: 'lbl', text: t('start.checking') }),
+      ...chips.map(c => el('button', { class: 'cchip', type: 'button', text: c, onclick: () => go('list') })));
+    const items = state.history.slice(0, 3);
+    $('recent').hidden = !items.length;
+    $('recentList').replaceChildren(...items.map(h => productListItem(h, { summary: true })));
   }
 
   function openSaved(code) {
@@ -888,13 +1015,16 @@
 
   function openDetail(i, from) {
     const r = state.current && state.current.a.rows[i];
-    if (!r) return;
+    if (r) openDetailRow(r, from);
+  }
+
+  function openDetailRow(r, from) {
     detailReturn = from || null;
     renderDetail(r);
     $('detail').hidden = false;
     $('detail').scrollTop = 0;
     document.documentElement.classList.add('noscroll');
-    pushState(Object.assign({}, history.state || { tab: 'scan' }, { detail: i + 1 }));
+    pushState(Object.assign({}, history.state || { tab: 'scan' }, { detail: 1 }));
     $('detailBack').focus();
   }
 
@@ -945,10 +1075,10 @@
   function renderDetail(r) {
     const body = [];
     body.push(el('h2', { id: 'detailTitle', text: r.label }));
-    body.push(el('p', { class: 'd-meta', text: r.pos ? t('d.pos', { n: r.pos }) : t('d.posNone') }));
+    body.push(el('p', { class: 'd-meta', text: r.fromSearch ? t(r.kind === 'cosmetic' ? 'search.kindCos' : 'search.kindFood') : r.pos ? t('d.pos', { n: r.pos }) : t('d.posNone') }));
 
     const top = r.why === 'mine' ? t('tag.mine') : r.why === 'allergen' ? t('tag.allergenYours')
-      : r.why === 'fragrance' ? t('tag.fragranceAvoid') : levelName(r.level);
+      : r.why === 'fragrance' ? t('tag.fragranceAvoid') : r.why === 'vegan' ? t('chip.vegan') : r.why === 'use' ? t('chip.use') : levelName(r.level);
     body.push(badge(r.group, top));
 
     // Personal reasons (your list, allergens, fragrance)
@@ -956,6 +1086,9 @@
     if (r.mine) mineP.push(el('p', { text: t('d.mineWhy', { term: r.mine.term }) }));
     if (r.why === 'allergen') mineP.push(el('p', { text: t('d.allergenTicked') }));
     if (r.fragAvoid) mineP.push(el('p', { text: t('d.fragranceWhy') }));
+    if (r.useHit) mineP.push(el('p', { text: t('d.useWhy') }));
+    if (r.vegan && state.vegan && r.vegan.no.length) mineP.push(el('p', { text: t('d.veganNo', { names: r.vegan.no.join(', ') }) }));
+    if (r.vegan && state.vegan && r.vegan.maybe.length) mineP.push(el('p', { text: t('d.veganMaybe', { names: r.vegan.maybe.join(', ') }) }));
     if (mineP.length) body.push(el('div', { class: 'd-card' }, mineP));
 
     if (r.kind === 'cosmetic') {
@@ -1029,12 +1162,13 @@
   // ---------- Read a label (free share flow) ----------
   let labelFor = null; // product or {code} the label belongs to
 
-  function openLabel(p) {
+  function openLabel(p, keepStatus) {
     labelFor = p && p.code ? p : null;
-    $('result').hidden = true;
-    $('scanner').hidden = false;
+    const keep = keepStatus && !$('status').hidden;
+    showPanel('labelPanel');
+    if (keep) $('status').hidden = false;
+    if (!history.state || history.state.view !== 'label') pushState({ tab: 'scan', view: 'label' });
     const panel = $('labelPanel');
-    panel.hidden = false;
     $('labelText').value = '';
     $('labelName').value = (p && p.name) || '';
     const kind = (p && p.kind) || 'food';
@@ -1042,6 +1176,50 @@
     $('labelLead').textContent = labelFor && labelFor.code && !String(labelFor.code).startsWith('label-')
       ? t('label.leadFor', { code: labelFor.code }) : t('label.lead');
     panel.scrollIntoView({ behavior: 'auto', block: 'start' });
+  }
+
+  // ---------- Find one ingredient (offline) ----------
+  let searchTimer = null;
+
+  function openSearch() {
+    showPanel('searchPanel');
+    if (!history.state || history.state.view !== 'search') pushState({ tab: 'scan', view: 'search' });
+    renderSearch();
+    $('searchInput').focus();
+  }
+
+  // One result -> the same row the result screen uses, with your settings applied.
+  function searchRow(hit) {
+    const p = hit.kind === 'cosmetic' ? { kind: 'cosmetic', ingredientsText: hit.name } : { kind: 'food', ingredientsText: hit.id.toUpperCase() };
+    const row = analyze(p).rows[0];
+    if (!row) return null;
+    row.fromSearch = true;
+    row.pos = null;
+    if (hit.kind === 'food' && row.additives && row.additives[0]) row.label = cap(row.additives[0].name) + ' (' + row.additives[0].e + ')';
+    return row;
+  }
+
+  function renderSearch() {
+    const q = $('searchInput').value.trim();
+    const list = $('searchList'), info = $('searchInfo');
+    if (!DBINFO) { info.textContent = t(DBINFO === null ? 'status.dbLoading' : 'status.dbFail'); list.replaceChildren(); return; }
+    if (q.length < 2) { info.textContent = t('search.hint'); list.replaceChildren(); return; }
+    const rows = LCDB.search(q, 30).map(searchRow).filter(Boolean);
+    info.textContent = rows.length ? '' : t('search.none');
+    list.replaceChildren(...rows.map(r => {
+      const chip = chipOf(r);
+      const kind = t(r.kind === 'cosmetic' ? 'search.kindCosShort' : 'search.kindFoodShort');
+      const detail = r.kind === 'food' && r.additives && r.additives[0] ? (r.additives[0].classes || []).join(', ') : whyOf(r);
+      const why = [kind, detail].filter(Boolean).join(' · ');
+      return el('li', {},
+        el('button', { class: 'row-btn', type: 'button', onclick: e => openDetailRow(r, e.currentTarget) },
+          el('span', { class: 'dot g-' + r.group, 'aria-hidden': 'true' }),
+          el('span', { class: 'main' },
+            chip ? el('span', { class: 'chip g-' + r.group, text: chip }) : null,
+            el('strong', { text: r.label }),
+            el('span', { class: 'why', text: why })),
+          icon(ICON.chev, 'chev')));
+    }));
   }
 
   async function copyText(text) {
@@ -1143,6 +1321,7 @@
     v.srcObject = stream;
     v.hidden = false;
     $('vfIdle').hidden = true;
+    $('scanner').classList.add('scanning');
     $('scanline').hidden = false;
     $('stopCam').hidden = false;
     try { await v.play(); } catch (e) { /* autoplay is allowed for muted video */ }
@@ -1177,6 +1356,7 @@
     $('scanline').hidden = true;
     $('stopCam').hidden = true;
     $('vfIdle').hidden = false;
+    $('scanner').classList.remove('scanning');
   }
 
   // ---------- My list: avoid list ----------
@@ -1201,6 +1381,8 @@
 
   function settingsChanged() {
     verdictCache.clear();
+    renderStart();
+    if (!$('searchPanel').hidden) renderSearch();
     if (state.current) renderResult(state.current.p);
     renderFavs();
     renderHistory();
@@ -1331,6 +1513,7 @@
     renderFavs();
     renderHistory();
     if (state.current) renderResult(state.current.p);
+    if (!$('searchPanel').hidden) renderSearch();
     if (!$('labelPanel').hidden) $('labelLead').textContent = labelFor && labelFor.code && !String(labelFor.code).startsWith('label-') ? t('label.leadFor', { code: labelFor.code }) : t('label.lead');
   }
 
@@ -1338,7 +1521,7 @@
   function exportBackup() {
     const data = {
       app: 'label-check', version: 2, exportedAt: new Date().toISOString(),
-      avoid: state.avoid, favs: state.favs, allergens: state.allergens, avoidFragrance: state.avoidFragrance,
+      avoid: state.avoid, favs: state.favs, allergens: state.allergens, avoidFragrance: state.avoidFragrance, vegan: state.vegan,
       lang: state.lang, theme: state.theme, bigText: state.bigText,
       history: state.history, products: state.products
     };
@@ -1370,10 +1553,11 @@
       };
     }
     if (typeof data.avoidFragrance === 'boolean') state.avoidFragrance = data.avoidFragrance;
+    if (typeof data.vegan === 'boolean') state.vegan = data.vegan;
     if (['auto', 'en', 'de', 'bg'].includes(data.lang)) state.lang = data.lang;
     if (['auto', 'light', 'dark'].includes(data.theme)) state.theme = data.theme;
     if (typeof data.bigText === 'boolean') state.bigText = data.bigText;
-    for (const k of ['avoid', 'history', 'products', 'favs', 'allergens', 'avoidFragrance', 'lang', 'theme', 'bigText']) store.set(k, state[k]);
+    for (const k of ['avoid', 'history', 'products', 'favs', 'allergens', 'avoidFragrance', 'vegan', 'lang', 'theme', 'bigText']) store.set(k, state[k]);
     verdictCache.clear();
     syncSettingsControls();
     applyTheme();
@@ -1386,6 +1570,7 @@
 
   function syncSettingsControls() {
     $('fragSwitch').checked = !!state.avoidFragrance;
+    $('veganSwitch').checked = !!state.vegan;
     $('bigSwitch').checked = !!state.bigText;
     $('langSelect').value = state.lang;
     $('themeSelect').value = state.theme;
@@ -1412,8 +1597,8 @@
     hideDetail();
     if (tab === currentTab) {
       // Tapping "Scan" on a result goes back to the scanner.
-      if (tab === 'scan' && (!$('result').hidden || !$('labelPanel').hidden)) {
-        if (history.state && history.state.view === 'result') { try { history.back(); } catch (e) { /* ignore */ } }
+      if (tab === 'scan' && $('scanner').hidden) {
+        try { history.replaceState({ tab: 'scan' }, ''); } catch (e) { /* ignore */ }
         showScanner();
       }
       return;
@@ -1426,15 +1611,18 @@
     const st = e.state || { tab: 'scan' };
     if (!st.detail) hideDetail();
     if (st.tab !== currentTab) setTab(st.tab);
-    if (st.tab === 'scan') {
-      if (st.view === 'result') {
-        if (!state.current || state.current.p.code !== st.code) {
-          const p = state.products[st.code];
-          if (p && DBINFO) renderResult(p); else showScanner();
-        }
-      } else if ($('scanner').hidden || !$('result').hidden) {
-        showScanner();
-      }
+    if (st.tab !== 'scan') return;
+    if (st.view === 'result') {
+      const p = state.current && state.current.p.code === st.code ? state.current.p : state.products[st.code];
+      if (!p || !DBINFO) showScanner();
+      else if ($('result').hidden || !state.current || state.current.p !== p) renderResult(p);
+    } else if (st.view === 'search') {
+      showPanel('searchPanel');
+      renderSearch();
+    } else if (st.view === 'label') {
+      showPanel('labelPanel');
+    } else if ($('scanner').hidden) {
+      showScanner();
     }
   });
 
@@ -1456,14 +1644,18 @@
     syncSettingsControls();
 
     document.querySelectorAll('.tabbar button').forEach(b => b.addEventListener('click', () => go(b.dataset.go)));
-    $('startCam').addEventListener('click', startCamera);
+    $('cardScan').addEventListener('click', startCamera);
     $('stopCam').addEventListener('click', stopCamera);
+    $('cardLabel').addEventListener('click', () => openLabel(null));
+    $('cardSearch').addEventListener('click', openSearch);
+    $('recentAll').addEventListener('click', () => go('history'));
+    document.querySelectorAll('[data-back]').forEach(b => b.addEventListener('click', closePanel));
+    $('searchInput').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(renderSearch, 120); });
     $('manualForm').addEventListener('submit', e => {
       e.preventDefault();
       stopCamera();
       lookup($('codeInput').value);
     });
-    $('openLabel').addEventListener('click', () => { hideAll(); openLabel(null); });
     $('photoInput').addEventListener('change', onPhoto);
     $('copyPrompt').addEventListener('click', async () => {
       toast((await copyText(PROMPT)) ? t('toast.qCopied2') : t('toast.copyFail'));
@@ -1474,6 +1666,11 @@
       e.preventDefault();
       addAvoid($('avoidInput').value);
       $('avoidInput').value = '';
+    });
+    $('veganSwitch').addEventListener('change', e => {
+      state.vegan = e.target.checked;
+      store.set('vegan', state.vegan);
+      settingsChanged();
     });
     $('fragSwitch').addEventListener('change', e => {
       state.avoidFragrance = e.target.checked;
@@ -1516,7 +1713,7 @@
   }
 
   // Small test hook (used only by automated checks).
-  window.LC = { analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage };
+  window.LC = { analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch };
 
   init();
 })();

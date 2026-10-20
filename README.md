@@ -26,12 +26,12 @@ Later it becomes a part of Jarvis.
 | manifest.json | Makes the app installable |
 | sw.js | Lets the app and the database open without internet |
 | icon-192.png, icon-512.png | App icon |
-| tools/ | Database build script, database test, app test |
-| rules.json | v1 starter rules. Not used since v2 (the database covers them). Can be deleted. |
+| tools/ | Database download (fetch_sources.py), build (build_db.py), tests (test_db.js, test_app.py), IARC list |
+| .github/workflows/update-db.yml | Monthly automatic database update on GitHub |
 
 ## Change the data or a text
 
-- Database: see `tools/FETCH.md`, then `python tools/build_db.py` and `node tools/test_db.js`.
+- Database: updates itself every month (see `tools/FETCH.md`). By hand: `python tools/fetch_sources.py _sources`, then `python tools/build_db.py _sources data` and `node tools/test_db.js`.
 - Screen text: edit `i18n.js` (same key in `en`, `de` and `bg`).
 - App test (needs Python Playwright): `python tools/test_app.py`.
 - After any change, raise `VERSION` in `sw.js` (for example `label-check-v4`), so the phone loads the new files.
