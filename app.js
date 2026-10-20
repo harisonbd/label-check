@@ -1296,6 +1296,10 @@
     if (!history.state || history.state.view !== 'label') pushState({ tab: 'scan', view: 'label' });
     const panel = $('labelPanel');
     $('labelText').value = '';
+    ocrFile = null;
+    $('ocrArea').hidden = true;
+    $('claudeBox').open = false;
+    ocrStatus('');
     $('labelName').value = (p && p.name) || '';
     const kind = (p && p.kind) || 'food';
     document.querySelectorAll('input[name="kind"]').forEach(i => { i.checked = i.value === kind; });
@@ -1366,10 +1370,177 @@
     catch (e) { return false; }
   }
 
-  async function onPhoto(e) {
+  // ---------- Read a label: offline reader (Tesseract, in ocr/) ----------
+  // The reader files load only when you tap "Read text", so barcode scans stay fast.
+  const OCR_LANGS = { en: 'eng', de: 'deu', bg: 'bul' };
+  let ocrFile = null, ocrWorker = null, ocrSeq = 0, ocrBusy = false, claudeNext = false;
+  const ocrWait = {};
+  const crop = { x: 0.06, y: 0.3, w: 0.88, h: 0.4 };   // part of the photo, 0..1
+
+  function ocrLang() {
+    const v = store.get('ocrLang', null);
+    return Object.values(OCR_LANGS).includes(v) ? v : (OCR_LANGS[LANG] || 'eng');
+  }
+  function renderOcrLang() {
+    const cur = ocrLang();
+    $('ocrLang').setAttribute('aria-label', t('ocr.lang'));
+    $('ocrLang').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.ocr === cur)));
+  }
+  function drawCrop() {
+    const b = $('cropBox').style;
+    b.left = crop.x * 100 + '%'; b.top = crop.y * 100 + '%';
+    b.width = crop.w * 100 + '%'; b.height = crop.h * 100 + '%';
+  }
+  function ocrStatus(text, cls) {
+    const n = $('ocrStatus');
+    n.hidden = !text; n.textContent = text || ''; n.className = 'ocrstatus' + (cls ? ' ' + cls : '');
+  }
+
+  function onPhoto(e) {
     const file = e.target.files && e.target.files[0];
     e.target.value = '';
     if (!file) return;
+    ocrFile = file;
+    if (claudeNext) { claudeNext = false; shareToClaude(file); }
+    const img = $('cropImg');
+    if (img.dataset.url) URL.revokeObjectURL(img.dataset.url);
+    img.dataset.url = URL.createObjectURL(file);
+    img.src = img.dataset.url;
+    Object.assign(crop, { x: 0.06, y: 0.3, w: 0.88, h: 0.4 });
+    drawCrop();
+    renderOcrLang();
+    ocrStatus('');
+    $('ocrArea').hidden = false;
+    $('ocrArea').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // Drag the box (move) or its corners (resize). Works with finger and mouse.
+  function initCrop() {
+    const box = $('cropBox'), wrap = $('cropInner');
+    let drag = null;
+    box.addEventListener('pointerdown', e => {
+      const r = wrap.getBoundingClientRect();
+      drag = { h: e.target.dataset.h || 'move', x: e.clientX, y: e.clientY, w: r.width, hh: r.height, c: Object.assign({}, crop) };
+      box.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    box.addEventListener('pointermove', e => {
+      if (!drag) return;
+      const dx = (e.clientX - drag.x) / drag.w, dy = (e.clientY - drag.y) / drag.hh, c = drag.c, MIN = 0.08;
+      let { x, y, w, h } = c;
+      if (drag.h === 'move') {
+        x = Math.min(Math.max(0, c.x + dx), 1 - c.w); y = Math.min(Math.max(0, c.y + dy), 1 - c.h);
+      } else {
+        if (drag.h.includes('w')) { x = Math.min(Math.max(0, c.x + dx), c.x + c.w - MIN); w = c.x + c.w - x; }
+        if (drag.h.includes('e')) { w = Math.min(Math.max(MIN, c.w + dx), 1 - c.x); }
+        if (drag.h.includes('n')) { y = Math.min(Math.max(0, c.y + dy), c.y + c.h - MIN); h = c.y + c.h - y; }
+        if (drag.h.includes('s')) { h = Math.min(Math.max(MIN, c.h + dy), 1 - c.y); }
+      }
+      Object.assign(crop, { x, y, w, h });
+      drawCrop();
+    });
+    const end = () => { drag = null; };
+    box.addEventListener('pointerup', end);
+    box.addEventListener('pointercancel', end);
+  }
+
+  // Cut out the box, make the text clear (grey + contrast) and send it as PNG.
+  async function ocrImage() {
+    const bmp = await createImageBitmap(ocrFile, { imageOrientation: 'from-image' });
+    const sx = Math.round(crop.x * bmp.width), sy = Math.round(crop.y * bmp.height);
+    const sw = Math.max(1, Math.round(crop.w * bmp.width)), sh = Math.max(1, Math.round(crop.h * bmp.height));
+    let k = Math.min(2400 / sw, 2400 / sh, 1);       // not too big (speed)
+    if (sw < 1400) k = Math.min(2, 1600 / sw);      // small print: make it bigger
+    const W = Math.round(sw * k), H = Math.round(sh * k);
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const cx = cv.getContext('2d', { willReadFrequently: true });
+    cx.imageSmoothingQuality = 'high';
+    cx.drawImage(bmp, sx, sy, sw, sh, 0, 0, W, H);
+    if (bmp.close) bmp.close();
+    const im = cx.getImageData(0, 0, W, H), d = im.data, n = W * H;
+    const g = new Uint8ClampedArray(n), hist = new Uint32Array(256);
+    let sum = 0;
+    for (let i = 0, j = 0; i < n; i++, j += 4) {
+      const v = (d[j] * 299 + d[j + 1] * 587 + d[j + 2] * 114) / 1000;
+      g[i] = v; hist[g[i]]++; sum += v;
+    }
+    if (sum / n >= 110) {   // light label: grey + stretch contrast. Dark labels stay in colour (the reader handles them better).
+      let lo = 0, hi = 255, acc = 0;
+      const cut = n * 0.01;
+      while (lo < 255 && (acc += hist[lo]) <= cut) lo++;
+      acc = 0;
+      while (hi > 0 && (acc += hist[hi]) <= cut) hi--;
+      const span = Math.max(1, hi - lo);
+      for (let i = 0, j = 0; i < n; i++, j += 4) {
+        const v = Math.min(255, Math.max(0, ((g[i] - lo) * 255) / span));
+        d[j] = d[j + 1] = d[j + 2] = v;
+      }
+      cx.putImageData(im, 0, 0);
+    }
+    const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
+    return new Uint8Array(await blob.arrayBuffer());
+  }
+
+  function ocrRun(image, lang) {
+    if (!ocrWorker) {
+      ocrWorker = new Worker('ocr/ocr-worker.js');
+      ocrWorker.onmessage = e => {
+        const m = e.data, w = ocrWait[m.id];
+        if (!w) return;
+        if (m.step) { w.step(m.step); return; }
+        delete ocrWait[m.id];
+        m.error ? w.reject(new Error(m.error)) : w.resolve(m);
+      };
+      ocrWorker.onerror = e => {
+        Object.keys(ocrWait).forEach(id => { ocrWait[id].reject(new Error(e.message || 'worker')); delete ocrWait[id]; });
+        ocrWorker = null;
+      };
+    }
+    const id = ++ocrSeq;
+    return new Promise((resolve, reject) => {
+      ocrWait[id] = { resolve, reject, step: s => ocrStatus(t(s === 'load' ? 'ocr.loading' : 'ocr.reading'), 'busy') };
+      ocrWorker.postMessage({ id, image, lang }, [image.buffer]);
+    });
+  }
+
+  // Reader text -> one line; start at "Ingredients:" when the label has it.
+  function cleanOcr(text) {
+    let s = String(text || '').replace(/[­]/g, '').replace(/(\p{L})-\s*\n\s*(\p{Ll})/gu, '$1$2');
+    s = s.replace(/\s*\n\s*/g, ' ').replace(/[|_]{1,}/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    const m = s.match(/(ingredients|ingrédients|ingredienti|ingredientes|zutaten|съставки)\s*[:：]/i);
+    if (m && m.index > 0) s = s.slice(m.index);
+    return s;
+  }
+
+  async function onOcrRead() {
+    if (!ocrFile) { toast(t('toast.photoFirst')); return; }
+    if (ocrBusy) return;
+    ocrBusy = true;
+    $('ocrRead').disabled = true;
+    const t0 = performance.now();
+    ocrStatus(t('ocr.reading'), 'busy');
+    try {
+      const r = await ocrRun(await ocrImage(), ocrLang());
+      const text = cleanOcr(r.text);
+      const secs = ((performance.now() - t0) / 1000).toFixed(1).replace('.', LANG === 'en' ? '.' : ',');
+      if (text.replace(/[^\p{L}]/gu, '').length < 12 || r.conf < 25) {
+        ocrStatus(t('ocr.little'), 'warn');
+        if (text) $('labelText').value = text;
+      } else {
+        $('labelText').value = text;
+        ocrStatus(t('ocr.done', { s: secs }));
+      }
+      $('labelText').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } catch (err) {
+      ocrStatus(t('ocr.fail'), 'warn');
+    } finally {
+      ocrBusy = false;
+      $('ocrRead').disabled = false;
+    }
+  }
+
+  // Option 2: send the same photo to Claude (old way).
+  async function shareToClaude(file) {
     const copied = await copyText(PROMPT);
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try {
@@ -1619,6 +1790,10 @@
         odbl: link('https://opendatacommons.org/licenses/odbl/1-0/', 'ODbL')
       })),
       el('p', { text: t('credit.ingredient') }),
+      el('p', {}, tNodes('credit.ocr', {
+        tess: link('https://github.com/tesseract-ocr/tesseract', 'Tesseract OCR'),
+        apache: link('https://www.apache.org/licenses/LICENSE-2.0', 'Apache 2.0')
+      })),
       el('p', { text: t('credit.guide') })
     );
   }
@@ -1795,6 +1970,14 @@
       lookup($('codeInput').value);
     });
     $('photoInput').addEventListener('change', onPhoto);
+    $('photoPick').addEventListener('change', onPhoto);
+    $('ocrRead').addEventListener('click', onOcrRead);
+    $('ocrLang').addEventListener('click', e => {
+      const b = e.target.closest('button[data-ocr]');
+      if (b) { store.set('ocrLang', b.dataset.ocr); renderOcrLang(); }
+    });
+    $('shareClaude').addEventListener('click', () => { if (ocrFile) shareToClaude(ocrFile); else { claudeNext = true; $('photoInput').click(); } });
+    initCrop();
     $('copyPrompt').addEventListener('click', async () => {
       toast((await copyText(PROMPT)) ? t('toast.qCopied2') : t('toast.copyFail'));
     });

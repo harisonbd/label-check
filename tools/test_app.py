@@ -227,7 +227,7 @@ with sync_playwright() as p:
     ok(pg.inner_text('.tc-head h2') == 'Magne Amino Armour' and pg.is_hidden('#pickBox'), 'next scan opens Magne directly (offline too)')
     pg.click('.tabbar button[data-go=scan]')
     pg.click('#cardLabel')
-    ok(pg.is_hidden('#pickBox') and pg.inner_text('#labelTitle') == 'Read a label with Claude', '"Read a label" card: no pick box, normal title')
+    ok(pg.is_hidden('#pickBox') and pg.inner_text('#labelTitle') == 'Read a label', '"Read a label" card: no pick box, normal title')
     pg.click('.tabbar button[data-go=scan]')
     # Language switch
     ok(pg.get_attribute('#langSwitch [data-lang=en]', 'aria-pressed') == 'true', 'switch shows EN')
@@ -281,7 +281,7 @@ with sync_playwright() as p:
 
     print('v2.4: camera frame (fake camera)')
     bc = p.chromium.launch(args=['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'])
-    for loc, tip in (('en-GB', 'Any direction works'), ('bg-BG', 'Всяка посока става')):
+    for loc, tip in (('en-GB', 'Scan'), ('bg-BG', 'Сканирай'), ('de-AT', 'Scannen')):
         ctx = bc.new_context(viewport={'width': 360, 'height': 740}, locale=loc, service_workers='block', permissions=['camera'])
         ctx.add_init_script("window.BarcodeDetector = class { static async getSupportedFormats() { return ['ean_13']; } async detect() { return []; } };")
         pg = ctx.new_page(); pg.on('pageerror', lambda e: errors.append(str(e)))
@@ -297,6 +297,77 @@ with sync_playwright() as p:
         ok(pg.is_visible('#cardScan'), '%s: Stop camera shows the start cards again' % loc)
         ctx.close()
     bc.close()
+
+    print('v2.5: read a label offline (Tesseract in ocr/)')
+    from PIL import Image, ImageDraw, ImageFont
+    def font(size, bold=False):
+        for f in ('DejaVuSans-Bold.ttf' if bold else 'DejaVuSans.ttf', 'arialbd.ttf' if bold else 'arial.ttf'):
+            for d in ('/usr/share/fonts/truetype/dejavu/', 'C:/Windows/Fonts/', ''):
+                try: return ImageFont.truetype(d + f, size)
+                except OSError: pass
+        return ImageFont.load_default()
+    LABEL = ['Ingredients: Sugar, wheat flour, palm oil, glucose', 'syrup, emulsifier: soya lecithin, colour:', 'tartrazine, salt, flavouring. May contain', 'traces of milk and hazelnuts.']
+    img = Image.new('RGB', (1200, 1600), (250, 248, 240)); dr = ImageDraw.Draw(img)
+    dr.text((80, 120), 'CRUNCHY WAFERS', fill=(150, 20, 20), font=font(90, True))
+    for i, line in enumerate(LABEL): dr.text((70, 740 + i * 62), line, fill=(25, 25, 25), font=font(46))
+    dr.text((80, 1250), 'Nutrition per 100 g   Energy 2002 kJ', fill=(25, 25, 25), font=font(40))
+    photo = os.path.join(SHOTS, 'v25-test-label.jpg'); img.rotate(-2, fillcolor=(250, 248, 240)).save(photo, quality=90)
+
+    def drag(pg, sel, tx, ty):
+        bb = pg.locator(sel).bounding_box(); pg.mouse.move(bb['x'] + bb['width'] / 2, bb['y'] + bb['height'] / 2)
+        pg.mouse.down(); pg.mouse.move(tx, ty, steps=6); pg.mouse.up()
+    def read_photo(pg, lang='eng', box=(0.03, 0.44, 0.97, 0.62)):
+        pg.set_input_files('#photoPick', photo)
+        pg.wait_for_selector('#ocrArea:not([hidden])')
+        pg.evaluate("document.getElementById('cropWrap').scrollIntoView({block: 'center'})")
+        r = pg.locator('#cropInner').bounding_box()
+        drag(pg, '#cropBox i[data-h="nw"]', r['x'] + box[0] * r['width'], r['y'] + box[1] * r['height'])
+        drag(pg, '#cropBox i[data-h="se"]', r['x'] + box[2] * r['width'], r['y'] + box[3] * r['height'])
+        pg.click('#ocrLang button[data-ocr="%s"]' % lang)
+        pg.click('#ocrRead')
+        pg.wait_for_function("() => { const s = document.getElementById('ocrStatus'); return !s.hidden && !s.classList.contains('busy'); }", timeout=90000)
+
+    b = p.chromium.launch()
+    ctx, pg = new_page(b, base, 'en-GB')
+    pg.click('#cardLabel')
+    ok(pg.inner_text('#labelTitle') == 'Read a label' and not pg.is_visible('#ocrArea') and not pg.eval_on_selector('#claudeBox', 'd => d.open'), 'panel: title "Read a label", no photo box yet, Claude part folded')
+    ok(pg.evaluate("[...performance.getEntriesByType('resource')].every(e => !e.name.includes('/ocr/'))"), 'reader files are not loaded before "Read text"')
+    read_photo(pg)
+    txt = pg.input_value('#labelText').lower()
+    ok(pg.inner_text('#ocrStatus').startswith('Done in'), 'status "Done in … s" (%s)' % pg.inner_text('#ocrStatus'))
+    ok(txt.startswith('ingredients:') and all(w in txt for w in ('sugar', 'wheat flour', 'palm oil', 'soya lecithin', 'tartrazine', 'milk')), 'text read from the box, starts at "Ingredients:"')
+    ok('crunchy' not in txt and 'nutrition' not in txt, 'text outside the box is not read')
+    pg.click('#checkLabel'); pg.wait_for_selector('#result:not([hidden]) .topcard')
+    ok('Tartrazine' in pg.inner_text('#result') or 'E102' in pg.inner_text('#result'), 'Check ingredients works with the read text (tartrazine found)')
+    pg.click('#cardLabel') if pg.is_visible('#cardLabel') else None
+    ctx.close()
+
+    ctx, pg = new_page(b, base, 'bg-BG')
+    pg.click('#cardLabel')
+    pg.set_input_files('#photoPick', photo)
+    ok(pg.inner_text('#ocrRead') == 'Прочети текста' and pg.eval_on_selector('#ocrLang button[data-ocr="bul"]', 'b => b.getAttribute("aria-pressed")') == 'true', 'BG: button text + label language BG by default')
+    pg.click('#ocrLang button[data-ocr="deu"]')
+    pg.reload(); pg.evaluate('LC.dbReady'); pg.click('#cardLabel'); pg.set_input_files('#photoPick', photo)
+    ok(pg.eval_on_selector('#ocrLang button[data-ocr="deu"]', 'b => b.getAttribute("aria-pressed")') == 'true', 'label language choice is remembered (DE)')
+    ok(no_side_scroll(pg), 'BG 390 px: no sideways scroll with the photo box')
+    pg.screenshot(path=os.path.join(SHOTS, 'v25-label-bg.png'), full_page=True)
+    ctx.close()
+
+    # With the service worker: reader files stay on the phone after the first use -> works offline.
+    ctx = b.new_context(viewport={'width': 390, 'height': 844}, locale='en-GB')
+    pg = ctx.new_page(); pg.on('pageerror', lambda e: errors.append(str(e)))
+    pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); pg.reload(); pg.evaluate('LC.dbReady')
+    ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
+    pg.click('#cardLabel'); read_photo(pg)
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v8')).keys()).map(r => r.url.split('/').pop())")
+    ok(all(f in cached for f in ('ocr-worker.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
+       'after first use: worker, program and only the used language are on the phone')
+    ctx.set_offline(True)
+    pg.reload(); pg.evaluate('LC.dbReady'); pg.click('#cardLabel'); read_photo(pg)
+    ok(pg.inner_text('#ocrStatus').startswith('Done in') and 'palm oil' in pg.input_value('#labelText').lower(), 'offline: Read text still works')
+    ctx.set_offline(False)
+    ctx.close()
+    b.close()
 srv.shutdown()
 
 print('\nPage errors:', errors or 'none')

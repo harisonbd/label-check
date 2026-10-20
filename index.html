@@ -46,7 +46,7 @@
         <div class="viewfinder" id="viewfinder">
           <video id="video" playsinline muted hidden></video>
           <div class="vf-box" aria-hidden="true"></div>
-          <p class="vf-tip" data-t="cam.any">Any direction works</p>
+          <p class="vf-tip" data-t="cam.any">Scan</p>
           <div class="vf-idle" id="vfIdle">
             <p class="vf-hint" data-t="cam.hint">Point it at the barcode. The scan starts by itself.</p>
           </div>
@@ -76,19 +76,43 @@
       <section id="labelPanel" class="panel" hidden>
         <button class="iconbtn panel-back" type="button" data-back><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span data-t="d.back">Back</span></button>
         <section class="pick" id="pickBox" hidden></section>
-        <h2 id="labelTitle">Read a label with Claude</h2>
+        <h2 id="labelTitle">Read a label</h2>
         <p class="lead" id="labelLead"></p>
-        <ol class="steps">
-          <li>
-            <label class="btn btn-primary filebtn"><span data-t="label.photo">Take photo of the ingredients</span>
-              <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
-            </label>
-            <span data-t="label.step1">The app copies a question and opens the share menu. Pick Claude.</span>
-          </li>
-          <li data-t="label.step2">In Claude, paste the question and send it with the photo.</li>
-          <li data-t="label.step3">Copy Claude's answer and paste it below.</li>
-        </ol>
-        <p class="minor"><span data-t="label.noClaude">Share menu does not show Claude?</span> <button class="linkbtn inline" id="copyPrompt" type="button" data-t="label.copyQ">Copy the question</button>, <span data-t="label.noClaude2">then open Claude and add the photo there.</span></p>
+        <label class="btn btn-primary wide filebtn"><span data-t="label.photo">Take photo of the ingredients</span>
+          <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
+        </label>
+        <p class="minor center"><label class="linkbtn inline filelink"><span data-t="ocr.pick">or choose a photo</span><input type="file" id="photoPick" accept="image/*" hidden></label></p>
+
+        <div id="ocrArea" hidden>
+          <p class="minor" data-t="ocr.mark">Move the box over the ingredient list.</p>
+          <div class="cropwrap" id="cropWrap">
+            <div class="cropinner" id="cropInner">
+              <img id="cropImg" alt="">
+              <div class="cropbox" id="cropBox"><i data-h="nw"></i><i data-h="ne"></i><i data-h="sw"></i><i data-h="se"></i></div>
+            </div>
+          </div>
+          <div class="ocrlang">
+            <span data-t="ocr.lang">Label language</span>
+            <div class="langsw" id="ocrLang" role="group">
+              <button type="button" data-ocr="eng">EN</button><button type="button" data-ocr="deu">DE</button><button type="button" data-ocr="bul">BG</button>
+            </div>
+          </div>
+          <button class="btn btn-primary wide" id="ocrRead" type="button" data-t="ocr.read">Read text</button>
+          <p class="ocrstatus" id="ocrStatus" aria-live="polite" hidden></p>
+        </div>
+
+        <details class="claudebox" id="claudeBox">
+          <summary data-t="claude.sum">Hard to read? Ask Claude</summary>
+          <ol class="steps">
+            <li>
+              <button class="btn btn-ghost wide" id="shareClaude" type="button" data-t="claude.share">Send the photo to Claude</button>
+              <span data-t="label.step1">The app copies a question and opens the share menu. Pick Claude.</span>
+            </li>
+            <li data-t="label.step2">In Claude, paste the question and send it with the photo.</li>
+            <li data-t="label.step3">Copy Claude's answer and paste it below.</li>
+          </ol>
+          <p class="minor"><span data-t="label.noClaude">Share menu does not show Claude?</span> <button class="linkbtn inline" id="copyPrompt" type="button" data-t="label.copyQ">Copy the question</button>, <span data-t="label.noClaude2">then open Claude and add the photo there.</span></p>
+        </details>
 
         <label for="labelText" data-t="label.list">Ingredient list</label>
         <textarea id="labelText" rows="6" data-t-ph="label.listPh"></textarea>
