@@ -112,6 +112,12 @@ const ok = (cond, msg) => { if (!cond) { fails++; console.log('  FAIL: ' + msg);
   ok(hit('natriumnitrit', 'food', 'E250') && hit('аспартам', 'food', 'E951'), 'German and Bulgarian names');
   ok(LCDB.search('a', 5).length === 0, 'one letter -> no search');
 
+  console.log('\n10 Supplement (BG, names from a real label)');
+  f = food('СЪСТАВКИ: Цинков цитрат, магнезиев л-аспартат дихидрат, вит Б6, л-теанин, титаниев диоксид, хипромелоза, магнезиев стеарат, силиконов диоксид.', 'bg');
+  ok(f.e('E171') && f.e('E171').level === 'b', 'титаниев диоксид = E171, banned');
+  ok(f.e('E464') && f.e('E551') && f.e('E572'), 'хипромелоза = E464, силиконов диоксид = E551, магнезиев стеарат = E572');
+  ok(LCDB.search('хипромелоза', 5)[0].id === 'e464', 'search хипромелоза -> E464');
+
   console.log(fails ? `\n${fails} FAILED` : '\nALL PASSED');
   process.exit(fails ? 1 : 0);
 })();

@@ -28,22 +28,22 @@
   color-scheme: light;
 }
 
-/* Night (dark): phone setting, unless the user picked light; or picked dark. */
+/* Graphite (dark): phone setting, unless the user picked light; or picked dark. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0E1513; --card: #17211E; --ink: #E7EEEA; --muted: #9AA9A2; --line: #2B3833;
-    --accent: #8FD3B0; --accent-ink: #0E1513;
-    --red: #F0624F; --orange: #F2B544; --info: #8FA3B8; --green: #5CCB8E; --grey: #4A5852;
-    --red-ink: #F0624F; --orange-ink: #F2B544; --info-ink: #A9BBCD; --green-ink: #5CCB8E;
+    --bg: #121417; --card: #1C1F24; --ink: #ECEEF1; --muted: #A0A7B2; --line: #2E333B;
+    --accent: #7AA2FF; --accent-ink: #0F1115;
+    --red: #F0624F; --orange: #F2B544; --info: #8FA3C2; --green: #5CCB8E; --grey: #3B414B;
+    --red-ink: #F0624F; --orange-ink: #F2B544; --info-ink: #A9B9D2; --green-ink: #5CCB8E;
     --tint: 16%;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0E1513; --card: #17211E; --ink: #E7EEEA; --muted: #9AA9A2; --line: #2B3833;
-  --accent: #8FD3B0; --accent-ink: #0E1513;
-  --red: #F0624F; --orange: #F2B544; --info: #8FA3B8; --green: #5CCB8E; --grey: #4A5852;
-  --red-ink: #F0624F; --orange-ink: #F2B544; --info-ink: #A9BBCD; --green-ink: #5CCB8E;
+  --bg: #121417; --card: #1C1F24; --ink: #ECEEF1; --muted: #A0A7B2; --line: #2E333B;
+  --accent: #7AA2FF; --accent-ink: #0F1115;
+  --red: #F0624F; --orange: #F2B544; --info: #8FA3C2; --green: #5CCB8E; --grey: #3B414B;
+  --red-ink: #F0624F; --orange-ink: #F2B544; --info-ink: #A9B9D2; --green-ink: #5CCB8E;
   --tint: 16%;
   color-scheme: dark;
 }

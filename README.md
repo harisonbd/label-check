@@ -22,6 +22,7 @@ Later it becomes a part of Jarvis.
 | i18n.js | All screen texts in English, German and Bulgarian |
 | db.js | Offline ingredient database lookup (LCDB) |
 | data/ | The ingredient database (see data/SOURCES.md) |
+| data/products.json | Our own product list: products that Open Food Facts / Open Beauty Facts do not have. Checked first on a scan (offline too); products without a barcode are found with Search. Label data only, no photos. |
 | app.js | Scanning, lookup, ingredient check, result screen, detail, favourites, label reading, backup |
 | manifest.json | Makes the app installable |
 | sw.js | Lets the app and the database open without internet |
@@ -34,7 +35,7 @@ Later it becomes a part of Jarvis.
 - Database: updates itself every month (see `tools/FETCH.md`). By hand: `python tools/fetch_sources.py _sources`, then `python tools/build_db.py _sources data` and `node tools/test_db.js`.
 - Screen text: edit `i18n.js` (same key in `en`, `de` and `bg`).
 - App test (needs Python Playwright): `python tools/test_app.py`.
-- After any change, raise `VERSION` in `sw.js` (for example `label-check-v4`), so the phone loads the new files.
+- After any change, raise `VERSION` in `sw.js` (for example `label-check-v7`), so the phone loads the new files.
 
 ## Parked ideas
 

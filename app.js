@@ -173,6 +173,36 @@
     .then(info => { DBINFO = info; return info; })
     .catch(() => { DBINFO = false; return null; });
 
+  // ---------- Our product list (data/products.json): products the online databases do not have ----------
+  // Checked first when a barcode is scanned; works offline. Products without a barcode are found with Search.
+  let OWN = [];
+  const ownReady = fetch('data/products.json').then(r => r.json())
+    .then(j => { OWN = (j.products || []).filter(o => o && o.id && o.ingredients); })
+    .catch(() => { OWN = []; });
+  const isBarcode = c => /^\d{8,14}$/.test(String(c || ''));
+  const ownCode = o => (isBarcode(o.code) ? o.code : 'own-' + o.id);
+  function ownProduct(o) {
+    return {
+      code: ownCode(o), kind: o.kind === 'cosmetic' ? 'cosmetic' : 'food', source: 'own',
+      name: o.name || '', brand: o.brand || '', image: '', use: o.use || undefined,
+      ingredientsText: o.ingredients, texts: [o.ingredients], tags: [], allergens: [], analysis: [],
+      nutriscore: null, nova: null, updated: null, added: Date.parse(o.added) || null, fetchedAt: Date.now(), url: ''
+    };
+  }
+  function ownBy(code) {
+    const o = OWN.find(x => ownCode(x) === code);
+    return o ? ownProduct(o) : null;
+  }
+  function ownSearch(q) {
+    const nq = LCDB.norm(q);
+    return OWN.filter(o => LCDB.norm([o.brand, o.name].join(' ')).includes(nq)).map(ownProduct);
+  }
+  // A saved product; for products from our list, the newest copy of the list.
+  function productBy(code) {
+    const p = state.products[code];
+    return p && p.source !== 'own' ? p : (ownBy(code) || p || null);
+  }
+
   // ---------- Analysis ----------
   // Every ingredient becomes a row with a level (b c u r n) and a group (red orange info green).
   function analyze(p) {
@@ -504,8 +534,11 @@
     }
     hideAll();
     showStatus(t('status.looking', { code }));
+    await ownReady;
 
     const cached = state.products[code];
+    const own = !forceOnline && !(cached && cached.source === 'label') && ownBy(code);
+    if (own) { showProduct(own); return; }
     const fresh = cached && !forceOnline &&
       (cached.source === 'label' || Date.now() - cached.fetchedAt < CACHE_DAYS * 864e5);
     if (fresh) { showProduct(cached); return; }
@@ -652,7 +685,7 @@
       el('div', { class: 'actions' },
         el('button', { class: 'btn btn-primary', type: 'button', text: t('btn.scanNext'), onclick: scanNext }),
         el('button', { class: 'btn btn-ghost', type: 'button', text: a.verdict === 'unknown' ? t('btn.readLabel') : t('btn.readAgain'), onclick: () => openLabel(p) }),
-        p.source === 'label' && p.code && !p.code.startsWith('label-')
+        p.source === 'label' && isBarcode(p.code)
           ? el('button', { class: 'btn btn-ghost', type: 'button', text: t('btn.lookupOnline'), onclick: () => lookup(p.code, true) })
           : null
       )
@@ -762,9 +795,11 @@
   function dataLine(p) {
     const sourceName = t('src.' + (p.source || 'label'));
     return el('p', { class: 'data-line' },
-      p.code && !String(p.code).startsWith('label-') ? t('data.barcode', { code: p.code }) + ' ' : null,
+      isBarcode(p.code) ? t('data.barcode', { code: p.code }) + ' ' : null,
       (t('data.from', { src: sourceName }) +
-        (p.updated ? t('data.updated', { date: fmtDate(p.updated) }) : (p.source === 'label' ? t('data.saved', { date: fmtDate(p.fetchedAt) }) : ''))).replace(/\.?$/, '. '),
+        (p.updated ? t('data.updated', { date: fmtDate(p.updated) })
+          : p.source === 'label' ? t('data.saved', { date: fmtDate(p.fetchedAt) })
+          : p.source === 'own' && p.added ? t('data.added', { date: fmtDate(p.added) }) : '')).replace(/\.?$/, '. '),
       p.url ? link(p.url, t('data.open')) : null,
       dbAge()
     );
@@ -943,7 +978,7 @@
   const verdictCache = new Map();
   function verdictOf(code, fallback) {
     if (verdictCache.has(code)) return verdictCache.get(code);
-    const p = state.products[code];
+    const p = productBy(code);
     if (DBINFO && p) {
       try { const a = analyze(p); const v = { verdict: a.verdict, summary: a.summary }; verdictCache.set(code, v); return v; }
       catch (e) { /* use the saved one */ }
@@ -953,7 +988,7 @@
 
   function productListItem(item, opts) {
     const v = verdictOf(item.code, item.verdict);
-    const p = state.products[item.code] || item;
+    const p = productBy(item.code) || item;
     return el('li', {},
       el('span', { class: 'dot ' + VERDICT_DOT[v.verdict], 'aria-hidden': 'true' }),
       el('button', { class: 'open', type: 'button', onclick: () => openSaved(item.code) },
@@ -1005,7 +1040,7 @@
 
   function openSaved(code) {
     go('scan');
-    const p = state.products[code];
+    const p = productBy(code);
     if (p) showProduct(p);
     else lookup(code);
   }
@@ -1173,7 +1208,7 @@
     $('labelName').value = (p && p.name) || '';
     const kind = (p && p.kind) || 'food';
     document.querySelectorAll('input[name="kind"]').forEach(i => { i.checked = i.value === kind; });
-    $('labelLead').textContent = labelFor && labelFor.code && !String(labelFor.code).startsWith('label-')
+    $('labelLead').textContent = labelFor && isBarcode(labelFor.code)
       ? t('label.leadFor', { code: labelFor.code }) : t('label.lead');
     panel.scrollIntoView({ behavior: 'auto', block: 'start' });
   }
@@ -1205,8 +1240,9 @@
     if (!DBINFO) { info.textContent = t(DBINFO === null ? 'status.dbLoading' : 'status.dbFail'); list.replaceChildren(); return; }
     if (q.length < 2) { info.textContent = t('search.hint'); list.replaceChildren(); return; }
     const rows = LCDB.search(q, 30).map(searchRow).filter(Boolean);
-    info.textContent = rows.length ? '' : t('search.none');
-    list.replaceChildren(...rows.map(r => {
+    const own = ownSearch(q);
+    info.textContent = rows.length || own.length ? '' : t('search.none');
+    list.replaceChildren(...own.map(ownRow), ...rows.map(r => {
       const chip = chipOf(r);
       const kind = t(r.kind === 'cosmetic' ? 'search.kindCosShort' : 'search.kindFoodShort');
       const detail = r.kind === 'food' && r.additives && r.additives[0] ? (r.additives[0].classes || []).join(', ') : whyOf(r);
@@ -1220,6 +1256,18 @@
             el('span', { class: 'why', text: why })),
           icon(ICON.chev, 'chev')));
     }));
+  }
+
+  // A product from our list, on top of the search results.
+  function ownRow(p) {
+    const v = analyze(p).verdict;
+    return el('li', { class: 'own' },
+      el('button', { class: 'row-btn', type: 'button', onclick: () => showProduct(p) },
+        el('span', { class: 'dot ' + VERDICT_DOT[v], 'aria-hidden': 'true' }),
+        el('span', { class: 'main' },
+          el('strong', { text: [p.brand, p.name].filter(Boolean).join(' ') }),
+          el('span', { class: 'why', text: [t('src.ownShort'), t(p.kind === 'cosmetic' ? 'kind.cosmetic' : 'kind.food'), t('v.' + v)].join(' · ') })),
+        icon(ICON.chev, 'chev')));
   }
 
   async function copyText(text) {
@@ -1271,7 +1319,7 @@
     const { main, extra } = parseClaudeAnswer(raw);
     const kind = (document.querySelector('input[name="kind"]:checked') || {}).value || 'food';
     const code = labelFor && labelFor.code ? labelFor.code : 'label-' + Date.now();
-    const base = labelFor && labelFor.code ? state.products[labelFor.code] : null;
+    const base = labelFor && labelFor.code ? productBy(labelFor.code) : null;
     const p = {
       code,
       kind,
@@ -1514,7 +1562,7 @@
     renderHistory();
     if (state.current) renderResult(state.current.p);
     if (!$('searchPanel').hidden) renderSearch();
-    if (!$('labelPanel').hidden) $('labelLead').textContent = labelFor && labelFor.code && !String(labelFor.code).startsWith('label-') ? t('label.leadFor', { code: labelFor.code }) : t('label.lead');
+    if (!$('labelPanel').hidden) $('labelLead').textContent = labelFor && isBarcode(labelFor.code) ? t('label.leadFor', { code: labelFor.code }) : t('label.lead');
   }
 
   // ---------- Backup ----------
@@ -1613,7 +1661,7 @@
     if (st.tab !== currentTab) setTab(st.tab);
     if (st.tab !== 'scan') return;
     if (st.view === 'result') {
-      const p = state.current && state.current.p.code === st.code ? state.current.p : state.products[st.code];
+      const p = state.current && state.current.p.code === st.code ? state.current.p : productBy(st.code);
       if (!p || !DBINFO) showScanner();
       else if ($('result').hidden || !state.current || state.current.p !== p) renderResult(p);
     } else if (st.view === 'search') {
@@ -1705,7 +1753,7 @@
     renderFavs();
     renderHistory();
     renderRules();
-    dbReady.then(() => { renderRules(); renderAllergens(); renderFavs(); renderHistory(); });
+    Promise.all([dbReady, ownReady]).then(() => { renderRules(); renderAllergens(); renderFavs(); renderHistory(); });
 
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch(() => { /* app still works online */ });

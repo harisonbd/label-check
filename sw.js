@@ -1,7 +1,7 @@
 /* Label Check — service worker.
    Keeps the app files and the ingredient database on the phone so the app opens without internet.
    When you change any app file or the database, raise the version number below. */
-const VERSION = 'label-check-v5';
+const VERSION = 'label-check-v6';
 const FILES = [
   './',
   'index.html',
@@ -14,7 +14,8 @@ const FILES = [
   'icon-512.png',
   'data/db-meta.json',
   'data/db-cosmetics.json',
-  'data/db-food.json'
+  'data/db-food.json',
+  'data/products.json'
 ];
 
 self.addEventListener('install', event => {

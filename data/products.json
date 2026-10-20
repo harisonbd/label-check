@@ -1,0 +1,17 @@
+{
+  "about": "Label Check - our own product list. Products that Open Food Facts / Open Beauty Facts do not have. The app checks this list first, also offline. Product data from the label only: no photos, nothing personal. code = the barcode digits (empty if not known yet: then find the product with Search). kind = food or cosmetic. lang = language of the ingredient text (en, de, bg).",
+  "updated": "2026-10-20",
+  "products": [
+    {
+      "id": "mlo-magne-amino-armour",
+      "code": "",
+      "name": "Magne Amino Armour",
+      "brand": "MLO",
+      "kind": "food",
+      "lang": "bg",
+      "ingredients": "Цинков цитрат, магнезиев л-аспартат дихидрат, вит Б6, л-теанин, титаниев диоксид, хипромелоза, магнезиев стеарат, силиконов диоксид.",
+      "note": "Food supplement, 90 capsules",
+      "added": "2026-10-20"
+    }
+  ]
+}

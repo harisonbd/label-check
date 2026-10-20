@@ -24,6 +24,9 @@
   const ALLERGEN_LABEL = { bg: { milk: 'мляко' } };
   // Names missing in the Open Food Facts data (move into build_db.py later).
   const EXTRA_ALLERGEN_NAMES = { milk: ['краве масло', 'масло от краве мляко'] };
+  // Additive names seen on real labels but missing in the data (move into build_db.py later).
+  const EXTRA_ADDITIVE_NAMES = { e464: { bg: ['хипромелоза'] }, e551: { bg: ['силиконов диоксид', 'силициев двуокис'] } };
+  const additiveNames = (a, lang) => (a.n[lang] || []).concat((EXTRA_ADDITIVE_NAMES[a.e] || {})[lang] || []);
   // Plant fats called "butter" are not milk: "cocoa butter" -> "cocoa" before the allergen check.
   const PLANT_BUTTER = / (cocoa|cacao|shea|mango|kokum|illipe|sal|peanut|almond|cashew|hazelnut|nut|seed) butter(?= )/g;
   const allergenName = (al, lang) => (ALLERGEN_LABEL[lang] && ALLERGEN_LABEL[lang][al.id]) || (al.n[lang] || al.n.en)[0];
@@ -44,7 +47,7 @@
     foodNames = [];
     for (const a of FOOD.additives) {
       for (const lang of ['en', 'de', 'bg']) {
-        for (const n of (a.n[lang] || [])) {
+        for (const n of additiveNames(a, lang)) {
           const t = norm(n);
           if (t.length >= 4) foodNames.push([t, a]);
         }
@@ -253,7 +256,7 @@
     const em = kq.match(/^e(\d{3,4}[a-z]?)$/);
     if (em) { const a = eIndex.get('e' + em[1]); if (a) add(0, a.e, 'food', a.e.toUpperCase(), a.lv); }
     for (const a of FOOD.additives) {
-      for (const lang of ['en', 'de', 'bg']) for (const n of (a.n[lang] || [])) {
+      for (const lang of ['en', 'de', 'bg']) for (const n of additiveNames(a, lang)) {
         const t = norm(n), i = t.indexOf(nq);
         if (i >= 0) add(t === nq ? 1 : i === 0 ? 2 : 4, a.e, 'food', a.e.toUpperCase(), a.lv);
       }
