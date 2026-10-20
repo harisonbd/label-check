@@ -1,0 +1,89 @@
+# Label Check – monthly update of the offline ingredient database.
+# Runs on the 2nd of each month (and by hand: Actions > "Monthly database update" > Run workflow).
+# Downloads the EU lists, rebuilds data/, runs the database test, and publishes only if the EU data changed.
+# If a download or the test fails, nothing is published and GitHub sends you an e-mail.
+name: Monthly database update
+
+on:
+  schedule:
+    - cron: '17 4 2 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: update-db
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download the sources
+        run: python3 tools/fetch_sources.py _sources
+
+      - name: Build the database
+        run: python3 -I tools/build_db.py _sources data
+
+      - name: Test the database
+        run: node tools/test_db.js
+
+      - name: Did the EU data change?
+        id: diff
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          def strip(o):
+              if isinstance(o, dict):
+                  return {k: strip(v) for k, v in o.items() if k not in ('version', 'built', 'fetched')}
+              if isinstance(o, list):
+                  return [strip(x) for x in o]
+              return o
+          changed = []
+          for f in ('data/db-cosmetics.json', 'data/db-food.json', 'data/db-meta.json'):
+              old = json.loads(subprocess.check_output(['git', 'show', 'HEAD:' + f]))
+              if strip(old) != strip(json.load(open(f))):
+                  changed.append(f)
+          print('Changed:', changed or 'nothing')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write('changed=' + ('yes' if changed else 'no') + '\n')
+          PY
+
+      - name: Publish the new data
+        if: steps.diff.outputs.changed == 'yes'
+        run: |
+          python3 - <<'PY'
+          import re, datetime
+          sw = open('sw.js').read()
+          sw = re.sub(r"label-check-v(\d+)", lambda m: 'label-check-v%d' % (int(m.group(1)) + 1), sw, count=1)
+          open('sw.js', 'w').write(sw)
+          src = open('data/SOURCES.md').read()
+          src = re.sub(r'Built \d{4}-\d{2}-\d{2}', 'Built ' + datetime.date.today().isoformat(), src, count=1)
+          open('data/SOURCES.md', 'w').write(src)
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/db-cosmetics.json data/db-food.json data/db-meta.json data/SOURCES.md sw.js
+          git commit -m "Monthly database update $(date -u +%Y-%m-%d)"
+          git push
+          # Ask GitHub Pages to publish the new commit.
+          curl -s -X POST -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+               -H "Accept: application/vnd.github+json" \
+               "https://api.github.com/repos/${{ github.repository }}/pages/builds" || true
+
+      - name: Nothing to publish
+        if: steps.diff.outputs.changed == 'no'
+        run: echo "The EU data did not change this month."
