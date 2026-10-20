@@ -474,3 +474,39 @@ details.fold input[type="search"] { margin: 6px 0 10px; }
   .switch input, .switch input::after, .grp-head .chev { transition: none; }
   .rows li.flash { animation: none; outline: 2px solid var(--accent); }
 }
+
+/* ---------- v2.1: compact result (product in the card, short tiles, tags on rows, chips for Clear) ---------- */
+.topcard .tc-head { margin: 0 0 8px; gap: 10px; }
+.tc-head .thumb { width: 40px; height: 40px; border-radius: 10px; }
+.tc-head .thumb svg { width: 20px; height: 20px; }
+.tc-head h2 { font-size: 1rem; line-height: 1.25; }
+.tc-head p { font-size: 0.82rem; margin: 1px 0 0; }
+.tc-head .iconbtn { min-width: 40px; min-height: 40px; padding: 4px 6px; }
+.topcard .verdict-word { font-size: clamp(2rem, 10vw, 2.6rem); }
+.topcard .verdict-sub { margin: 2px 0 10px; }
+.tile { min-height: 50px; padding: 6px 4px; }
+.tile b { font-size: 1.25rem; }
+.tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.tile span { font-size: clamp(0.66rem, 2.9vw, 0.78rem); line-height: 1.15; max-width: 100%; overflow-wrap: normal; hyphens: auto; }
+.strip { margin-top: 12px; }
+.strip button { height: 18px; }
+.grp { margin-top: 8px; }
+.grp-head { min-height: 46px; padding: 8px 12px; gap: 8px; }
+.grp-head .ttl { flex: 0 0 auto; }
+.grp-head .desc { flex: 1; min-width: 0; color: var(--muted); font-size: 0.82rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row-btn { padding: 9px 12px; align-items: center; gap: 10px; }
+.row-btn .pos { flex: 0 0 2.1em; font-size: 0.8rem; padding-top: 0; }
+.row-btn .why { display: block; color: var(--muted); font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row-btn .chev { margin-top: 0; }
+/* The tag floats right inside the text column: a long name moves under the tag instead of breaking mid-word. */
+.row-btn .main > .chip { float: right; margin: 1px 0 4px 8px; }
+.row-btn .main > strong { overflow-wrap: normal; }
+.chip { flex: 0 0 auto; font-size: 0.75rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; }
+.chip.g-red { background: color-mix(in srgb, var(--red) var(--tint), var(--card)); color: var(--red-ink); }
+.chip.g-orange { background: color-mix(in srgb, var(--orange) var(--tint), var(--card)); color: var(--orange-ink); }
+.chip.g-info { background: color-mix(in srgb, var(--info) var(--tint), var(--card)); color: var(--info-ink); }
+.chiplist { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 10px 12px 12px; border-top: 1px solid var(--line); }
+.gchip { font: inherit; font-size: 0.88rem; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
+.gchip small { color: var(--muted); margin-right: 4px; }
+.gchip.nf { border-style: dashed; color: var(--muted); }
+.chiplist li.flash .gchip { animation: flash 1.4s ease-out; }

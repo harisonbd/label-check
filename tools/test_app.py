@@ -37,8 +37,8 @@ def fake_api(route):
     else:
         route.fulfill(status=200, content_type='application/json', body='{"status":0}')
 
-def new_page(browser, base, locale, dark=False):
-    ctx = browser.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, locale=locale,
+def new_page(browser, base, locale, dark=False, width=390):
+    ctx = browser.new_context(viewport={'width': width, 'height': 844}, device_scale_factor=2, locale=locale,
                               color_scheme='dark' if dark else 'light', service_workers='block')
     ctx.route('https://world.openfoodfacts.org/**', fake_api)
     ctx.route('https://world.openbeautyfacts.org/**', fake_api)
@@ -63,6 +63,10 @@ def counts(pg):
 def no_side_scroll(pg):
     return pg.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
 
+def tiles_fit(pg):
+    # No tile word is cut with "…"
+    return pg.evaluate('[...document.querySelectorAll(".tile span")].every(s => s.scrollWidth <= s.clientWidth + 1)')
+
 srv = serve()
 base = 'http://127.0.0.1:%d/index.html' % srv.server_address[1]
 with sync_playwright() as p:
@@ -73,6 +77,14 @@ with sync_playwright() as p:
     read_label(pg, SHOWER, 'cosmetic', 'Shower gel')
     ok(pg.inner_text('.verdict-word') == 'Avoid', 'verdict Avoid (Lilial is banned)')
     ok(counts(pg) == [1, 1, 5, 7], 'tiles 1 / 1 / 5 / 7')
+    ok(pg.eval_on_selector_all('.tile span', 'n => n.map(x => x.textContent)') == ['Avoid', 'Check', 'Info', 'Clear'], 'tile words Avoid / Check / Info / Clear')
+    ok(pg.is_visible('.topcard .tc-head h2') and pg.inner_text('.topcard .tc-head h2') == 'Shower gel', 'product name inside the top card')
+    ok(pg.inner_text('#groups li:has-text("Butylphenyl") .chip') == 'Banned', 'row tag "Banned"')
+    ok(pg.inner_text('#groups li:has-text("Sodium Benzoate") .why') == 'Preservative · EU limit', 'why line "Preservative · EU limit"')
+    pg.click('#groups .grp.g-green .grp-head')
+    ok(pg.locator('#groups .chiplist .gchip').count() == 7, 'Clear group shows 7 name chips')
+    ok('Fragrance · Fragrance' not in pg.inner_text('#result'), 'no "Fragrance · Fragrance"')
+    ok(pg.locator('.strip-ends').count() == 1 and pg.get_attribute('.strip button:nth-child(14)', 'title').startswith('#14'), 'strip stays in label order')
     ok(pg.locator('.strip button').count() == 14, '14 blocks in the strip')
     ok(no_side_scroll(pg), 'no sideways scroll')
     pg.screenshot(path=os.path.join(SHOTS, 'en-cosmetic.png'))
@@ -101,20 +113,23 @@ with sync_playwright() as p:
     ok('Shower gel' in pg.inner_text('#favList'), 'favourite listed')
     ctx.close()
 
-    print('German, dark')
-    ctx, pg = new_page(b, base, 'de-AT', dark=True)
+    print('German, dark, 360 px')
+    ctx, pg = new_page(b, base, 'de-AT', dark=True, width=360)
     read_label(pg, SHOWER, 'cosmetic', 'Duschgel')
     ok(pg.inner_text('.verdict-word') == 'Meiden', 'German verdict')
-    ok('Anhang' in pg.inner_text('#groups'), 'German reason texts')
+    ok('Anhang' in pg.inner_text('#groups') or 'Grenzwert' in pg.inner_text('#groups'), 'German row texts')
+    ok(tiles_fit(pg), 'German tile words fit at 360 px')
+    ok(no_side_scroll(pg), 'no sideways scroll')
     pg.screenshot(path=os.path.join(SHOTS, 'de-dark.png'))
     ctx.close()
 
-    print('Bulgarian, food label')
-    ctx, pg = new_page(b, base, 'bg-BG')
+    print('Bulgarian, food label, 360 px')
+    ctx, pg = new_page(b, base, 'bg-BG', width=360)
     read_label(pg, WAFER, 'food', 'Вафла')
     ok(pg.inner_text('.verdict-word') == 'Провери', 'Bulgarian verdict')
     ok(counts(pg) == [0, 3, 3, 5], 'tiles 0 / 3 / 3 / 5')
     ok('Мляко' in pg.inner_text('.allergen-line'), 'milk allergen named Мляко')
+    ok(tiles_fit(pg), 'Bulgarian tile words fit at 360 px')
     ok(no_side_scroll(pg), 'no sideways scroll')
     pg.screenshot(path=os.path.join(SHOTS, 'bg-food.png'))
     ctx.close()

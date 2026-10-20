@@ -241,7 +241,7 @@
     if (row.why === 'fragrance') return { lvl: { text: t('tag.fragranceAvoid'), g: 'red' }, parts: tags };
     if (row.group === 'orange') return { lvl: { text: levelName(row.level), g: 'orange' }, parts: [firstReason] };
     if (row.group === 'info') return { lvl: { text: levelName(row.level), g: 'info' }, parts: tags.length ? tags : [firstReason] };
-    return { lvl: null, parts: tags.concat((r.functions || []).slice(0, 1)) };
+    return { lvl: null, parts: [...new Set(tags.concat((r.functions || []).slice(0, 1)))] };
   }
 
   const ALLERGEN_TAG = /^en:(gluten|crustaceans|eggs|fish|peanuts|soybeans|milk|nuts|celery|mustard|sesame-seeds|sulphur-dioxide-and-sulphites|lupin|molluscs)$/;
@@ -563,8 +563,7 @@
 
     const r = $('result');
     r.replaceChildren(...[
-      topCard(a),
-      productHead(p, a),
+      topCard(a, p),
       productChips(p, a),
       el('div', { id: 'groups' }),
       p.ingredientsText
@@ -586,8 +585,9 @@
     return a;
   }
 
-  function topCard(a) {
+  function topCard(a, p) {
     const card = el('section', { class: 'topcard v-' + a.verdict, 'aria-label': t('v.' + a.verdict) },
+      productHead(p, a),
       el('span', { class: 'verdict-word', text: t('v.' + a.verdict) }),
       el('p', { class: 'verdict-sub', text: a.summary })
     );
@@ -599,7 +599,7 @@
         type: 'button', class: 'tile g-' + g + (n ? ' has' : ' zero'), 'data-g': g,
         'aria-pressed': String(state.filter === g), 'aria-disabled': n ? null : 'true',
         onclick: () => { if (n) setFilter(g); }
-      }, el('b', { text: String(n) }), el('span', { text: t('g.' + g) }));
+      }, el('b', { text: String(n) }), el('span', { text: t('tile.' + g) }));
     })));
 
     const strip = el('div', { class: 'strip' + (a.rows.length > 30 ? ' dense' : ''), role: 'group', 'aria-label': t('strip.aria') },
@@ -616,8 +616,9 @@
 
   function productHead(p, a) {
     const isFav = state.favs.includes(p.code);
-    const meta = [p.brand, t(p.kind === 'cosmetic' ? 'kind.cosmetic' : 'kind.food'), a.total ? tn('ph.ingredients', a.total) : null].filter(Boolean).join(' · ');
-    return el('div', { class: 'product-head' },
+    const meta = [p.brand, t(p.kind === 'cosmetic' ? 'kind.cosmetic' : 'kind.food'), a.total ? tn('ph.ingredients', a.total) : null,
+      p.kind === 'cosmetic' && a.rows.length ? t(a.fragrance ? 'chip.fragrance' : 'chip.noFragrance') : null].filter(Boolean).join(' · ');
+    return el('div', { class: 'product-head tc-head' },
       el('div', { class: 'thumb' }, icon(ICON.tag), p.image ? el('img', { src: p.image, alt: '', loading: 'lazy', onerror: e => e.target.remove() }) : null),
       el('div', { class: 'grow' },
         el('h2', { text: p.name || t('ph.unnamed') }),
@@ -636,7 +637,6 @@
 
   function productChips(p, a) {
     const chips = [];
-    if (p.kind === 'cosmetic' && a.rows.length) chips.push(t(a.fragrance ? 'chip.fragrance' : 'chip.noFragrance'));
     if (p.nutriscore) chips.push(t('chip.nutri', { g: p.nutriscore.toUpperCase() }));
     if (p.nova && [1, 2, 3, 4].includes(+p.nova)) chips.push(t('chip.nova', { n: p.nova, label: t('nova.' + p.nova) }));
     for (const tag of p.analysis || []) if (TEXT.en['an.' + tag]) chips.push(t('an.' + tag));
@@ -694,7 +694,7 @@
       if (!list.length) {
         parts.push(el('section', { class: 'grp empty g-' + g },
           el('div', { class: 'grp-head' },
-            el('span', { class: 'dot g-' + g }), el('span', { class: 'ttl', text: t('g.' + g) }),
+            el('span', { class: 'dot g-' + g }), el('span', { class: 'ttl', text: t('tile.' + g) }), el('span', { class: 'desc', text: t('gd.' + g) }),
             el('span', { class: 'num', text: t('g.none') }))));
         continue;
       }
@@ -704,25 +704,49 @@
           class: 'grp-head', type: 'button', 'aria-expanded': String(open), 'aria-controls': id,
           onclick: () => { state.open[g] = !state.open[g]; renderGroups(); }
         },
-          el('span', { class: 'dot g-' + g }), el('span', { class: 'ttl', text: t('g.' + g) }),
+          el('span', { class: 'dot g-' + g }), el('span', { class: 'ttl', text: t('tile.' + g) }), el('span', { class: 'desc', text: t('gd.' + g) }),
           el('span', { class: 'num', text: String(list.length) }), icon(ICON.chev, 'chev')),
-        el('ul', { class: 'rows', id, hidden: !open }, list.map(rowItem))
+        g === 'green'
+          ? el('ul', { class: 'chiplist', id, hidden: !open }, list.map(r => el('li', { 'data-i': r.i },
+              el('button', { class: 'gchip' + (r.kind === 'cosmetic' && !r.found ? ' nf' : ''), type: 'button', onclick: e => openDetail(r.i, e.currentTarget) },
+                el('small', { text: r.pos ? '#' + r.pos : '–' }), r.label))))
+          : el('ul', { class: 'rows', id, hidden: !open }, list.map(rowItem))
       ));
     }
     box.replaceChildren(...parts);
   }
 
+  // Short coloured tag on the right of a row.
+  function chipOf(r) {
+    const k = r.why === 'b' ? 'chip.b' : r.why === 'mine' ? 'chip.mine' : r.why === 'allergen' ? 'chip.yourAlg' : r.why === 'fragrance' ? 'chip.frag'
+      : r.group === 'orange' ? (r.level === 'u' ? 'chip.u' : 'chip.c')
+      : r.group === 'info' ? (r.allergen || (r.allergens && r.allergens.length && r.level !== 'r') ? 'chip.alg' : 'chip.r') : null;
+    return k ? t(k) : null;
+  }
+  // One short line: why this row has its colour.
+  function whyOf(r) {
+    if (r.kind === 'cosmetic') {
+      const s = r.src, tags = cosmeticTags(r), fn = (s.functions || [])[0];
+      if (r.group === 'orange' && !r.why) return (s.reasons[0] || {}).text || '';
+      if (r.group === 'info') {
+        if (r.allergen) return t('tag.allergen');
+        const an = (((s.reasons[0] || {}).source || {}).label || '').match(/Annex (IV|V|VI)\b/);
+        return an ? t('why.annex' + an[1]) : [fn, t('why.limit')].filter(Boolean).join(' · ');
+      }
+      return (tags.length ? tags : [fn]).filter(Boolean).join(' · ');
+    }
+    return r.sub ? r.sub.parts.filter(Boolean).join(' · ') : '';
+  }
+
   function rowItem(r) {
-    const sub = [];
-    if (r.sub && r.sub.lvl) sub.push(el('span', { class: 'lvl g-' + r.sub.lvl.g, text: r.sub.lvl.text }));
-    const rest = r.sub ? r.sub.parts.filter(Boolean) : [];
-    if (rest.length) sub.push((sub.length ? ' · ' : '') + rest.join(' · '));
+    const chip = chipOf(r), why = whyOf(r);
     return el('li', { 'data-i': r.i },
       el('button', { class: 'row-btn', type: 'button', onclick: e => openDetail(r.i, e.currentTarget) },
         el('span', { class: 'pos', text: r.pos ? '#' + r.pos : '–' }),
         el('span', { class: 'main' },
+          chip ? el('span', { class: 'chip g-' + r.group, text: chip }) : null,
           el('strong', { text: r.label }),
-          sub.length ? el('span', { class: 'sub' }, sub) : null),
+          why ? el('span', { class: 'why', text: why }) : null),
         icon(ICON.chev, 'chev')
       )
     );
