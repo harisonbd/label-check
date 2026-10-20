@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://world.openfoodfacts.org https://world.openbeautyfacts.org; img-src 'self' data: blob: https://images.openfoodfacts.org https://images.openbeautyfacts.org https://static.openfoodfacts.org https://static.openbeautyfacts.org; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Label Check</title>
+  <meta name="description" content="Scan food and cosmetics and check the ingredients against your own avoid list and sourced EU rules.">
+  <meta name="theme-color" content="#F3F5F2" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0F1412" media="(prefers-color-scheme: dark)">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Label Check</h1>
+  </header>
+
+  <main>
+    <!-- SCAN TAB -->
+    <section class="tab" id="tab-scan" data-tab="scan">
+      <div class="viewfinder" id="viewfinder">
+        <video id="video" playsinline muted hidden></video>
+        <div class="scanline" id="scanline" hidden></div>
+        <div class="vf-idle" id="vfIdle">
+          <button class="btn btn-primary" id="startCam" type="button">Start camera</button>
+          <p class="vf-hint">Point it at the barcode. The scan starts by itself.</p>
+        </div>
+        <button class="btn btn-ghost vf-stop" id="stopCam" type="button" hidden>Stop camera</button>
+      </div>
+
+      <form class="manual" id="manualForm" autocomplete="off">
+        <label for="codeInput">Or type the numbers under the barcode</label>
+        <div class="row">
+          <input id="codeInput" inputmode="numeric" pattern="[0-9 ]*" placeholder="e.g. 9001234567890" aria-describedby="codeHelp">
+          <button class="btn btn-primary" type="submit">Look up</button>
+        </div>
+        <p class="help" id="codeHelp">8 to 14 digits.</p>
+      </form>
+
+      <button class="linkbtn" id="openLabel" type="button">No barcode? Read a label instead</button>
+
+      <div id="status" class="status" hidden></div>
+
+      <!-- Result -->
+      <article id="result" class="result" hidden aria-live="polite"></article>
+
+      <!-- Read a label -->
+      <section id="labelPanel" class="panel" hidden>
+        <h2>Read a label with Claude</h2>
+        <p class="lead" id="labelLead">Free: it uses your normal Claude app.</p>
+        <ol class="steps">
+          <li>
+            <label class="btn btn-primary filebtn">Take photo of the ingredients
+              <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
+            </label>
+            <span>The app copies a question and opens the share menu. Pick Claude.</span>
+          </li>
+          <li>In Claude, paste the question and send it with the photo.</li>
+          <li>Copy Claude's answer and paste it below.</li>
+        </ol>
+        <p class="minor">Share menu does not show Claude? <button class="linkbtn inline" id="copyPrompt" type="button">Copy the question</button>, then open Claude and add the photo there.</p>
+
+        <label for="labelText">Ingredient list</label>
+        <textarea id="labelText" rows="6" placeholder="Paste the ingredient list here"></textarea>
+        <div class="row">
+          <button class="btn btn-ghost" id="pasteBtn" type="button">Paste</button>
+        </div>
+
+        <fieldset class="kind">
+          <legend>Product type</legend>
+          <label><input type="radio" name="kind" value="food" checked> Food</label>
+          <label><input type="radio" name="kind" value="cosmetic"> Cosmetic</label>
+        </fieldset>
+
+        <label for="labelName">Product name (optional)</label>
+        <input id="labelName" placeholder="e.g. Shower gel lime">
+
+        <button class="btn btn-primary wide" id="checkLabel" type="button">Check ingredients</button>
+      </section>
+
+      <p class="credit">Product data: <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a> and <a href="https://world.openbeautyfacts.org" target="_blank" rel="noopener">Open Beauty Facts</a> contributors, licensed under the <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL</a>. Results are a guide, not medical advice.</p>
+    </section>
+
+    <!-- MY LIST TAB -->
+    <section class="tab" id="tab-list" data-tab="list" hidden>
+      <h2>Your avoid list</h2>
+      <p class="lead">A product with anything from this list turns red. Put other names on one line with commas: <em>palm oil, palmöl, palmfett</em>.</p>
+      <form class="row" id="avoidForm" autocomplete="off">
+        <label class="sr-only" for="avoidInput">Ingredient to avoid</label>
+        <input id="avoidInput" placeholder="Ingredient and other names">
+        <button class="btn btn-primary" type="submit">Add</button>
+      </form>
+      <ul class="plainlist" id="avoidList"></ul>
+      <p class="empty" id="avoidEmpty">Your list is empty. The starter rules still check every product.</p>
+
+      <h3>Quick picks</h3>
+      <div class="picks" id="picks"></div>
+
+      <h3>Backup</h3>
+      <p class="minor">Your list, rule settings, history and saved products stay on this phone only. Export a backup file now and then.</p>
+      <div class="row">
+        <button class="btn btn-ghost" id="exportBtn" type="button">Export backup</button>
+        <label class="btn btn-ghost filebtn">Import backup
+          <input type="file" id="importInput" accept="application/json,.json" hidden>
+        </label>
+      </div>
+    </section>
+
+    <!-- RULES TAB -->
+    <section class="tab" id="tab-rules" data-tab="rules" hidden>
+      <h2>Starter rules</h2>
+      <p class="lead">Each rule has a source. Turn off any rule you do not want. Red rules make a product red; orange rules make it orange.</p>
+      <div id="rulesList"></div>
+      <p class="minor" id="rulesMeta"></p>
+    </section>
+
+    <!-- HISTORY TAB -->
+    <section class="tab" id="tab-history" data-tab="history" hidden>
+      <h2>History</h2>
+      <ul class="plainlist history" id="historyList"></ul>
+      <p class="empty" id="historyEmpty">No scans yet. Scan a product and it shows up here.</p>
+      <button class="btn btn-ghost" id="clearHistory" type="button" hidden>Clear history</button>
+    </section>
+  </main>
+
+  <nav class="tabbar" aria-label="Sections">
+    <button type="button" data-go="scan" aria-current="page">Scan</button>
+    <button type="button" data-go="list">My list</button>
+    <button type="button" data-go="rules">Rules</button>
+    <button type="button" data-go="history">History</button>
+  </nav>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

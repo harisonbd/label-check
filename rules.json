@@ -1,0 +1,137 @@
+{
+  "version": "2026-10-12",
+  "note": "Starter rules. Each rule has a source. 'terms' are matched as whole words in the ingredient text (lower case, accents removed; a * at the end allows any word ending). 'tags' are Open Food Facts ingredient or additive tags.",
+  "groups": {
+    "eu-food": "EU food bans and limits",
+    "eu-cosmetic": "EU cosmetics bans and limits",
+    "health": "Health warnings"
+  },
+  "rules": [
+    {
+      "id": "e171",
+      "group": "eu-food",
+      "name": "Titanium dioxide (E171)",
+      "applies": ["food"],
+      "level": "high",
+      "reason": "Banned as a food additive in the EU since 2022. EFSA no longer considers it safe in food. Can still appear in imported food.",
+      "terms": ["e171", "titanium dioxide", "titandioxid", "dioxyde de titane", "biossido di titanio", "dioxido de titanio"],
+      "tags": ["en:e171"],
+      "source": { "label": "Regulation (EU) 2022/63", "url": "https://eur-lex.europa.eu/eli/reg/2022/63/oj" }
+    },
+    {
+      "id": "trans-fat",
+      "group": "eu-food",
+      "name": "Partially hydrogenated fat",
+      "applies": ["food"],
+      "level": "medium",
+      "reason": "Main source of industrial trans fat. The EU limits industrial trans fat to 2 g per 100 g of fat.",
+      "terms": ["partially hydrogenated", "teilweise gehartet*", "teilweise hydriert*", "partiellement hydrogen*", "parzialmente idrogenat*", "parcialmente hidrogenad*"],
+      "tags": [],
+      "source": { "label": "Regulation (EU) 2019/649", "url": "https://eur-lex.europa.eu/eli/reg/2019/649/oj" }
+    },
+    {
+      "id": "southampton-colours",
+      "group": "health",
+      "name": "Colours with a child warning (E102, E104, E110, E122, E124, E129)",
+      "applies": ["food"],
+      "level": "medium",
+      "reason": "EU law requires the warning: may have an adverse effect on activity and attention in children.",
+      "terms": [
+        "e102", "tartrazine", "tartrazin",
+        "e104", "quinoline yellow", "chinolingelb", "jaune de quinoleine",
+        "e110", "sunset yellow", "sunset yellow fcf", "gelborange s", "jaune orange s",
+        "e122", "azorubine", "azorubin", "carmoisine",
+        "e124", "ponceau 4r", "cochenillerot a",
+        "e129", "allura red", "allura red ac", "allurarot ac", "rouge allura ac"
+      ],
+      "tags": ["en:e102", "en:e104", "en:e110", "en:e122", "en:e124", "en:e129"],
+      "source": { "label": "Regulation (EC) 1333/2008, Annex V", "url": "https://eur-lex.europa.eu/eli/reg/2008/1333/oj" }
+    },
+    {
+      "id": "nitrite",
+      "group": "health",
+      "name": "Nitrite and nitrate (E249 to E252)",
+      "applies": ["food"],
+      "level": "medium",
+      "reason": "IARC: probably causes cancer in humans (Group 2A) when it forms nitroso compounds in the body. Common in cured meat as curing salt.",
+      "terms": [
+        "e249", "e250", "e251", "e252",
+        "sodium nitrite", "natriumnitrit", "potassium nitrite", "kaliumnitrit",
+        "sodium nitrate", "natriumnitrat", "potassium nitrate", "kaliumnitrat",
+        "nitritpokelsalz", "nitrit pokelsalz", "nitrite curing salt", "nitrited curing salt", "sel nitrite", "nitrite de sodium", "nitrate de potassium"
+      ],
+      "tags": ["en:e249", "en:e250", "en:e251", "en:e252"],
+      "source": { "label": "IARC Monograph 94 (2010), summary by UK FSA", "url": "https://science.food.gov.uk/article/144676-safety-of-nitrates-and-nitrites-as-food-additives" }
+    },
+    {
+      "id": "banned-parabens",
+      "group": "eu-cosmetic",
+      "name": "Banned parabens",
+      "applies": ["cosmetic"],
+      "level": "high",
+      "reason": "Isopropyl-, isobutyl-, phenyl-, benzyl- and pentylparaben are banned in EU cosmetics. The industry gave too little safety data.",
+      "terms": ["isopropylparaben", "isobutylparaben", "phenylparaben", "benzylparaben", "pentylparaben"],
+      "tags": [],
+      "source": { "label": "Regulation (EU) 358/2014", "url": "https://eur-lex.europa.eu/eli/reg/2014/358/oj" }
+    },
+    {
+      "id": "lilial",
+      "group": "eu-cosmetic",
+      "name": "Lilial (butylphenyl methylpropional)",
+      "applies": ["cosmetic"],
+      "level": "high",
+      "reason": "Fragrance banned in EU cosmetics since March 2022. Classified as toxic for reproduction (CMR 1B).",
+      "terms": ["butylphenyl methylpropional", "lilial", "p bmhca"],
+      "tags": [],
+      "source": { "label": "Regulation (EU) 2021/1902", "url": "https://eur-lex.europa.eu/eli/reg/2021/1902/oj" }
+    },
+    {
+      "id": "zinc-pyrithione",
+      "group": "eu-cosmetic",
+      "name": "Zinc pyrithione",
+      "applies": ["cosmetic"],
+      "level": "high",
+      "reason": "Banned in EU cosmetics since March 2022 (CMR 1B). It was common in anti-dandruff shampoo.",
+      "terms": ["zinc pyrithione", "zinkpyrithion", "pyrithione zinc"],
+      "tags": [],
+      "source": { "label": "Regulation (EU) 2021/1902", "url": "https://eur-lex.europa.eu/eli/reg/2021/1902/oj" }
+    },
+    {
+      "id": "methylisothiazolinone",
+      "group": "eu-cosmetic",
+      "name": "Methylisothiazolinone (MI)",
+      "applies": ["cosmetic"],
+      "level": "medium",
+      "reason": "Strong skin allergen. The EU bans it in leave-on products such as creams and wet wipes.",
+      "terms": ["methylisothiazolinone"],
+      "tags": [],
+      "source": { "label": "Regulation (EU) 2016/1198", "url": "https://eur-lex.europa.eu/eli/reg/2016/1198/oj" }
+    },
+    {
+      "id": "formaldehyde-releasers",
+      "group": "eu-cosmetic",
+      "name": "Formaldehyde releasers",
+      "applies": ["cosmetic"],
+      "level": "medium",
+      "reason": "Preservatives that slowly release formaldehyde, a skin allergen. Above 10 ppm the label must say 'releases formaldehyde'.",
+      "terms": [
+        "dmdm hydantoin", "imidazolidinyl urea", "diazolidinyl urea", "quaternium 15",
+        "sodium hydroxymethylglycinate", "2 bromo 2 nitropropane 1 3 diol", "bronopol", "methenamine",
+        "releases formaldehyde", "setzt formaldehyd frei", "libere du formaldehyde"
+      ],
+      "tags": [],
+      "source": { "label": "Regulation (EU) 2022/1181", "url": "https://eur-lex.europa.eu/eli/reg/2022/1181/oj" }
+    },
+    {
+      "id": "triclosan",
+      "group": "eu-cosmetic",
+      "name": "Triclosan",
+      "applies": ["cosmetic"],
+      "level": "medium",
+      "reason": "Antibacterial agent. The EU allows it only in a few product types and at low levels.",
+      "terms": ["triclosan"],
+      "tags": [],
+      "source": { "label": "Regulation (EU) 358/2014", "url": "https://eur-lex.europa.eu/eli/reg/2014/358/oj" }
+    }
+  ]
+}
