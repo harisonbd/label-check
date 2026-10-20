@@ -109,6 +109,7 @@ const ok = (cond, msg) => { if (!cond) { fails++; console.log('  FAIL: ' + msg);
   const hit = (q, kind, name) => LCDB.search(q, 10).some(h => h.kind === kind && h.name === name);
   ok(hit('phenoxy', 'cosmetic', 'PHENOXYETHANOL'), 'phenoxy -> PHENOXYETHANOL');
   ok(LCDB.search('e 250', 5)[0].id === 'e250', 'e 250 -> E250 first');
+  ok(LCDB.search('e 250', 10).length === 1, 'e 250 -> only E250 (no cosmetic name that contains "e250")');
   ok(hit('natriumnitrit', 'food', 'E250') && hit('аспартам', 'food', 'E951'), 'German and Bulgarian names');
   ok(LCDB.search('a', 5).length === 0, 'one letter -> no search');
 

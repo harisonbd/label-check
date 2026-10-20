@@ -453,6 +453,7 @@ fieldset.kind input { width: 20px; height: 20px; accent-color: var(--accent); }
   border-radius: 999px; border: 1.5px dashed var(--line);
   background: transparent; color: var(--ink); cursor: pointer;
 }
+.picks button[aria-pressed="true"] { background: var(--accent); border: 1.5px solid var(--accent); color: var(--accent-ink); font-weight: 650; }
 
 .setting { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .setting label { margin: 0; }
@@ -548,7 +549,7 @@ details.fold input[type="search"] { margin: 6px 0 10px; }
 .grp-head .desc { flex: 1; min-width: 0; color: var(--muted); font-size: 0.82rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row-btn { padding: 9px 12px; align-items: center; gap: 10px; }
 .row-btn .pos { flex: 0 0 2.1em; font-size: 0.8rem; padding-top: 0; }
-.row-btn .why { display: block; color: var(--muted); font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row-btn .why { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; color: var(--muted); font-size: 0.85rem; overflow: hidden; }   /* reason: up to 2 lines (v2.7) */
 .row-btn .chev { margin-top: 0; }
 /* The tag floats right inside the text column: a long name moves under the tag instead of breaking mid-word. */
 .row-btn .main > .chip { float: right; margin: 1px 0 4px 8px; }
@@ -581,7 +582,8 @@ details.fold input[type="search"] { margin: 6px 0 10px; }
 .manual label { font-size: 0.92rem; }
 .checking { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 16px 0 0; }
 .checking .lbl { font-size: 0.85rem; color: var(--muted); font-weight: 600; }
-.cchip { font: inherit; font-size: 0.82rem; font-weight: 600; color: var(--ink); padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); cursor: pointer; }
+.cchip { font: inherit; font-size: 0.82rem; font-weight: 600; color: var(--ink); padding: 6px 12px; min-height: 40px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); cursor: pointer; }
+#recentAll { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: flex-end; }
 .recent { margin-top: 18px; }
 .recent-head { display: flex; align-items: baseline; justify-content: space-between; }
 .recent-head h3 { margin: 0; }

@@ -261,7 +261,8 @@
         if (i >= 0) add(t === nq ? 1 : i === 0 ? 2 : 4, a.e, 'food', a.e.toUpperCase(), a.lv);
       }
     }
-    for (const [k, name, level] of cosKeys) {
+    // A full E-number ("e 250") means a food additive: no cosmetic names that only contain the letters ("…peptide-250")
+    if (!em) for (const [k, name, level] of cosKeys) {
       const i = k.indexOf(kq);
       if (i >= 0) add(k === kq ? 1 : i === 0 ? 2 : 4, name, 'cosmetic', name, level);
     }

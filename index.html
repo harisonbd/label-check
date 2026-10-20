@@ -15,7 +15,7 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>Label Check <span class="ver">v2.6</span></h1>
+    <h1>Label Check <span class="ver">v2.7</span></h1>
     <div class="langsw" id="langSwitch" role="group" aria-label="Language">
       <button type="button" data-lang="en" lang="en" aria-pressed="false">EN</button>
       <button type="button" data-lang="bg" lang="bg" aria-pressed="false">BG</button>
@@ -166,23 +166,8 @@
       <h3 data-t="list.picks">Quick picks</h3>
       <div class="picks" id="picks"></div>
 
-      <h3 data-t="frag.title">Fragrance</h3>
-      <div class="setting">
-        <label for="fragSwitch" class="grow"><span data-t="frag.label">I avoid fragrance (perfume)</span>
-          <span class="sub" data-t="frag.help"></span></label>
-        <span class="switch"><input type="checkbox" role="switch" id="fragSwitch"></span>
-      </div>
-
-      <h3 data-t="diet.title">Vegan</h3>
-      <div class="setting">
-        <label for="veganSwitch" class="grow"><span data-t="diet.label">I eat vegan</span>
-          <span class="sub" data-t="diet.help"></span></label>
-        <span class="switch"><input type="checkbox" role="switch" id="veganSwitch"></span>
-      </div>
-
       <h3 data-t="alg.title">Allergens</h3>
-      <p class="minor" data-t="alg.lead"></p>
-      <details class="fold" id="foodAlgBox" open>
+      <details class="fold" id="foodAlgBox">
         <summary><span data-t="alg.food">Food allergens (EU 14)</span> <span class="count" id="foodAlgCount"></span></summary>
         <div class="ticks" id="foodAlgList"></div>
       </details>
@@ -217,19 +202,29 @@
         <span class="switch"><input type="checkbox" role="switch" id="bigSwitch"></span>
       </div>
 
-      <h3 data-t="rules.title">What the app checks</h3>
-      <p class="minor" data-t="rules.lead"></p>
-      <div id="rulesBox"></div>
-      <div class="credit" id="credit"></div>
+      <details class="fold" id="rulesFold">
+        <summary data-t="rules.title">What the app checks</summary>
+        <p class="minor" data-t="rules.lead"></p>
+        <div id="rulesBox"></div>
+        <div class="credit" id="credit"></div>
+      </details>
 
-      <h3 data-t="backup.title">Backup</h3>
-      <p class="minor" data-t="backup.lead"></p>
-      <div class="row">
-        <button class="btn btn-ghost" id="exportBtn" type="button" data-t="backup.export">Export backup</button>
-        <label class="btn btn-ghost filebtn"><span data-t="backup.import">Import backup</span>
-          <input type="file" id="importInput" accept="application/json,.json" hidden>
-        </label>
-      </div>
+      <details class="fold" id="moreFold">
+        <summary data-t="more.title">More: vegan, backup</summary>
+        <div class="setting">
+          <label for="veganSwitch" class="grow"><span data-t="diet.label">I eat vegan</span>
+            <span class="sub" data-t="diet.help"></span></label>
+          <span class="switch"><input type="checkbox" role="switch" id="veganSwitch"></span>
+        </div>
+        <h4 class="rules-sub" data-t="backup.title">Backup</h4>
+        <p class="minor" data-t="backup.lead"></p>
+        <div class="row">
+          <button class="btn btn-ghost" id="exportBtn" type="button" data-t="backup.export">Export backup</button>
+          <label class="btn btn-ghost filebtn"><span data-t="backup.import">Import backup</span>
+            <input type="file" id="importInput" accept="application/json,.json" hidden>
+          </label>
+        </div>
+      </details>
     </section>
 
     <!-- HISTORY TAB -->

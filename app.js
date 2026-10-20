@@ -1695,9 +1695,19 @@
     $('avoidEmpty').hidden = state.avoid.length > 0;
 
     const have = new Set(state.avoid.map(i => i.text.split(',')[0].trim().toLowerCase()));
-    $('picks').replaceChildren(...QUICK_PICKS
+    // First chip = "I avoid fragrance" (same as the old switch: perfume + the fragrance allergens turn red)
+    const frag = el('button', { type: 'button', class: 'frag-chip', 'aria-pressed': String(!!state.avoidFragrance), 'aria-label': t('frag.label'),
+      text: (state.avoidFragrance ? '✓ ' : '+ ') + t('frag.chip'), onclick: () => setFragrance(!state.avoidFragrance) });
+    $('picks').replaceChildren(frag, ...QUICK_PICKS
       .filter(p => !have.has(p.split(',')[0].trim().toLowerCase()))
       .map(p => el('button', { type: 'button', text: '+ ' + p.split(',')[0], onclick: () => addAvoid(p) })));
+  }
+
+  function setFragrance(on) {
+    state.avoidFragrance = on;
+    store.set('avoidFragrance', on);
+    renderAvoid();
+    settingsChanged();
   }
 
   function settingsChanged() {
@@ -1895,7 +1905,6 @@
   }
 
   function syncSettingsControls() {
-    $('fragSwitch').checked = !!state.avoidFragrance;
     $('veganSwitch').checked = !!state.vegan;
     $('bigSwitch').checked = !!state.bigText;
     $('langSelect').value = state.lang;
@@ -2004,11 +2013,6 @@
     $('veganSwitch').addEventListener('change', e => {
       state.vegan = e.target.checked;
       store.set('vegan', state.vegan);
-      settingsChanged();
-    });
-    $('fragSwitch').addEventListener('change', e => {
-      state.avoidFragrance = e.target.checked;
-      store.set('avoidFragrance', state.avoidFragrance);
       settingsChanged();
     });
     $('cosAlgSearch').addEventListener('input', filterCosAllergens);
