@@ -1373,6 +1373,9 @@
   // ---------- Read a label: offline reader (Tesseract, in ocr/) ----------
   // The reader files load only when you tap "Read text", so barcode scans stay fast.
   const OCR_LANGS = { en: 'eng', de: 'deu', bg: 'bul' };
+  const OCR_NAMES = { eng: 'EN', deu: 'DE', bul: 'BG' };
+  const OCR_LOW = 60;   // reader confidence below this: read again with the other alphabet
+  const OCR_BAD = 50;   // below this: orange line instead of "Done" (wrong alphabet gave 31–48, good reads 75–95)
   let ocrFile = null, ocrWorker = null, ocrSeq = 0, ocrBusy = false, claudeNext = false;
   const ocrWait = {};
   const crop = { x: 0.06, y: 0.3, w: 0.88, h: 0.4 };   // part of the photo, 0..1
@@ -1520,15 +1523,25 @@
     const t0 = performance.now();
     ocrStatus(t('ocr.reading'), 'busy');
     try {
-      const r = await ocrRun(await ocrImage(), ocrLang());
+      const image = await ocrImage(), lang = ocrLang();
+      let r = await ocrRun(image.slice(), lang), switched = '';
+      // Low confidence: probably the wrong alphabet (a Latin label read as BG, or the reverse).
+      // Read once more with the other alphabet and keep the better text.
+      if (r.conf < OCR_LOW) {
+        const other = lang === 'bul' ? 'eng' : 'bul';
+        try {
+          const r2 = await ocrRun(image.slice(), other);
+          if (r2.conf > r.conf) { r = r2; switched = other; store.set('ocrLang', other); renderOcrLang(); }
+        } catch (e) { /* other language not on the phone yet and no internet: keep the first text */ }
+      }
       const text = cleanOcr(r.text);
       const secs = ((performance.now() - t0) / 1000).toFixed(1).replace('.', LANG === 'en' ? '.' : ',');
-      if (text.replace(/[^\p{L}]/gu, '').length < 12 || r.conf < 25) {
+      if (text.replace(/[^\p{L}]/gu, '').length < 12 || r.conf < OCR_BAD) {
         ocrStatus(t('ocr.little'), 'warn');
         if (text) $('labelText').value = text;
       } else {
         $('labelText').value = text;
-        ocrStatus(t('ocr.done', { s: secs }));
+        ocrStatus(t('ocr.done', { s: secs }) + (switched ? ' ' + t('ocr.switched', { lang: OCR_NAMES[switched] }) : ''));
       }
       $('labelText').scrollIntoView({ behavior: 'smooth', block: 'center' });
     } catch (err) {

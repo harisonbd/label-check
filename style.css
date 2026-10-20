@@ -93,6 +93,7 @@ html.noscroll { overflow: hidden; }
 .langsw button + button { border-left: 1px solid var(--line); }
 .langsw button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
 .topbar h1 { font-size: 1.05rem; font-weight: 800; letter-spacing: -0.01em; }
+.topbar .ver { font-size: 0.75rem; font-weight: 600; color: var(--muted); margin-left: 4px; letter-spacing: 0; }
 
 main {
   max-width: 560px;
@@ -589,7 +590,10 @@ details.fold input[type="search"] { margin: 6px 0 10px; }
 
 /* ---------- Panels (label, search) open as their own screen ---------- */
 .panel { margin-top: 6px; }
-.panel-back { margin: -6px 0 2px -8px; }
+/* Back button: tinted pill, easy to see (v2.6) */
+.panel-back, #detailBack { background: color-mix(in srgb, var(--accent) 18%, var(--bg)); color: var(--accent); border-radius: 999px; padding: 8px 18px 8px 10px; }
+.panel-back { margin: 0 0 10px; }
+.panel-back svg, #detailBack svg { stroke-width: 2.6; }
 .searchlist { margin: 6px -16px 0; border-top: 1px solid var(--line); }
 .searchlist .row-btn .dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
 #searchInput { margin-top: 4px; }

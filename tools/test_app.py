@@ -316,14 +316,14 @@ with sync_playwright() as p:
     def drag(pg, sel, tx, ty):
         bb = pg.locator(sel).bounding_box(); pg.mouse.move(bb['x'] + bb['width'] / 2, bb['y'] + bb['height'] / 2)
         pg.mouse.down(); pg.mouse.move(tx, ty, steps=6); pg.mouse.up()
-    def read_photo(pg, lang='eng', box=(0.03, 0.44, 0.97, 0.62)):
-        pg.set_input_files('#photoPick', photo)
+    def read_photo(pg, lang='eng', box=(0.03, 0.44, 0.97, 0.62), file=None):
+        pg.set_input_files('#photoPick', file or photo)
         pg.wait_for_selector('#ocrArea:not([hidden])')
         pg.evaluate("document.getElementById('cropWrap').scrollIntoView({block: 'center'})")
         r = pg.locator('#cropInner').bounding_box()
         drag(pg, '#cropBox i[data-h="nw"]', r['x'] + box[0] * r['width'], r['y'] + box[1] * r['height'])
         drag(pg, '#cropBox i[data-h="se"]', r['x'] + box[2] * r['width'], r['y'] + box[3] * r['height'])
-        pg.click('#ocrLang button[data-ocr="%s"]' % lang)
+        if lang: pg.click('#ocrLang button[data-ocr="%s"]' % lang)
         pg.click('#ocrRead')
         pg.wait_for_function("() => { const s = document.getElementById('ocrStatus'); return !s.hidden && !s.classList.contains('busy'); }", timeout=90000)
 
@@ -353,13 +353,70 @@ with sync_playwright() as p:
     pg.screenshot(path=os.path.join(SHOTS, 'v25-label-bg.png'), full_page=True)
     ctx.close()
 
+    print('v2.6: wrong label language -> the reader reads again with the other alphabet')
+    BG_LINES = ['Съставки: захар, пшенично брашно, растителна', 'мазнина (палмова), сухо мляко, емулгатор: соев', 'лецитин, консервант: калиев сорбат,', 'оцветител: тартразин, подсладител: аспартам.']
+    img = Image.new('RGB', (1200, 1600), (70, 30, 110)); dr = ImageDraw.Draw(img)     # dark label, light letters
+    for i, line in enumerate(BG_LINES): dr.text((60, 740 + i * 62), line, fill=(240, 235, 245), font=font(44))
+    photo_bg = os.path.join(SHOTS, 'v26-test-label-bg.jpg'); img.rotate(-2, fillcolor=(70, 30, 110)).save(photo_bg, quality=88)
+    COUNT = "(() => { const W = window.Worker; window.__reads = 0; window.Worker = function (u, o) { const w = new W(u, o); w.addEventListener('message', e => { if (!e.data.step) window.__reads++; }); return w; }; })();"
+    pressed = lambda pg: pg.eval_on_selector('#ocrLang button[aria-pressed=true]', 'b => b.dataset.ocr')
+    ctx = b.new_context(viewport={'width': 390, 'height': 844}, locale='bg-BG', service_workers='block'); ctx.add_init_script(COUNT)
+    pg = ctx.new_page(); pg.on('pageerror', lambda e: errors.append(str(e))); pg.goto(base); pg.evaluate('LC.dbReady'); pg.click('#cardLabel')
+    read_photo(pg, lang=None)                     # BG app, nothing tapped -> BG reader on an English label
+    st, txt = pg.inner_text('#ocrStatus'), pg.input_value('#labelText').lower()
+    ok(st.startswith('Готово') and 'Прочетено с EN' in st and 'palm oil' in txt and 'tartrazine' in txt, 'BG reader on an English label: read again with EN (%s)' % st)
+    ok(pressed(pg) == 'eng' and pg.evaluate('window.__reads') == 2, 'EN button is now marked; 2 reads')
+    read_photo(pg, lang=None)
+    ok(pg.evaluate('window.__reads') == 3 and 'Прочетено с' not in pg.inner_text('#ocrStatus'), 'next English label: 1 read with EN, no note')
+    ctx.close()
+    ctx = b.new_context(viewport={'width': 390, 'height': 844}, locale='en-GB', service_workers='block'); ctx.add_init_script(COUNT)
+    pg = ctx.new_page(); pg.on('pageerror', lambda e: errors.append(str(e))); pg.goto(base); pg.evaluate('LC.dbReady'); pg.click('#cardLabel')
+    read_photo(pg, lang='eng', file=photo_bg)
+    st, txt = pg.inner_text('#ocrStatus'), pg.input_value('#labelText').lower()
+    ok('Read with BG' in st and 'тартразин' in txt and pressed(pg) == 'bul', 'EN reader on a dark Bulgarian label: read again with BG (%s)' % st)
+    ctx.close()
+    # Other language not on the phone and no internet: keep the first text, orange line instead of "Done"
+    ctx = b.new_context(viewport={'width': 390, 'height': 844}, locale='bg-BG', service_workers='block'); ctx.add_init_script(COUNT)
+    ctx.route('**/ocr/lang/eng.traineddata.gz', lambda r: r.abort())
+    pg = ctx.new_page(); pg.on('pageerror', lambda e: errors.append(str(e))); pg.goto(base); pg.evaluate('LC.dbReady'); pg.click('#cardLabel')
+    read_photo(pg, lang=None)
+    ok(pg.inner_text('#ocrStatus').startswith('Намерен е малко текст') and pg.input_value('#labelText') != '' and pressed(pg) == 'bul',
+       'EN not available: first text kept, orange "little text" line, BG stays marked')
+    ctx.close()
+
+    print('v2.6: Back button, version in the top bar, BG words')
+    TINT = "s => { const b = document.querySelector(s); const c = getComputedStyle(b); return [c.backgroundColor, c.color, b.getBoundingClientRect().height]; }"
+    for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
+        ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
+        top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
+        ok(pg.inner_text('.topbar .ver') == 'v2.6' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.6" next to the title, one line, left of EN | BG' % tag)
+        pg.click('#cardLabel')
+        bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
+        ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
+        if loc == 'bg-BG':
+            pg.fill('#labelText', 'Съставки: овесени ядки, мед, сол, канела'); pg.check('input[name=kind][value=food]'); pg.click('#checkLabel')
+            pg.wait_for_selector('#result:not([hidden]) .topcard')
+            ok(pg.inner_text('.verdict-word') == 'Нищо открито' and 'Нищо открито' in pg.inner_text('.tile.g-green') and tiles_fit(pg), '%s: green word "Нищо открито", tile word not cut' % tag)
+            pg.click('#groups .row-btn')
+            bg2 = pg.evaluate(TINT, '#detailBack')[0]
+            ok(pg.is_visible('#detail') and bg2 not in ('rgba(0, 0, 0, 0)', 'transparent'), '%s: Back on the ingredient detail is a tinted pill' % tag)
+            pg.click('#detailBack'); pg.click('.tabbar button[data-go=scan]')
+            pg.fill('#codeInput', '3800123456781'); pg.click('#manualForm button[type=submit]'); pg.wait_for_selector('#pickBox:not([hidden])')
+            ok(pg.eval_on_selector_all('#pickBox li button', 'n => n.map(x => x.textContent)')[0] == 'Избери' and no_side_scroll(pg), '%s: "checked before" button says "Избери"' % tag)
+            pg.screenshot(path=os.path.join(SHOTS, 'v26-pick-bg.png'))
+        else:
+            pg.click('.tabbar button[data-go=scan]'); pg.click('#cardSearch')
+            ok(pg.evaluate(TINT, '#searchPanel .panel-back')[0] not in ('rgba(0, 0, 0, 0)', 'transparent'), '%s: Back on "Find one ingredient" is a tinted pill' % tag)
+        pg.screenshot(path=os.path.join(SHOTS, 'v26-%s-%s-%d.png' % (loc, 'dark' if dark else 'light', width)))
+        ctx.close()
+
     # With the service worker: reader files stay on the phone after the first use -> works offline.
     ctx = b.new_context(viewport={'width': 390, 'height': 844}, locale='en-GB')
     pg = ctx.new_page(); pg.on('pageerror', lambda e: errors.append(str(e)))
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); pg.reload(); pg.evaluate('LC.dbReady')
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v8')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v9')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
