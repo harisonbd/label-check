@@ -6,9 +6,8 @@
   <meta name="robots" content="noindex, nofollow">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://world.openfoodfacts.org https://world.openbeautyfacts.org; img-src 'self' data: blob: https://images.openfoodfacts.org https://images.openbeautyfacts.org https://static.openfoodfacts.org https://static.openbeautyfacts.org; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Label Check</title>
-  <meta name="description" content="Scan food and cosmetics and check the ingredients against your own avoid list and sourced EU rules.">
-  <meta name="theme-color" content="#F3F5F2" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#0F1412" media="(prefers-color-scheme: dark)">
+  <meta name="description" content="Scan food and cosmetics and check every ingredient against official EU lists and your own avoid list.">
+  <meta name="theme-color" content="#F2F5FA" id="themeColor">
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
@@ -22,26 +21,28 @@
   <main>
     <!-- SCAN TAB -->
     <section class="tab" id="tab-scan" data-tab="scan">
-      <div class="viewfinder" id="viewfinder">
-        <video id="video" playsinline muted hidden></video>
-        <div class="scanline" id="scanline" hidden></div>
-        <div class="vf-idle" id="vfIdle">
-          <button class="btn btn-primary" id="startCam" type="button">Start camera</button>
-          <p class="vf-hint">Point it at the barcode. The scan starts by itself.</p>
+      <div id="scanner">
+        <div class="viewfinder" id="viewfinder">
+          <video id="video" playsinline muted hidden></video>
+          <div class="scanline" id="scanline" hidden></div>
+          <div class="vf-idle" id="vfIdle">
+            <button class="btn btn-primary" id="startCam" type="button" data-t="cam.start">Start camera</button>
+            <p class="vf-hint" data-t="cam.hint">Point it at the barcode. The scan starts by itself.</p>
+          </div>
+          <button class="btn btn-ghost vf-stop" id="stopCam" type="button" hidden data-t="cam.stop">Stop camera</button>
         </div>
-        <button class="btn btn-ghost vf-stop" id="stopCam" type="button" hidden>Stop camera</button>
+
+        <form class="manual" id="manualForm" autocomplete="off">
+          <label for="codeInput" data-t="manual.label">Or type the numbers under the barcode</label>
+          <div class="row">
+            <input id="codeInput" inputmode="numeric" pattern="[0-9 ]*" data-t-ph="manual.ph" placeholder="e.g. 9001234567890" aria-describedby="codeHelp">
+            <button class="btn btn-primary" type="submit" data-t="manual.go">Look up</button>
+          </div>
+          <p class="help" id="codeHelp" data-t="manual.help">8 to 14 digits.</p>
+        </form>
+
+        <button class="linkbtn" id="openLabel" type="button" data-t="openLabel">No barcode? Read a label instead</button>
       </div>
-
-      <form class="manual" id="manualForm" autocomplete="off">
-        <label for="codeInput">Or type the numbers under the barcode</label>
-        <div class="row">
-          <input id="codeInput" inputmode="numeric" pattern="[0-9 ]*" placeholder="e.g. 9001234567890" aria-describedby="codeHelp">
-          <button class="btn btn-primary" type="submit">Look up</button>
-        </div>
-        <p class="help" id="codeHelp">8 to 14 digits.</p>
-      </form>
-
-      <button class="linkbtn" id="openLabel" type="button">No barcode? Read a label instead</button>
 
       <div id="status" class="status" hidden></div>
 
@@ -50,92 +51,163 @@
 
       <!-- Read a label -->
       <section id="labelPanel" class="panel" hidden>
-        <h2>Read a label with Claude</h2>
-        <p class="lead" id="labelLead">Free: it uses your normal Claude app.</p>
+        <h2 data-t="label.title">Read a label with Claude</h2>
+        <p class="lead" id="labelLead"></p>
         <ol class="steps">
           <li>
-            <label class="btn btn-primary filebtn">Take photo of the ingredients
+            <label class="btn btn-primary filebtn"><span data-t="label.photo">Take photo of the ingredients</span>
               <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
             </label>
-            <span>The app copies a question and opens the share menu. Pick Claude.</span>
+            <span data-t="label.step1">The app copies a question and opens the share menu. Pick Claude.</span>
           </li>
-          <li>In Claude, paste the question and send it with the photo.</li>
-          <li>Copy Claude's answer and paste it below.</li>
+          <li data-t="label.step2">In Claude, paste the question and send it with the photo.</li>
+          <li data-t="label.step3">Copy Claude's answer and paste it below.</li>
         </ol>
-        <p class="minor">Share menu does not show Claude? <button class="linkbtn inline" id="copyPrompt" type="button">Copy the question</button>, then open Claude and add the photo there.</p>
+        <p class="minor"><span data-t="label.noClaude">Share menu does not show Claude?</span> <button class="linkbtn inline" id="copyPrompt" type="button" data-t="label.copyQ">Copy the question</button>, <span data-t="label.noClaude2">then open Claude and add the photo there.</span></p>
 
-        <label for="labelText">Ingredient list</label>
-        <textarea id="labelText" rows="6" placeholder="Paste the ingredient list here"></textarea>
+        <label for="labelText" data-t="label.list">Ingredient list</label>
+        <textarea id="labelText" rows="6" data-t-ph="label.listPh"></textarea>
         <div class="row">
-          <button class="btn btn-ghost" id="pasteBtn" type="button">Paste</button>
+          <button class="btn btn-ghost" id="pasteBtn" type="button" data-t="label.paste">Paste</button>
         </div>
 
         <fieldset class="kind">
-          <legend>Product type</legend>
-          <label><input type="radio" name="kind" value="food" checked> Food</label>
-          <label><input type="radio" name="kind" value="cosmetic"> Cosmetic</label>
+          <legend data-t="label.kind">Product type</legend>
+          <label><input type="radio" name="kind" value="food" checked> <span data-t="kind.food">Food</span></label>
+          <label><input type="radio" name="kind" value="cosmetic"> <span data-t="kind.cosmetic">Cosmetic</span></label>
         </fieldset>
 
-        <label for="labelName">Product name (optional)</label>
-        <input id="labelName" placeholder="e.g. Shower gel lime">
+        <label for="labelName" data-t="label.name">Product name (optional)</label>
+        <input id="labelName" data-t-ph="label.namePh">
 
-        <button class="btn btn-primary wide" id="checkLabel" type="button">Check ingredients</button>
+        <button class="btn btn-primary wide" id="checkLabel" type="button" data-t="label.check">Check ingredients</button>
       </section>
 
-      <p class="credit">Product data: <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a> and <a href="https://world.openbeautyfacts.org" target="_blank" rel="noopener">Open Beauty Facts</a> contributors, licensed under the <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL</a>. Results are a guide, not medical advice.</p>
+      <div class="credit" id="credit"></div>
     </section>
 
-    <!-- MY LIST TAB -->
+    <!-- FAVOURITES TAB -->
+    <section class="tab" id="tab-favs" data-tab="favs" hidden>
+      <h2 data-t="favs.title">Favourites</h2>
+      <ul class="plainlist prodlist" id="favList"></ul>
+      <p class="empty" id="favEmpty" data-t="favs.empty"></p>
+    </section>
+
+    <!-- MY LIST TAB (avoid list, allergens, settings, rules, backup) -->
     <section class="tab" id="tab-list" data-tab="list" hidden>
-      <h2>Your avoid list</h2>
-      <p class="lead">A product with anything from this list turns red. Put other names on one line with commas: <em>palm oil, palmöl, palmfett</em>.</p>
+      <h2 data-t="list.title">Your avoid list</h2>
+      <p class="lead" data-t="list.lead"></p>
       <form class="row" id="avoidForm" autocomplete="off">
-        <label class="sr-only" for="avoidInput">Ingredient to avoid</label>
-        <input id="avoidInput" placeholder="Ingredient and other names">
-        <button class="btn btn-primary" type="submit">Add</button>
+        <label class="sr-only" for="avoidInput" data-t="list.inputLabel">Ingredient to avoid</label>
+        <input id="avoidInput" data-t-ph="list.ph">
+        <button class="btn btn-primary" type="submit" data-t="list.add">Add</button>
       </form>
       <ul class="plainlist" id="avoidList"></ul>
-      <p class="empty" id="avoidEmpty">Your list is empty. The starter rules still check every product.</p>
-
-      <h3>Quick picks</h3>
+      <p class="empty" id="avoidEmpty" data-t="list.empty"></p>
+      <h3 data-t="list.picks">Quick picks</h3>
       <div class="picks" id="picks"></div>
 
-      <h3>Backup</h3>
-      <p class="minor">Your list, rule settings, history and saved products stay on this phone only. Export a backup file now and then.</p>
+      <h3 data-t="frag.title">Fragrance</h3>
+      <div class="setting">
+        <label for="fragSwitch" class="grow"><span data-t="frag.label">I avoid fragrance (perfume)</span>
+          <span class="sub" data-t="frag.help"></span></label>
+        <span class="switch"><input type="checkbox" role="switch" id="fragSwitch"></span>
+      </div>
+
+      <h3 data-t="alg.title">Allergens</h3>
+      <p class="minor" data-t="alg.lead"></p>
+      <details class="fold" id="foodAlgBox" open>
+        <summary><span data-t="alg.food">Food allergens (EU 14)</span> <span class="count" id="foodAlgCount"></span></summary>
+        <div class="ticks" id="foodAlgList"></div>
+      </details>
+      <details class="fold" id="cosAlgBox">
+        <summary><span data-t="alg.cos">Fragrance allergens in cosmetics</span> <span class="count" id="cosAlgCount"></span></summary>
+        <label class="sr-only" for="cosAlgSearch" data-t="alg.search"></label>
+        <input id="cosAlgSearch" type="search" data-t-ph="alg.search" autocomplete="off">
+        <div class="ticks" id="cosAlgList"></div>
+        <button class="btn btn-ghost small" id="cosAlgClear" type="button" data-t="alg.clear">Untick all</button>
+      </details>
+
+      <h3 data-t="set.title">Settings</h3>
+      <div class="setting">
+        <label for="langSelect" class="grow" data-t="set.lang">Language</label>
+        <select id="langSelect">
+          <option value="auto" data-t="set.langAuto">Phone language</option>
+          <option value="en">English</option>
+          <option value="de">Deutsch</option>
+          <option value="bg">Български</option>
+        </select>
+      </div>
+      <div class="setting">
+        <label for="themeSelect" class="grow" data-t="set.theme">Colours</label>
+        <select id="themeSelect">
+          <option value="auto" data-t="set.themeAuto">Like the phone</option>
+          <option value="light" data-t="set.themeLight">Light</option>
+          <option value="dark" data-t="set.themeDark">Dark</option>
+        </select>
+      </div>
+      <div class="setting">
+        <label for="bigSwitch" class="grow" data-t="set.big">Big text</label>
+        <span class="switch"><input type="checkbox" role="switch" id="bigSwitch"></span>
+      </div>
+
+      <h3 data-t="rules.title">What the app checks</h3>
+      <p class="minor" data-t="rules.lead"></p>
+      <div id="rulesBox"></div>
+
+      <h3 data-t="backup.title">Backup</h3>
+      <p class="minor" data-t="backup.lead"></p>
       <div class="row">
-        <button class="btn btn-ghost" id="exportBtn" type="button">Export backup</button>
-        <label class="btn btn-ghost filebtn">Import backup
+        <button class="btn btn-ghost" id="exportBtn" type="button" data-t="backup.export">Export backup</button>
+        <label class="btn btn-ghost filebtn"><span data-t="backup.import">Import backup</span>
           <input type="file" id="importInput" accept="application/json,.json" hidden>
         </label>
       </div>
     </section>
 
-    <!-- RULES TAB -->
-    <section class="tab" id="tab-rules" data-tab="rules" hidden>
-      <h2>Starter rules</h2>
-      <p class="lead">Each rule has a source. Turn off any rule you do not want. Red rules make a product red; orange rules make it orange.</p>
-      <div id="rulesList"></div>
-      <p class="minor" id="rulesMeta"></p>
-    </section>
-
     <!-- HISTORY TAB -->
     <section class="tab" id="tab-history" data-tab="history" hidden>
-      <h2>History</h2>
-      <ul class="plainlist history" id="historyList"></ul>
-      <p class="empty" id="historyEmpty">No scans yet. Scan a product and it shows up here.</p>
-      <button class="btn btn-ghost" id="clearHistory" type="button" hidden>Clear history</button>
+      <h2 data-t="hist.title">History</h2>
+      <ul class="plainlist prodlist" id="historyList"></ul>
+      <p class="empty" id="historyEmpty" data-t="hist.empty"></p>
+      <button class="btn btn-ghost" id="clearHistory" type="button" hidden data-t="hist.clear">Clear history</button>
     </section>
   </main>
 
+  <!-- Ingredient detail (opens over the result) -->
+  <section id="detail" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+    <div class="sheet-bar">
+      <button class="iconbtn" id="detailBack" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+        <span data-t="d.back">Back</span>
+      </button>
+    </div>
+    <div class="sheet-body" id="detailBody"></div>
+  </section>
+
   <nav class="tabbar" aria-label="Sections">
-    <button type="button" data-go="scan" aria-current="page">Scan</button>
-    <button type="button" data-go="list">My list</button>
-    <button type="button" data-go="rules">Rules</button>
-    <button type="button" data-go="history">History</button>
+    <button type="button" data-go="scan" aria-current="page">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M7 12h10"/></svg>
+      <span data-t="tab.scan">Scan</span>
+    </button>
+    <button type="button" data-go="favs">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/></svg>
+      <span data-t="tab.favs">Favourites</span>
+    </button>
+    <button type="button" data-go="list">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg>
+      <span data-t="tab.list">My list</span>
+    </button>
+    <button type="button" data-go="history">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
+      <span data-t="tab.history">History</span>
+    </button>
   </nav>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
+  <script src="i18n.js"></script>
+  <script src="db.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

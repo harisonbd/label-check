@@ -1,5 +1,6 @@
-/* Label Check — app logic. Plain JavaScript, no libraries.
-   Parts: storage, matching, data lookup, camera, label reading, screens. */
+/* Label Check v2 – app logic. Plain JavaScript, no libraries.
+   Uses LCDB (db.js) for the ingredient database and LC_TEXT (i18n.js) for the screen texts.
+   Parts: settings, storage, texts, matching, analysis, product lookup, screens, detail, lists, camera, start. */
 'use strict';
 
 (() => {
@@ -7,9 +8,9 @@
   const OFF = 'https://world.openfoodfacts.org';
   const OBF = 'https://world.openbeautyfacts.org';
   const FIELDS = [
-    'code', 'product_name', 'product_name_de', 'product_name_en', 'generic_name', 'brands',
+    'code', 'product_name', 'product_name_de', 'product_name_en', 'product_name_bg', 'generic_name', 'brands',
     'image_front_small_url', 'image_small_url',
-    'ingredients_text', 'ingredients_text_de', 'ingredients_text_en',
+    'ingredients_text', 'ingredients_text_de', 'ingredients_text_en', 'ingredients_text_bg',
     'ingredients_tags', 'additives_tags', 'allergens_tags', 'ingredients_analysis_tags',
     'nutriscore_grade', 'nova_group', 'last_modified_t'
   ].join(',');
@@ -22,12 +23,19 @@
     'If the label is not in English, add one more line that starts with "EN:" and gives the English translation.';
 
   const QUICK_PICKS = [
-    'palm oil, palmöl, palmfett, huile de palme',
-    'parfum, fragrance, duftstoffe',
-    'aspartame, aspartam, e951',
-    'glucose-fructose syrup, glukose-fruktose-sirup, isoglucose',
-    'alcohol denat, alkohol denat'
+    'palm oil, palm fat, palm kernel*, palmöl, palmfett, palmkern*, палмово масло, палмова мазнина, палмов*',
+    'glucose-fructose syrup, glukose-fruktose-sirup, isoglucose, глюкозо-фруктозен сироп',
+    'alcohol denat, alkohol denat',
+    'silicones, dimethicone, *methicone, *siloxane',
+    'sodium lauryl sulfate, sodium laureth sulfate, sls, sles'
   ];
+
+  // One order and one colour everywhere: tiles, strip and groups.
+  const GROUPS = ['red', 'orange', 'info', 'green'];
+  const LEVEL_GROUP = { b: 'red', c: 'orange', u: 'orange', r: 'info', n: 'green' };
+  const SEV = { b: 5, c: 4, u: 3, r: 2, n: 1 };
+  const VERDICT_DOT = { avoid: 'g-red', check: 'g-orange', ok: 'g-green', unknown: 'g-grey' };
+  const LOCALE = { en: 'en-GB', de: 'de-AT', bg: 'bg-BG' };
 
   // ---------- Storage (stays on this phone) ----------
   const store = {
@@ -39,140 +47,314 @@
     },
     set(key, value) {
       try { localStorage.setItem('lc.' + key, JSON.stringify(value)); return true; }
-      catch (e) { toast('Could not save on this phone. Storage may be full.'); return false; }
+      catch (e) { toast(t('toast.saveFail')); return false; }
     }
   };
 
-  let RULES = [];
-  let GROUPS = {};
-  let RULES_VERSION = '';
-
   const state = {
-    avoid: store.get('avoid', []),       // [{id, text}]
-    rulesOff: store.get('rulesOff', []), // [ruleId]
-    history: store.get('history', []),   // [{code, name, brand, kind, verdict, time}]
-    products: store.get('products', {}), // {code: product}
-    lastCode: null
+    avoid: store.get('avoid', []),           // [{id, text}]
+    history: store.get('history', []),       // [{code, name, brand, kind, verdict, time}]
+    products: store.get('products', {}),     // {code: product}
+    favs: store.get('favs', []),             // [code]
+    allergens: Object.assign({ food: [], cos: [] }, store.get('allergens', {})), // ticked ids / annex refs
+    avoidFragrance: store.get('avoidFragrance', false),
+    lang: store.get('lang', 'auto'),
+    theme: store.get('theme', 'auto'),
+    bigText: store.get('bigText', false),
+    current: null,   // { p, a } shown on the scan tab
+    filter: null,    // group shown alone, or null
+    open: null       // which groups are open
   };
 
-  // ---------- Text matching ----------
-  // Lower case, remove accents, join E-numbers ("E 250" -> "e250"), keep only letters and digits.
-  function norm(s, keepStar) {
-    let t = String(s || '').toLowerCase().replace(/ß/g, 'ss')
-      .normalize('NFD').replace(/[̀-ͯ]/g, '')
-      .replace(/\be[\s\-‐-―]*(\d{3,4}[a-z]?)\b/g, 'e$1');
-    t = keepStar ? t.replace(/[^a-z0-9*]+/g, ' ') : t.replace(/[^a-z0-9]+/g, ' ');
-    return t.trim();
+  // ---------- Texts ----------
+  const TEXT = window.LC_TEXT || { en: {} };
+  let LANG = 'en';
+
+  function pickLang() {
+    if (state.lang !== 'auto' && TEXT[state.lang]) return state.lang;
+    for (const l of navigator.languages || [navigator.language || 'en']) {
+      const c = String(l).slice(0, 2).toLowerCase();
+      if (TEXT[c]) return c;
+    }
+    return 'en';
   }
 
+  function t(key, vars) {
+    let s = TEXT[LANG] && TEXT[LANG][key];
+    if (s === undefined) s = TEXT.en[key];
+    if (s === undefined) s = key;
+    if (vars) s = s.replace(/\{(\w+)\}/g, (m, k) => (vars[k] !== undefined ? vars[k] : m));
+    return s;
+  }
+  const tn = (key, n, vars) => t(key + (n === 1 ? '.one' : '.other'), Object.assign({ n }, vars));
+  const tr = obj => (obj && (obj[LANG] || obj.en)) || '';
+  const levelName = lv => tr(META() && META().levels[lv]);
+  const cap = s => (s ? s.charAt(0).toLocaleUpperCase() + s.slice(1) : s);
+
+  // A text with {placeholders} filled by nodes (e.g. links).
+  function tNodes(key, nodes) {
+    return t(key).split(/(\{\w+\})/).map(part => {
+      const m = part.match(/^\{(\w+)\}$/);
+      return m && nodes[m[1]] ? nodes[m[1]] : part;
+    });
+  }
+
+  function applyTexts() {
+    document.documentElement.lang = LANG;
+    document.querySelectorAll('[data-t]').forEach(n => { n.textContent = t(n.dataset.t); });
+    document.querySelectorAll('[data-t-ph]').forEach(n => { n.placeholder = t(n.dataset.tPh); });
+    document.querySelector('.tabbar').setAttribute('aria-label', [t('tab.scan'), t('tab.favs'), t('tab.list'), t('tab.history')].join(', '));
+    renderCredit();
+  }
+
+  // ---------- Text matching (your list) ----------
+  // Same rule as the database: lower case, no accents, Cyrillic kept. "E 250" -> "e250".
+  const joinE = s => String(s || '').replace(/\b[eE][\s\-‐-―]*(\d{3,4}[a-zA-Z]?)\b/g, 'e$1');
+  const nrm = s => (window.LCDB ? LCDB.norm(joinE(s)) : String(s || '').toLowerCase());
+
   const reCache = new Map();
-  // Whole-word match. A * at the end of a term allows any word ending.
-  function termRegex(term) {
+  // Whole-word match. A * allows any letters there ("palm kernel*", "*siloxane").
+  function termRe(term) {
     if (reCache.has(term)) return reCache.get(term);
-    const t = norm(term, true);
+    const tt = nrm(String(term).replace(/\*/g, ' zzstarzz ')).replace(/ ?zzstarzz ?/g, '*');
     let re = null;
-    if (t.replace(/\*/g, '').trim()) {
-      const body = t.split('*')
-        .map(p => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
-        .join('[a-z0-9]*');
+    if (tt.replace(/\*/g, '').trim()) {
+      const body = tt.split('*').map(p => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[a-z0-9\\u0430-\\u044f]*');
       re = new RegExp('(?:^| )' + body + '(?= |$)');
     }
     reCache.set(term, re);
     return re;
   }
 
-  function toTag(text) {
-    const t = norm(text);
-    return t ? 'en:' + t.replace(/ /g, '-') : '';
-  }
+  const termsOf = item => item.text.split(',').map(s => s.trim()).filter(Boolean);
 
-  function stripLabelWord(text) {
-    return String(text || '').replace(/^\s*(zutaten|ingredients?|ingr[eé]dients?|inci|ingredienti|ingredientes|composition)\s*:\s*/i, '');
-  }
-
-  // Split at commas and semicolons that are not inside brackets.
-  function splitIngredients(text) {
-    const out = [];
-    let depth = 0, cur = '';
-    for (const ch of stripLabelWord(text)) {
-      if ('([{'.includes(ch)) depth++;
-      else if (')]}'.includes(ch)) depth = Math.max(0, depth - 1);
-      if ((ch === ',' || ch === ';') && depth === 0) {
-        if (cur.trim()) out.push(cur.trim());
-        cur = '';
-      } else {
-        cur += ch;
-      }
-    }
-    if (cur.trim()) out.push(cur.trim());
-    return out;
-  }
-
-  function analyze(product) {
-    const texts = (product.texts || []).filter(Boolean);
-    const normTexts = texts.map(t => norm(t));
-    const mainSegs = splitIngredients(product.ingredientsText).map(s => norm(s));
-    const tagSet = new Set([...(product.tags || []), ...(product.allergens || [])].map(t => String(t).toLowerCase()));
-
-    const shown = term => {
-      const t = term.replace(/\*+$/, '');
-      return /^e\d{3,4}[a-z]?$/i.test(t) ? t.toUpperCase() : t;
-    };
-
-    function check(terms, tags) {
-      // First the main ingredient list (gives the position), then other texts (e.g. the English line).
-      for (const term of terms) {
-        const re = termRegex(term);
-        if (!re) continue;
-        const idx = mainSegs.findIndex(s => re.test(s));
-        if (idx >= 0) return { found: shown(term), position: idx + 1 };
-      }
-      for (const term of terms) {
-        const re = termRegex(term);
-        if (re && normTexts.some(t => re.test(t))) return { found: shown(term), position: null };
-      }
-      for (const tag of tags || []) {
-        if (tag && tagSet.has(tag)) {
-          return { found: tag.replace(/^[a-z]{2}:/, '').replace(/-/g, ' '), position: null };
-        }
-      }
-      return null;
-    }
-
-    const findings = [];
+  // First item of your list that matches one of the texts -> { item, term }.
+  function matchAvoid(texts) {
+    const hay = texts.filter(Boolean).map(nrm);
     for (const item of state.avoid) {
-      const terms = item.text.split(',').map(s => s.trim()).filter(Boolean);
-      const hit = check(terms, terms.map(toTag));
-      if (hit) {
-        findings.push(Object.assign({
-          type: 'mine', level: 'high', name: terms[0], reason: 'On your avoid list.'
-        }, hit));
+      for (const term of termsOf(item)) {
+        const re = termRe(term);
+        if (re && hay.some(h => re.test(h))) return { item, term, name: termsOf(item)[0] };
       }
     }
-    for (const rule of RULES) {
-      if (state.rulesOff.includes(rule.id)) continue;
-      if (!rule.applies.includes(product.kind)) continue;
-      const hit = check(rule.terms, rule.tags);
-      if (hit) {
-        findings.push(Object.assign({
-          type: 'rule', level: rule.level, name: rule.name, reason: rule.reason, source: rule.source
-        }, hit));
-      }
-    }
-
-    const hasIngredients = normTexts.some(t => t.length > 0) || (product.tags || []).length > 0;
-    let verdict = 'ok';
-    if (findings.some(f => f.level === 'high')) verdict = 'avoid';
-    else if (findings.some(f => f.level === 'medium')) verdict = 'check';
-    else if (!hasIngredients) verdict = 'unknown';
-
-    const order = { high: 0, medium: 1 };
-    const mineFirst = f => (f.type === 'mine' ? 0 : 1);
-    findings.sort((a, b) => (order[a.level] - order[b.level]) || (mineFirst(a) - mineFirst(b)));
-    return { verdict, findings, count: mainSegs.length };
+    return null;
   }
 
-  // ---------- Data lookup ----------
+  // ---------- Names ----------
+  const ACRONYMS = new Set(('CI PEG PPG BHT BHA EDTA DMDM MEA DEA TEA MIPA PVP PCA HCL HC DNA UV II III IV VP VA TDI HDI IPDI ' +
+    'MDI SD PG TBHQ PABA MI MCI AHA PHA EO PO PHB HEDP GLDA MGDA DTPA PET PTFE PVA PVC PE PP PU SLS SLES ALS TIPA AMP DMAE').split(' '));
+  // "SODIUM BENZOATE" -> "Sodium Benzoate", "CI 77891" stays, "PEG-40" stays.
+  function niceName(s) {
+    return String(s || '').toLowerCase().replace(/[a-z]+/g, w => {
+      const u = w.toUpperCase();
+      return ACRONYMS.has(u) || w.length === 1 ? u : w[0].toUpperCase() + w.slice(1);
+    });
+  }
+  const cleanSeg = s => cap(String(s || '').replace(/\s+/g, ' ').replace(/[.\s]+$/, '').trim());
+
+  // ---------- Database ----------
+  let DBINFO = null;   // null = loading, false = failed, object = ready
+  const META = () => (DBINFO ? LCDB.meta() : null);
+  const dbReady = (window.LCDB ? LCDB.load('data/') : Promise.reject(new Error('db.js missing')))
+    .then(info => { DBINFO = info; return info; })
+    .catch(() => { DBINFO = false; return null; });
+
+  // ---------- Analysis ----------
+  // Every ingredient becomes a row with a level (b c u r n) and a group (red orange info green).
+  function analyze(p) {
+    const text = p.ingredientsText || '';
+    let rows = p.kind === 'cosmetic' ? analyzeCosmetic(text) : analyzeFood(p, text);
+
+    // Your list: also look in the other texts (e.g. the "EN:" line from Claude).
+    const extraTexts = (p.texts || []).filter(x => x && x !== text);
+    if (extraTexts.length) {
+      for (const item of state.avoid) {
+        if (rows.some(r => r.mine && r.mine.item.id === item.id)) continue;
+        const hit = matchAvoidItem(item, extraTexts);
+        if (hit) rows.push(personalRow(hit));
+      }
+    }
+
+    rows.sort((x, y) => (x.pos || 999) - (y.pos || 999));
+    rows.forEach((r, i) => { r.i = i; });
+
+    const counts = { red: 0, orange: 0, info: 0, green: 0 };
+    for (const r of rows) counts[r.group]++;
+    const verdict = counts.red ? 'avoid' : counts.orange ? 'check' : rows.length ? 'ok' : 'unknown';
+    return {
+      verdict, rows, counts,
+      summary: summarize(verdict, rows, counts),
+      total: rows.filter(r => r.pos).length,
+      fragrance: rows.filter(r => r.fragrance || r.allergen).length
+    };
+  }
+
+  function matchAvoidItem(item, texts) {
+    const hay = texts.map(nrm);
+    for (const term of termsOf(item)) {
+      const re = termRe(term);
+      if (re && hay.some(h => re.test(h))) return { item, term, name: termsOf(item)[0] };
+    }
+    return null;
+  }
+
+  function personalRow(mine) {
+    return {
+      pos: null, kind: 'extra', label: cap(mine.name), text: '', level: 'n', group: 'red', why: 'mine', mine,
+      sub: { lvl: { text: t('tag.mine'), g: 'red' }, parts: [t('tag.fromData')] }
+    };
+  }
+
+  function analyzeCosmetic(text) {
+    return LCDB.checkCosmetic(text, LANG).map(r => {
+      const mine = matchAvoid([r.text, r.found ? r.name : '']);
+      const tickedAllergen = !!(r.allergen && state.allergens.cos.includes(r.allergenRef));
+      const fragAvoid = !!(state.avoidFragrance && (r.fragrance || r.allergen));
+      const why = r.level === 'b' ? 'b' : mine ? 'mine' : tickedAllergen ? 'allergen' : fragAvoid ? 'fragrance' : null;
+      const row = {
+        pos: r.pos, kind: 'cosmetic', text: r.text,
+        label: r.found ? niceName(r.name) : cleanSeg(r.text),
+        level: r.level, group: why ? 'red' : LEVEL_GROUP[r.level] || 'green', why, mine, tickedAllergen, fragAvoid,
+        fragrance: r.fragrance, allergen: r.allergen, nano: r.nano, mayContain: r.mayContain, found: r.found, src: r
+      };
+      row.sub = cosmeticSub(row);
+      return row;
+    });
+  }
+
+  function cosmeticTags(row) {
+    const tags = [];
+    if (row.allergen) tags.push(t('tag.allergen'));
+    else if (row.fragrance) tags.push(t('tag.fragrance'));
+    if (row.nano) tags.push(t('tag.nano'));
+    if (row.mayContain) tags.push(t('tag.may'));
+    if (!row.found) tags.push(t('tag.notFound'));
+    return tags;
+  }
+
+  function cosmeticSub(row) {
+    const r = row.src, tags = cosmeticTags(row);
+    const firstReason = r.reasons && r.reasons[0] ? r.reasons[0].text : '';
+    if (row.why === 'b') return { lvl: { text: levelName('b'), g: 'red' }, parts: tags.length ? tags : (r.functions || []).slice(0, 1) };
+    if (row.why === 'mine') return { lvl: { text: t('tag.mine'), g: 'red' }, parts: tags };
+    if (row.why === 'allergen') return { lvl: { text: t('tag.allergenYours'), g: 'red' }, parts: tags };
+    if (row.why === 'fragrance') return { lvl: { text: t('tag.fragranceAvoid'), g: 'red' }, parts: tags };
+    if (row.group === 'orange') return { lvl: { text: levelName(row.level), g: 'orange' }, parts: [firstReason] };
+    if (row.group === 'info') return { lvl: { text: levelName(row.level), g: 'info' }, parts: tags.length ? tags : [firstReason] };
+    return { lvl: null, parts: tags.concat((r.functions || []).slice(0, 1)) };
+  }
+
+  const ALLERGEN_TAG = /^en:(gluten|crustaceans|eggs|fish|peanuts|soybeans|milk|nuts|celery|mustard|sesame-seeds|sulphur-dioxide-and-sulphites|lupin|molluscs)$/;
+
+  function analyzeFood(p, text) {
+    const segs = LCDB.splitIngredients(text);
+    const segN = segs.map(nrm);
+    const res = LCDB.checkFood(text, LANG);
+    const blank = (pos, txt, label) => ({ pos, kind: 'food', text: txt, label, additives: [], rules: [], allergens: [] });
+    const rows = segs.map((s, i) => blank(i + 1, s, cleanSeg(s)));
+    const extra = [];
+    const at = pos => (pos && rows[pos - 1]) || null;
+
+    for (const a of res.additives) {
+      const row = at(a.pos);
+      if (row) row.additives.push(a);
+      else { const x = blank(null, a.e + ' ' + a.name, cap(a.name) + ' (' + a.e + ')'); x.additives.push(a); extra.push(x); }
+    }
+    for (const r of res.rules) {
+      const re = termRe(r.matched);
+      const i = re ? segN.findIndex(s => re.test(s)) : -1;
+      if (i >= 0) rows[i].rules.push(r);
+      else { const x = blank(null, r.matched, cap(r.matched.replace(/\*/g, ''))); x.rules.push(r); extra.push(x); }
+    }
+    for (const al of res.allergens) {
+      const row = at(al.pos);
+      if (row) row.allergens.push(al);
+    }
+
+    // Product data from Open Food Facts: additives and allergens the text did not show.
+    const seenE = new Set(res.additives.map(a => a.e.toLowerCase()));
+    for (const tag of p.tags || []) {
+      const m = String(tag).match(/^en:(e\d{3,4}[a-z]?)$/);
+      if (!m || seenE.has(m[1])) continue;
+      const a = LCDB.checkFood(m[1].toUpperCase(), LANG).additives[0];
+      if (!a || seenE.has(a.e.toLowerCase())) continue;
+      seenE.add(a.e.toLowerCase());
+      const x = blank(null, a.e, cap(a.name) + ' (' + a.e + ')');
+      x.additives.push(a); x.fromData = true;
+      extra.push(x);
+    }
+    const foundAl = new Set(res.allergens.map(a => a.id));
+    const names = Object.fromEntries(LCDB.foodAllergens(LANG).map(a => [a.id, a.name]));
+    for (const tag of p.allergens || []) {
+      const m = String(tag).match(ALLERGEN_TAG);
+      if (!m || foundAl.has(m[1]) || !state.allergens.food.includes(m[1])) continue;
+      foundAl.add(m[1]);
+      const x = blank(null, names[m[1]] || m[1], cap(names[m[1]] || m[1]));
+      x.allergens.push({ id: m[1], name: names[m[1]] || m[1] }); x.fromData = true;
+      extra.push(x);
+    }
+
+    return rows.concat(extra).map(row => {
+      let level = 'n';
+      for (const x of [...row.additives, ...row.rules]) if (SEV[x.level] > SEV[level]) level = x.level;
+      const mine = matchAvoid([row.text, ...row.additives.map(a => a.e + ' ' + a.name)]);
+      const ticked = row.allergens.filter(a => state.allergens.food.includes(a.id));
+      const why = level === 'b' ? 'b' : mine ? 'mine' : ticked.length ? 'allergen' : null;
+      row.level = level;
+      row.mine = mine;
+      row.tickedAllergens = ticked;
+      row.why = why;
+      row.group = why ? 'red' : level === 'c' || level === 'u' ? 'orange' : level === 'r' || row.allergens.length ? 'info' : 'green';
+      row.sub = foodSub(row);
+      return row;
+    });
+  }
+
+  function foodSub(row) {
+    const parts = [];
+    for (const a of row.additives) parts.push(a.e + ' ' + a.name);
+    const al = row.allergens.map(a => t('tag.foodAllergen', { name: cap(a.name) }));
+    if (row.fromData) parts.push(t('tag.fromData'));
+    if (row.why === 'b') return { lvl: { text: levelName('b'), g: 'red' }, parts };
+    if (row.why === 'mine') return { lvl: { text: t('tag.mine'), g: 'red' }, parts: parts.concat(al) };
+    if (row.why === 'allergen') return { lvl: { text: t('tag.allergenYours'), g: 'red' }, parts: row.tickedAllergens.map(a => cap(a.name)).concat(parts) };
+    if (row.group === 'orange' || (row.group === 'info' && row.level === 'r')) {
+      const reason = !row.additives.length && row.rules[0] && row.rules[0].reasons[0] ? [row.rules[0].reasons[0].text] : [];
+      return { lvl: { text: levelName(row.level), g: row.group }, parts: parts.concat(al, reason) };
+    }
+    if (row.group === 'info') return { lvl: null, parts: al.concat(parts) };
+    const classes = row.additives.flatMap(a => a.classes || []).slice(0, 1);
+    return { lvl: null, parts: parts.concat(classes) };
+  }
+
+  // The name used in the one-line summary.
+  function shortName(row) {
+    if (row.why === 'mine') return cap(row.mine.name);
+    if (row.why === 'allergen' && row.kind === 'food') return cap(row.tickedAllergens[0].name);
+    if (row.kind === 'food') {
+      const a = row.additives.slice().sort((x, y) => SEV[y.level] - SEV[x.level])[0];
+      if (a && a.level === row.level) return cap(a.name) + ' (' + a.e + ')';
+    }
+    return row.label;
+  }
+
+  function summarize(verdict, rows, counts) {
+    if (verdict === 'unknown') return t('sum.unknown');
+    if (verdict === 'avoid') {
+      if (counts.red > 1) return t('sum.redN', { n: counts.red });
+      const r = rows.find(x => x.group === 'red');
+      const key = { b: 'sum.red1.b', mine: 'sum.red1.mine', allergen: 'sum.red1.allergen', fragrance: 'sum.red1.fragrance' }[r.why];
+      return t(key, { name: shortName(r) });
+    }
+    if (verdict === 'check') {
+      if (counts.orange > 1) return t('sum.orN', { n: counts.orange });
+      const r = rows.find(x => x.group === 'orange');
+      return t(r.level === 'u' ? 'sum.or1.u' : 'sum.or1.c', { name: shortName(r) });
+    }
+    return counts.info ? t('sum.okInfo', { n: counts.info }) : t('sum.ok');
+  }
+
+  // ---------- Product lookup ----------
   async function fetchJson(url, ms) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), ms || 9000);
@@ -187,15 +369,16 @@
   }
 
   function fromApi(p, kind, base, code) {
+    const text = p.ingredients_text || p.ingredients_text_de || p.ingredients_text_bg || p.ingredients_text_en || '';
     return {
       code,
       kind,
       source: kind === 'food' ? 'off' : 'obf',
-      name: p.product_name || p.product_name_de || p.product_name_en || p.generic_name || '',
+      name: p.product_name || p.product_name_de || p.product_name_bg || p.product_name_en || p.generic_name || '',
       brand: String(p.brands || '').split(',')[0].trim(),
       image: p.image_front_small_url || p.image_small_url || '',
-      ingredientsText: p.ingredients_text || p.ingredients_text_de || p.ingredients_text_en || '',
-      texts: [p.ingredients_text, p.ingredients_text_de, p.ingredients_text_en].filter(Boolean),
+      ingredientsText: text,
+      texts: [text, p.ingredients_text_de, p.ingredients_text_bg, p.ingredients_text_en].filter((x, i, all) => x && all.indexOf(x) === i),
       tags: [].concat(p.ingredients_tags || [], p.additives_tags || []),
       allergens: p.allergens_tags || [],
       analysis: p.ingredients_analysis_tags || [],
@@ -229,15 +412,17 @@
 
   function saveProduct(p) {
     state.products[p.code] = p;
-    const codes = Object.keys(state.products);
-    if (codes.length > MAX_PRODUCTS) {
+    verdictCache.delete(p.code);
+    const codes = Object.keys(state.products).filter(c => !state.favs.includes(c));
+    const extra = Object.keys(state.products).length - MAX_PRODUCTS;
+    if (extra > 0) {
       codes
         .sort((a, b) => {
           const pa = state.products[a], pb = state.products[b];
           const la = pa.source === 'label' ? 1 : 0, lb = pb.source === 'label' ? 1 : 0;
           return (la - lb) || (pa.fetchedAt - pb.fetchedAt);
         })
-        .slice(0, codes.length - MAX_PRODUCTS)
+        .slice(0, extra)
         .forEach(c => delete state.products[c]);
     }
     store.set('products', state.products);
@@ -254,12 +439,11 @@
   async function lookup(raw, forceOnline) {
     const code = String(raw || '').replace(/\D/g, '');
     if (code.length < 8 || code.length > 14) {
-      toast('A barcode has 8 to 14 digits.');
+      toast(t('err.digits'));
       return;
     }
-    state.lastCode = code;
     hideAll();
-    showStatus('Looking up ' + code + ' …');
+    showStatus(t('status.looking', { code }));
 
     const cached = state.products[code];
     const fresh = cached && !forceOnline &&
@@ -269,15 +453,15 @@
     try {
       const p = await fetchProduct(code);
       if (p) { saveProduct(p); showProduct(p); }
-      else if (cached) showProduct(cached, 'Not found online. Showing the saved result.');
+      else if (cached) showProduct(cached, t('status.notOnline'));
       else showNotFound(code);
     } catch (e) {
-      if (cached) showProduct(cached, 'No connection. Showing the saved result.');
+      if (cached) showProduct(cached, t('status.noConn'));
       else showOffline(code);
     }
   }
 
-  // ---------- Screens ----------
+  // ---------- Small helpers for the screens ----------
   const $ = id => document.getElementById(id);
   const el = (tag, attrs, ...kids) => {
     const n = document.createElement(tag);
@@ -294,35 +478,43 @@
     }
     return n;
   };
-
-  const VERDICT = {
-    avoid: { word: 'Avoid', cls: 'v-avoid' },
-    check: { word: 'Check', cls: 'v-check' },
-    ok: { word: 'No flags', cls: 'v-ok' },
-    unknown: { word: 'No ingredients', cls: 'v-unknown' }
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  function icon(d, cls) {
+    const s = document.createElementNS(SVG_NS, 'svg');
+    s.setAttribute('viewBox', '0 0 24 24');
+    s.setAttribute('aria-hidden', 'true');
+    if (cls) s.setAttribute('class', cls);
+    const p = document.createElementNS(SVG_NS, 'path');
+    p.setAttribute('d', d);
+    s.append(p);
+    return s;
+  }
+  const ICON = {
+    chev: 'M9 6l6 6-6 6',
+    heart: 'M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z',
+    share: 'M12 15V4M8 8l4-4 4 4M5 13v5.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V13',
+    close: 'M6 6l12 12M18 6L6 18',
+    tag: 'M3.5 12.5v-8a1 1 0 0 1 1-1h8l8 8-9 9zM8 8h.01'
   };
-
-  const ANALYSIS = {
-    'en:palm-oil': 'Contains palm oil',
-    'en:may-contain-palm-oil': 'May contain palm oil',
-    'en:palm-oil-free': 'Palm oil free',
-    'en:vegan': 'Vegan',
-    'en:non-vegan': 'Not vegan',
-    'en:vegetarian': 'Vegetarian',
-    'en:non-vegetarian': 'Not vegetarian'
-  };
-
-  const NOVA = { 1: 'unprocessed', 2: 'culinary ingredient', 3: 'processed', 4: 'ultra-processed' };
+  const link = (href, text) => el('a', { href, target: '_blank', rel: 'noopener', text });
 
   function fmtDate(ms) {
-    try { return new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }); }
+    try { return new Date(ms).toLocaleDateString(LOCALE[LANG], { day: 'numeric', month: 'short', year: 'numeric' }); }
     catch (e) { return ''; }
   }
+  const smooth = () => (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
 
   function hideAll() {
     $('result').hidden = true;
     $('labelPanel').hidden = true;
     $('status').hidden = true;
+  }
+
+  function showScanner() {
+    hideAll();
+    $('scanner').hidden = false;
+    state.current = null;
+    window.scrollTo({ top: 0 });
   }
 
   function showStatus(text, buttons) {
@@ -332,97 +524,482 @@
     s.hidden = false;
   }
 
-  function sub(verdict, findings) {
-    if (verdict === 'ok') return 'Nothing from your list or the starter rules.';
-    if (verdict === 'unknown') return 'The database has no ingredient list. Read the label to check it.';
-    const n = findings.length;
-    return n + (n === 1 ? ' finding. See why below.' : ' findings. See why below.');
+  // ---------- History (Back button) ----------
+  // States: { tab } · { tab: 'scan', view: 'result', code } · same + { detail: i }.
+  function pushState(st, hash) {
+    try {
+      const cur = history.state || {};
+      if (st.view === 'result' && !st.detail && cur.view === 'result' && !cur.detail) history.replaceState(st, '');
+      else history.pushState(st, '', hash || undefined);
+    } catch (e) { /* ignore */ }
   }
 
-  function showProduct(p, note) {
+  // ---------- Result screen ----------
+  async function showProduct(p, note) {
+    if (DBINFO === null) {
+      showStatus(t('status.dbLoading'));
+      await dbReady;
+    }
+    if (!DBINFO) {
+      hideAll();
+      showStatus(t('status.dbFail'));
+      return;
+    }
+    pushState({ tab: 'scan', view: 'result', code: p.code });
+    state.filter = null;
+    state.open = null;
+    const a = renderResult(p, note);
+    addHistory(p, a.verdict);
+    $('result').scrollIntoView({ behavior: smooth(), block: 'start' });
+  }
+
+  function renderResult(p, note) {
     const a = analyze(p);
-    const v = VERDICT[a.verdict];
+    state.current = { p, a };
+    if (!state.open) state.open = { red: true, orange: true, info: true, green: false };
     hideAll();
+    $('scanner').hidden = true;
     if (note) showStatus(note);
 
     const r = $('result');
-    const chips = [];
-    chips.push(p.kind === 'food' ? 'Food' : 'Cosmetic');
-    if (p.nutriscore) chips.push('Nutri-Score ' + p.nutriscore.toUpperCase());
-    if (p.nova && NOVA[p.nova]) chips.push('NOVA ' + p.nova + ' (' + NOVA[p.nova] + ')');
-    for (const t of p.analysis || []) if (ANALYSIS[t]) chips.push(ANALYSIS[t]);
-
-    const allergens = (p.allergens || []).map(t => t.replace(/^[a-z]{2}:/, '').replace(/-/g, ' '));
-
-    const findingItems = a.findings.map(f => el('li', { class: 'lv-' + f.level },
-      el('span', { class: 'f-name', text: f.name }),
-      el('span', { class: 'f-tag', text: f.type === 'mine' ? 'your list' : (f.level === 'high' ? 'red' : 'orange') }),
-      el('p', { class: 'f-why', text: f.reason }),
-      el('p', { class: 'f-where', text: 'Found as "' + f.found + '"' + (f.position ? ', ingredient ' + f.position + ' of ' + a.count : '') + '.' }),
-      f.source ? el('p', { class: 'f-src' }, 'Source: ', el('a', { href: f.source.url, target: '_blank', rel: 'noopener', text: f.source.label })) : null
-    ));
-
-    const sourceName = p.source === 'off' ? 'Open Food Facts' : p.source === 'obf' ? 'Open Beauty Facts' : 'your label photo';
-    const dataLine = el('p', { class: 'data-line' },
-      p.code && !p.code.startsWith('label-') ? 'Barcode ' + p.code + '. ' : null,
-      'Data from ' + sourceName + (p.updated ? ', updated ' + fmtDate(p.updated) : (p.source === 'label' ? ', saved ' + fmtDate(p.fetchedAt) : '')) + '. ',
-      p.url ? el('a', { href: p.url, target: '_blank', rel: 'noopener', text: 'Open product page' }) : null
-    );
-
-    const actions = el('div', { class: 'actions' },
-      el('button', { class: 'btn btn-primary', type: 'button', text: 'Scan next', onclick: scanNext }),
-      el('button', { class: 'btn btn-ghost', type: 'button', text: a.verdict === 'unknown' ? 'Read label' : 'Read label again', onclick: () => openLabel(p) }),
-      p.source === 'label' && p.code && !p.code.startsWith('label-')
-        ? el('button', { class: 'btn btn-ghost', type: 'button', text: 'Look up online', onclick: () => lookup(p.code, true) })
-        : null
-    );
-
     r.replaceChildren(...[
-      el('div', { class: 'verdict ' + v.cls },
-        el('span', { class: 'verdict-word', text: v.word }),
-        el('span', { class: 'verdict-sub', text: sub(a.verdict, a.findings) })
-      ),
-      el('div', { class: 'product-head' },
-        p.image ? el('img', { src: p.image, alt: '', loading: 'lazy', onerror: e => e.target.remove() }) : null,
-        el('div', {},
-          el('h2', { text: p.name || 'Unnamed product' }),
-          p.brand ? el('p', { text: p.brand }) : null
-        )
-      ),
-      el('ul', { class: 'chips' }, chips.map(c => el('li', { text: c }))),
-      allergens.length ? el('p', { class: 'allergens' }, el('strong', { text: 'Allergens: ' }), allergens.join(', ')) : null,
-      findingItems.length ? el('ul', { class: 'findings' }, findingItems) : null,
+      topCard(a),
+      productHead(p, a),
+      productChips(p, a),
+      el('div', { id: 'groups' }),
       p.ingredientsText
-        ? el('details', {},
-            el('summary', { text: 'Ingredients' + (a.count ? ' (' + a.count + ')' : '') }),
-            el('p', { class: 'ingredients', text: stripLabelWord(p.ingredientsText) }))
+        ? el('details', { class: 'ingr' },
+            el('summary', { text: t('ingredientsTitle') }),
+            el('p', { class: 'ingredients', text: p.ingredientsText.replace(/^\s*[\p{L} ]{2,20}[:：]\s*/u, '') }))
         : null,
-      dataLine,
-      actions
+      dataLine(p),
+      el('div', { class: 'actions' },
+        el('button', { class: 'btn btn-primary', type: 'button', text: t('btn.scanNext'), onclick: scanNext }),
+        el('button', { class: 'btn btn-ghost', type: 'button', text: a.verdict === 'unknown' ? t('btn.readLabel') : t('btn.readAgain'), onclick: () => openLabel(p) }),
+        p.source === 'label' && p.code && !p.code.startsWith('label-')
+          ? el('button', { class: 'btn btn-ghost', type: 'button', text: t('btn.lookupOnline'), onclick: () => lookup(p.code, true) })
+          : null
+      )
     ].filter(Boolean));
+    renderGroups();
     r.hidden = false;
-    addHistory(p, a.verdict);
-    r.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    return a;
+  }
+
+  function topCard(a) {
+    const card = el('section', { class: 'topcard v-' + a.verdict, 'aria-label': t('v.' + a.verdict) },
+      el('span', { class: 'verdict-word', text: t('v.' + a.verdict) }),
+      el('p', { class: 'verdict-sub', text: a.summary })
+    );
+    if (a.verdict === 'unknown') return card;
+
+    card.append(el('div', { class: 'tiles', id: 'tiles' }, GROUPS.map(g => {
+      const n = a.counts[g];
+      return el('button', {
+        type: 'button', class: 'tile g-' + g + (n ? ' has' : ' zero'), 'data-g': g,
+        'aria-pressed': String(state.filter === g), 'aria-disabled': n ? null : 'true',
+        onclick: () => { if (n) setFilter(g); }
+      }, el('b', { text: String(n) }), el('span', { text: t('g.' + g) }));
+    })));
+
+    const strip = el('div', { class: 'strip' + (a.rows.length > 30 ? ' dense' : ''), role: 'group', 'aria-label': t('strip.aria') },
+      a.rows.map(r => el('button', {
+        type: 'button', class: 'g-' + r.group + (r.kind === 'cosmetic' && !r.found ? ' nf' : ''),
+        title: (r.pos ? '#' + r.pos + ' ' : '') + r.label,
+        'aria-label': (r.pos ? '#' + r.pos + ' ' : '') + r.label + ', ' + t('g.' + r.group),
+        onclick: e => jumpTo(r.i, e.currentTarget)
+      })));
+    card.append(strip, el('div', { class: 'strip-ends', 'aria-hidden': 'true' },
+      el('span', { text: t('strip.first') }), el('span', { text: t('strip.last') })));
+    return card;
+  }
+
+  function productHead(p, a) {
+    const isFav = state.favs.includes(p.code);
+    const meta = [p.brand, t(p.kind === 'cosmetic' ? 'kind.cosmetic' : 'kind.food'), a.total ? tn('ph.ingredients', a.total) : null].filter(Boolean).join(' · ');
+    return el('div', { class: 'product-head' },
+      el('div', { class: 'thumb' }, icon(ICON.tag), p.image ? el('img', { src: p.image, alt: '', loading: 'lazy', onerror: e => e.target.remove() }) : null),
+      el('div', { class: 'grow' },
+        el('h2', { text: p.name || t('ph.unnamed') }),
+        el('p', { text: meta })
+      ),
+      el('div', { class: 'acts' },
+        el('button', {
+          class: 'iconbtn' + (isFav ? ' on' : ''), type: 'button', id: 'favBtn',
+          'aria-pressed': String(isFav), 'aria-label': t(isFav ? 'btn.unfav' : 'btn.fav'), title: t(isFav ? 'btn.unfav' : 'btn.fav'),
+          onclick: () => toggleFav(p)
+        }, icon(ICON.heart)),
+        el('button', { class: 'iconbtn', type: 'button', 'aria-label': t('btn.share'), title: t('btn.share'), onclick: shareResult }, icon(ICON.share))
+      )
+    );
+  }
+
+  function productChips(p, a) {
+    const chips = [];
+    if (p.kind === 'cosmetic' && a.rows.length) chips.push(t(a.fragrance ? 'chip.fragrance' : 'chip.noFragrance'));
+    if (p.nutriscore) chips.push(t('chip.nutri', { g: p.nutriscore.toUpperCase() }));
+    if (p.nova && [1, 2, 3, 4].includes(+p.nova)) chips.push(t('chip.nova', { n: p.nova, label: t('nova.' + p.nova) }));
+    for (const tag of p.analysis || []) if (TEXT.en['an.' + tag]) chips.push(t('an.' + tag));
+
+    let allergenLine = null;
+    if (p.kind !== 'cosmetic') {
+      const names = Object.fromEntries(LCDB.foodAllergens(LANG).map(x => [x.id, x.name]));
+      const ids = new Set();
+      a.rows.forEach(r => (r.allergens || []).forEach(x => ids.add(x.id)));
+      (p.allergens || []).forEach(tag => { const m = String(tag).match(ALLERGEN_TAG); if (m) ids.add(m[1]); });
+      if (ids.size) {
+        const parts = [...ids].map(id => {
+          const name = cap(names[id] || id);
+          return state.allergens.food.includes(id) ? el('strong', { class: 'lvl g-red', text: name }) : name;
+        });
+        allergenLine = el('p', { class: 'allergen-line' }, el('strong', { text: t('allergens') + ': ' }),
+          parts.flatMap((x, i) => (i ? [', ', x] : [x])));
+      }
+    }
+    if (!chips.length && !allergenLine) return null;
+    return el('div', {}, chips.length ? el('ul', { class: 'chips' }, chips.map(c => el('li', { text: c }))) : null, allergenLine);
+  }
+
+  function dataLine(p) {
+    const sourceName = t('src.' + (p.source || 'label'));
+    return el('p', { class: 'data-line' },
+      p.code && !String(p.code).startsWith('label-') ? t('data.barcode', { code: p.code }) + ' ' : null,
+      (t('data.from', { src: sourceName }) +
+        (p.updated ? t('data.updated', { date: fmtDate(p.updated) }) : (p.source === 'label' ? t('data.saved', { date: fmtDate(p.fetchedAt) }) : ''))).replace(/\.?$/, '. '),
+      p.url ? link(p.url, t('data.open')) : null
+    );
+  }
+
+  function setFilter(g) {
+    state.filter = state.filter === g ? null : g;
+    if (state.filter) state.open[g] = true;
+    document.querySelectorAll('#tiles .tile').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.g === state.filter)));
+    renderGroups();
+  }
+
+  function renderGroups() {
+    const box = $('groups');
+    if (!box || !state.current) return;
+    const { a } = state.current;
+    if (a.verdict === 'unknown') { box.replaceChildren(); return; }
+    const parts = [];
+    if (state.filter) {
+      parts.push(el('p', { class: 'filterbar' },
+        el('button', { class: 'linkbtn', type: 'button', text: t('filter.all'), onclick: () => setFilter(state.filter) })));
+    }
+    for (const g of GROUPS) {
+      if (state.filter && state.filter !== g) continue;
+      const list = a.rows.filter(r => r.group === g);
+      const id = 'grp-' + g;
+      if (!list.length) {
+        parts.push(el('section', { class: 'grp empty g-' + g },
+          el('div', { class: 'grp-head' },
+            el('span', { class: 'dot g-' + g }), el('span', { class: 'ttl', text: t('g.' + g) }),
+            el('span', { class: 'num', text: t('g.none') }))));
+        continue;
+      }
+      const open = !!state.open[g];
+      parts.push(el('section', { class: 'grp g-' + g },
+        el('button', {
+          class: 'grp-head', type: 'button', 'aria-expanded': String(open), 'aria-controls': id,
+          onclick: () => { state.open[g] = !state.open[g]; renderGroups(); }
+        },
+          el('span', { class: 'dot g-' + g }), el('span', { class: 'ttl', text: t('g.' + g) }),
+          el('span', { class: 'num', text: String(list.length) }), icon(ICON.chev, 'chev')),
+        el('ul', { class: 'rows', id, hidden: !open }, list.map(rowItem))
+      ));
+    }
+    box.replaceChildren(...parts);
+  }
+
+  function rowItem(r) {
+    const sub = [];
+    if (r.sub && r.sub.lvl) sub.push(el('span', { class: 'lvl g-' + r.sub.lvl.g, text: r.sub.lvl.text }));
+    const rest = r.sub ? r.sub.parts.filter(Boolean) : [];
+    if (rest.length) sub.push((sub.length ? ' · ' : '') + rest.join(' · '));
+    return el('li', { 'data-i': r.i },
+      el('button', { class: 'row-btn', type: 'button', onclick: e => openDetail(r.i, e.currentTarget) },
+        el('span', { class: 'pos', text: r.pos ? '#' + r.pos : '–' }),
+        el('span', { class: 'main' },
+          el('strong', { text: r.label }),
+          sub.length ? el('span', { class: 'sub' }, sub) : null),
+        icon(ICON.chev, 'chev')
+      )
+    );
+  }
+
+  function jumpTo(i, block) {
+    const r = state.current && state.current.a.rows[i];
+    if (!r) return;
+    if (state.filter && state.filter !== r.group) {
+      state.filter = null;
+      document.querySelectorAll('#tiles .tile').forEach(b => b.setAttribute('aria-pressed', 'false'));
+    }
+    state.open[r.group] = true;
+    renderGroups();
+    document.querySelectorAll('.strip .mark').forEach(b => b.classList.remove('mark'));
+    if (block) block.classList.add('mark');
+    const li = document.querySelector('#groups li[data-i="' + i + '"]');
+    if (li) {
+      li.scrollIntoView({ behavior: smooth(), block: 'center' });
+      li.classList.remove('flash');
+      void li.offsetWidth;
+      li.classList.add('flash');
+    }
   }
 
   function showNotFound(code) {
     hideAll();
-    showStatus('Barcode ' + code + ' is not in Open Food Facts or Open Beauty Facts. Read the label with Claude instead.');
+    showStatus(t('status.notFound', { code }));
     openLabel({ code });
   }
 
   function showOffline(code) {
     hideAll();
-    showStatus('No connection, and this product is not saved on your phone yet.', [
-      el('button', { class: 'btn btn-primary', type: 'button', text: 'Try again', onclick: () => lookup(code) }),
-      el('button', { class: 'btn btn-ghost', type: 'button', text: 'Read label', onclick: () => openLabel({ code }) })
+    showStatus(t('status.offline'), [
+      el('button', { class: 'btn btn-primary', type: 'button', text: t('btn.tryAgain'), onclick: () => lookup(code) }),
+      el('button', { class: 'btn btn-ghost', type: 'button', text: t('btn.readLabel'), onclick: () => openLabel({ code }) })
     ]);
   }
 
+  // From a result: go back to the scanner (the state below a result is always the scanner).
   function scanNext() {
-    hideAll();
-    window.scrollTo({ top: 0 });
+    if (history.state && history.state.view === 'result') { try { history.back(); } catch (e) { /* ignore */ } }
+    showScanner();
     startCamera();
+  }
+
+  // ---------- Share ----------
+  async function shareResult() {
+    if (!state.current) return;
+    const { p, a } = state.current;
+    const lines = [(p.name || t('ph.unnamed')) + (p.brand ? ' – ' + p.brand : ''), t('v.' + a.verdict) + ': ' + a.summary];
+    for (const r of a.rows.filter(x => x.group === 'red' || x.group === 'orange').slice(0, 10)) {
+      lines.push('• ' + r.label + (r.sub && r.sub.lvl ? ' – ' + r.sub.lvl.text : ''));
+    }
+    lines.push('', t('share.checked'));
+    if (p.url) lines.push(p.url);
+    const text = lines.join('\n');
+    if (navigator.share) {
+      try { await navigator.share({ title: 'Label Check', text }); return; }
+      catch (e) { if (e && e.name === 'AbortError') return; }
+    }
+    toast((await copyText(text)) ? t('toast.shareCopied') : t('toast.copyFail'));
+  }
+
+  // ---------- Favourites ----------
+  function toggleFav(p) {
+    const on = state.favs.includes(p.code);
+    state.favs = on ? state.favs.filter(c => c !== p.code) : [p.code, ...state.favs];
+    if (!on && !state.products[p.code]) saveProduct(p);
+    store.set('favs', state.favs);
+    const b = $('favBtn');
+    if (b && state.current && state.current.p.code === p.code) {
+      b.classList.toggle('on', !on);
+      b.setAttribute('aria-pressed', String(!on));
+      b.setAttribute('aria-label', t(on ? 'btn.fav' : 'btn.unfav'));
+      b.title = t(on ? 'btn.fav' : 'btn.unfav');
+    }
+    toast(t(on ? 'toast.favRemoved' : 'toast.favAdded'));
+    renderFavs();
+  }
+
+  // Current verdict of a saved product (settings may have changed since the scan). Cached until a setting changes.
+  const verdictCache = new Map();
+  function verdictOf(code, fallback) {
+    if (verdictCache.has(code)) return verdictCache.get(code);
+    const p = state.products[code];
+    if (DBINFO && p) {
+      try { const a = analyze(p); const v = { verdict: a.verdict, summary: a.summary }; verdictCache.set(code, v); return v; }
+      catch (e) { /* use the saved one */ }
+    }
+    return { verdict: fallback || 'unknown', summary: '' };
+  }
+
+  function productListItem(item, opts) {
+    const v = verdictOf(item.code, item.verdict);
+    const p = state.products[item.code] || item;
+    return el('li', {},
+      el('span', { class: 'dot ' + VERDICT_DOT[v.verdict], 'aria-hidden': 'true' }),
+      el('button', { class: 'open', type: 'button', onclick: () => openSaved(item.code) },
+        el('strong', { text: p.name || t('ph.unnamed') }),
+        el('span', { class: 'sub', text: [p.brand, t('v.' + v.verdict), opts && opts.time ? fmtDate(opts.time) : null].filter(Boolean).join(' · ') }),
+        opts && opts.summary && v.summary ? el('span', { class: 'sub one', text: v.summary }) : null
+      ),
+      opts && opts.remove ? opts.remove : null
+    );
+  }
+
+  function renderFavs() {
+    const ul = $('favList');
+    const list = state.favs.filter(c => state.products[c]);
+    ul.replaceChildren(...list.map(code => {
+      const p = state.products[code];
+      return productListItem({ code }, {
+        summary: true,
+        remove: el('button', {
+          class: 'iconbtn', type: 'button', 'aria-label': t('favs.remove', { name: p.name || t('ph.unnamed') }),
+          onclick: () => toggleFav(p)
+        }, icon(ICON.close))
+      });
+    }));
+    $('favEmpty').hidden = list.length > 0;
+  }
+
+  function renderHistory() {
+    $('historyList').replaceChildren(...state.history.map(h => productListItem(h, { time: h.time })));
+    $('historyEmpty').hidden = state.history.length > 0;
+    $('clearHistory').hidden = state.history.length === 0;
+  }
+
+  function openSaved(code) {
+    go('scan');
+    const p = state.products[code];
+    if (p) showProduct(p);
+    else lookup(code);
+  }
+
+  // ---------- Ingredient detail ----------
+  let detailReturn = null;
+
+  function openDetail(i, from) {
+    const r = state.current && state.current.a.rows[i];
+    if (!r) return;
+    detailReturn = from || null;
+    renderDetail(r);
+    $('detail').hidden = false;
+    $('detail').scrollTop = 0;
+    document.documentElement.classList.add('noscroll');
+    pushState(Object.assign({}, history.state || { tab: 'scan' }, { detail: i + 1 }));
+    $('detailBack').focus();
+  }
+
+  function hideDetail() {
+    if ($('detail').hidden) return;
+    $('detail').hidden = true;
+    document.documentElement.classList.remove('noscroll');
+    if (detailReturn && document.body.contains(detailReturn)) detailReturn.focus();
+    detailReturn = null;
+  }
+
+  function closeDetail() {
+    if (history.state && history.state.detail) { try { history.back(); return; } catch (e) { /* fall through */ } }
+    hideDetail();
+  }
+
+  function reasonBlock(rs) {
+    const d = rs.details || {};
+    const items = [];
+    const add = (key, val) => { if (val) items.push(el('dt', { text: t(key) }), el('dd', {}, val)); };
+    add('d.det.entry', d.entry);
+    add('d.det.products', d.products);
+    add('d.det.max', d.max);
+    add('d.det.conditions', d.conditions);
+    add('d.det.warning', d.warning);
+    add('d.det.date', d.date);
+    if (Array.isArray(d.expert) && d.expert.length) {
+      add('d.det.expert', d.expert.map((u, k) => [k ? ', ' : '', link(u, 'SCCS ' + (k + 1))]).flat());
+    }
+    if (Array.isArray(d.status) && d.status.length) add('d.det.status', d.status.join(' · '));
+    add('d.det.year', d.year);
+    return el('div', { class: 'reason' },
+      el('p', {}, el('span', { class: 'lvl g-' + LEVEL_GROUP[rs.lv], text: levelName(rs.lv) + ': ' }), rs.text),
+      rs.source ? el('p', { class: 'src' }, t('d.source') + ': ', rs.source.url ? link(rs.source.url, rs.source.label) : rs.source.label) : null,
+      items.length ? el('dl', {}, items) : null
+    );
+  }
+
+  function studiesLink(name) {
+    const tpl = (META() && META().studySearch) || 'https://europepmc.org/search?query=%22{name}%22';
+    return el('a', { class: 'btn btn-ghost', href: tpl.replace('{name}', encodeURIComponent(name)), target: '_blank', rel: 'noopener', text: t('d.studies') });
+  }
+
+  function badge(group, text) {
+    return el('span', { class: 'badge g-' + group }, el('span', { class: 'dot g-' + group }), text);
+  }
+
+  function renderDetail(r) {
+    const body = [];
+    body.push(el('h2', { id: 'detailTitle', text: r.label }));
+    body.push(el('p', { class: 'd-meta', text: r.pos ? t('d.pos', { n: r.pos }) : t('d.posNone') }));
+
+    const top = r.why === 'mine' ? t('tag.mine') : r.why === 'allergen' ? t('tag.allergenYours')
+      : r.why === 'fragrance' ? t('tag.fragranceAvoid') : levelName(r.level);
+    body.push(badge(r.group, top));
+
+    // Personal reasons (your list, allergens, fragrance)
+    const mineP = [];
+    if (r.mine) mineP.push(el('p', { text: t('d.mineWhy', { term: r.mine.term }) }));
+    if (r.why === 'allergen') mineP.push(el('p', { text: t('d.allergenTicked') }));
+    if (r.fragAvoid) mineP.push(el('p', { text: t('d.fragranceWhy') }));
+    if (mineP.length) body.push(el('div', { class: 'd-card' }, mineP));
+
+    if (r.kind === 'cosmetic') {
+      const tags = cosmeticTags(r);
+      if (tags.length) body.push(el('ul', { class: 'd-tags' }, tags.map(x => el('li', { text: x }))));
+      if (r.found && niceName(r.src.name) !== cleanSeg(r.text)) {
+        body.push(el('p', { class: 'd-meta' }, t('d.asOnLabel') + ': ', el('em', { text: r.text })));
+      }
+      if (r.src.functions && r.src.functions.length) {
+        body.push(el('div', { class: 'd-card' }, el('h3', { text: t('d.functions') }), el('p', { text: r.src.functions.join(', ') })));
+      }
+      const reasons = r.src.reasons || [];
+      body.push(el('div', { class: 'd-card' },
+        el('h3', { text: t('d.why') }),
+        reasons.length ? reasons.map(reasonBlock) : el('p', { text: r.found ? t('d.noReasons') : t('d.notFound') }),
+        r.allergen && !r.tickedAllergen ? el('p', { class: 'minor', text: t('d.allergenNot') }) : null,
+        reasons.some(x => x.details && (x.details.entry || x.details.conditions)) ? el('p', { class: 'minor', text: t('d.det.engOnly') }) : null
+      ));
+    } else if (r.kind === 'food') {
+      if (cleanSeg(r.text) !== r.label) body.push(el('p', { class: 'd-meta' }, t('d.asOnLabel') + ': ', el('em', { text: r.text })));
+      for (const a of r.additives) {
+        const en = LCDB.checkFood(a.e, 'en').additives[0];
+        body.push(el('div', { class: 'd-card' },
+          el('h3', { text: cap(a.name) + ' (' + a.e + ')' }),
+          r.additives.length > 1 || a.level !== r.level || r.why ? badge(LEVEL_GROUP[a.level], levelName(a.level)) : null,
+          a.classes && a.classes.length ? el('p', {}, el('strong', { text: t('d.classes') + ': ' }), a.classes.join(', ')) : null,
+          a.vegan ? el('p', { class: 'minor', text: t('d.vegan.' + a.vegan) }) : null,
+          a.reasons.length ? a.reasons.map(reasonBlock) : el('p', { text: t('d.noReasons') }),
+          el('div', { class: 'd-actions' }, studiesLink(en ? en.name : a.name))
+        ));
+      }
+      for (const rule of r.rules) {
+        body.push(el('div', { class: 'd-card' }, el('h3', { text: t('d.why') }), rule.reasons.map(reasonBlock)));
+      }
+      const foodAlText = tr(META().reasons['food.allergen']);
+      for (const al of r.allergens) {
+        const ticked = state.allergens.food.includes(al.id);
+        body.push(el('div', { class: 'd-card' },
+          el('h3', { text: t('tag.foodAllergen', { name: cap(al.name) }) }),
+          el('p', { text: foodAlText }),
+          el('p', { class: 'minor', text: t(ticked ? 'd.allergenTicked' : 'd.allergenNot') })
+        ));
+      }
+      if (!r.additives.length && !r.rules.length && !r.allergens.length && !r.mine) body.push(el('div', { class: 'd-card' }, el('p', { text: t('d.plain') })));
+    }
+
+    // Actions
+    const acts = [];
+    const studyName = r.kind === 'cosmetic' ? (r.found ? niceName(r.src.name) : cleanSeg(r.text)) : (r.kind === 'food' && !r.additives.length ? cleanSeg(r.text).replace(/\s*\(.*\)\s*/g, ' ').trim() : null);
+    if (studyName) acts.push(studiesLink(studyName));
+    if (r.kind !== 'extra') {
+      const listName = r.kind === 'cosmetic' && r.found ? [niceName(r.src.name), cleanSeg(r.text)] : [cleanSeg(r.text).replace(/\s*\(.*\)\s*/g, ' ').trim()];
+      const already = !!r.mine;
+      acts.push(el('button', {
+        class: 'btn ' + (already ? 'btn-ghost' : 'btn-primary'), type: 'button', disabled: already,
+        text: already ? t('d.onList') : t('d.addList'),
+        onclick: e => {
+          addAvoid([...new Set(listName.map(x => x.toLowerCase()))].join(', '));
+          e.currentTarget.disabled = true;
+          e.currentTarget.textContent = t('d.onList');
+          e.currentTarget.className = 'btn btn-ghost';
+        }
+      }));
+    }
+    if (acts.length) body.push(el('div', { class: 'd-actions' }, acts));
+    body.push(el('p', { class: 'minor', style: null, text: t('d.studiesNote') }));
+
+    $('detailBody').replaceChildren(...body.filter(Boolean));
   }
 
   // ---------- Read a label (free share flow) ----------
@@ -431,15 +1008,15 @@
   function openLabel(p) {
     labelFor = p && p.code ? p : null;
     $('result').hidden = true;
+    $('scanner').hidden = false;
     const panel = $('labelPanel');
     panel.hidden = false;
     $('labelText').value = '';
     $('labelName').value = (p && p.name) || '';
     const kind = (p && p.kind) || 'food';
     document.querySelectorAll('input[name="kind"]').forEach(i => { i.checked = i.value === kind; });
-    $('labelLead').textContent = labelFor && labelFor.code
-      ? 'For barcode ' + labelFor.code + '. Free: it uses your normal Claude app.'
-      : 'Free: it uses your normal Claude app.';
+    $('labelLead').textContent = labelFor && labelFor.code && !String(labelFor.code).startsWith('label-')
+      ? t('label.leadFor', { code: labelFor.code }) : t('label.lead');
     panel.scrollIntoView({ behavior: 'auto', block: 'start' });
   }
 
@@ -453,26 +1030,25 @@
     e.target.value = '';
     if (!file) return;
     const copied = await copyText(PROMPT);
-    const data = { files: [file], text: PROMPT };
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try {
-        await navigator.share(data);
-        toast(copied ? 'Question copied. Paste it in Claude.' : 'Pick Claude in the share menu.');
+        await navigator.share({ files: [file], text: PROMPT });
+        toast(copied ? t('toast.qCopied') : t('toast.pickClaude'));
       } catch (err) {
-        if (err && err.name !== 'AbortError') toast('Sharing failed. Copy the question and open Claude yourself.');
+        if (err && err.name !== 'AbortError') toast(t('toast.shareFail'));
       }
     } else {
-      toast('This browser cannot share photos. Copy the question, open Claude and add the photo there.');
+      toast(t('toast.noShare'));
     }
   }
 
   async function onPaste() {
     try {
-      const t = await navigator.clipboard.readText();
-      if (t) $('labelText').value = t.trim();
-      else toast('The clipboard is empty.');
+      const txt = await navigator.clipboard.readText();
+      if (txt) $('labelText').value = txt.trim();
+      else toast(t('toast.clipEmpty'));
     } catch (e) {
-      toast('Paste is blocked. Long-press in the box and choose Paste.');
+      toast(t('toast.pasteBlocked'));
     }
   }
 
@@ -484,12 +1060,12 @@
       if (m) extra.push(m[1]);
       else if (line.trim()) main.push(line.trim());
     }
-    return { main: stripLabelWord(main.join(' ')), extra: extra.join(' ') };
+    return { main: main.join(' '), extra: extra.join(' ') };
   }
 
   function onCheckLabel() {
     const raw = $('labelText').value.trim();
-    if (!raw) { toast('Paste the ingredient list first.'); $('labelText').focus(); return; }
+    if (!raw) { toast(t('toast.pasteFirst')); $('labelText').focus(); return; }
     const { main, extra } = parseClaudeAnswer(raw);
     const kind = (document.querySelector('input[name="kind"]:checked') || {}).value || 'food';
     const code = labelFor && labelFor.code ? labelFor.code : 'label-' + Date.now();
@@ -521,7 +1097,7 @@
 
   async function startCamera() {
     if (!('BarcodeDetector' in window)) {
-      toast('This browser cannot read barcodes from the camera. Type the numbers under the barcode.');
+      toast(t('toast.noBarcodeApi'));
       $('codeInput').focus();
       return;
     }
@@ -536,9 +1112,7 @@
       stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
     } catch (e) {
       stopCamera();
-      toast(e && e.name === 'NotAllowedError'
-        ? 'The camera is blocked. Allow it for this site in the browser settings, or type the barcode.'
-        : 'The camera did not start. Type the barcode instead.');
+      toast(e && e.name === 'NotAllowedError' ? t('toast.camBlocked') : t('toast.camFail'));
       return;
     }
     const v = $('video');
@@ -571,7 +1145,7 @@
 
   function stopCamera() {
     clearTimeout(scanTimer);
-    if (stream) stream.getTracks().forEach(t => t.stop());
+    if (stream) stream.getTracks().forEach(tr2 => tr2.stop());
     stream = null;
     const v = $('video');
     v.srcObject = null;
@@ -581,17 +1155,16 @@
     $('vfIdle').hidden = false;
   }
 
-  // ---------- My list ----------
+  // ---------- My list: avoid list ----------
   function renderAvoid() {
-    const ul = $('avoidList');
-    ul.replaceChildren(...state.avoid.map(item => {
-      const parts = item.text.split(',').map(s => s.trim()).filter(Boolean);
+    $('avoidList').replaceChildren(...state.avoid.map(item => {
+      const parts = termsOf(item);
       return el('li', {},
         el('span', { class: 'grow' },
           el('strong', { text: parts[0] }),
-          parts.length > 1 ? el('span', { class: 'sub', text: 'Also: ' + parts.slice(1).join(', ') }) : null
+          parts.length > 1 ? el('span', { class: 'sub', text: t('list.also') + parts.slice(1).join(', ') }) : null
         ),
-        el('button', { class: 'btn btn-ghost', type: 'button', text: 'Remove', 'aria-label': 'Remove ' + parts[0], onclick: () => removeAvoid(item.id) })
+        el('button', { class: 'btn btn-ghost', type: 'button', text: t('list.remove'), 'aria-label': t('list.remove') + ': ' + parts[0], onclick: () => removeAvoid(item.id) })
       );
     }));
     $('avoidEmpty').hidden = state.avoid.length > 0;
@@ -602,87 +1175,155 @@
       .map(p => el('button', { type: 'button', text: '+ ' + p.split(',')[0], onclick: () => addAvoid(p) })));
   }
 
+  function settingsChanged() {
+    verdictCache.clear();
+    if (state.current) renderResult(state.current.p);
+    renderFavs();
+    renderHistory();
+  }
+
   function addAvoid(text) {
     const clean = String(text || '').split(',').map(s => s.trim()).filter(Boolean).join(', ');
     if (!clean) return;
     state.avoid.push({ id: 'a' + Date.now() + Math.random().toString(36).slice(2, 6), text: clean });
     store.set('avoid', state.avoid);
     renderAvoid();
-    toast('Added: ' + clean.split(',')[0]);
+    settingsChanged();
+    toast(t('toast.added', { name: clean.split(',')[0] }));
   }
 
   function removeAvoid(id) {
     state.avoid = state.avoid.filter(i => i.id !== id);
     store.set('avoid', state.avoid);
     renderAvoid();
+    settingsChanged();
   }
 
-  // ---------- Rules ----------
+  // ---------- My list: allergens ----------
+  let COS_ALLERGENS = [];
+
+  function tick(id, checked, label, sub, onchange) {
+    return el('label', { 'data-search': (label + ' ' + (sub || '')).toLowerCase() },
+      el('input', { type: 'checkbox', checked, onchange }),
+      el('span', {}, label, sub ? el('span', { class: 'sub', text: ' ' + sub }) : null));
+  }
+
+  function renderAllergens() {
+    if (!DBINFO) return;
+    const food = LCDB.foodAllergens(LANG);
+    $('foodAlgList').replaceChildren(...food.map(a => tick(a.id, state.allergens.food.includes(a.id), cap(a.name), null, e => {
+      state.allergens.food = state.allergens.food.filter(x => x !== a.id);
+      if (e.target.checked) state.allergens.food.push(a.id);
+      store.set('allergens', state.allergens);
+      updateAllergenCounts();
+      settingsChanged();
+    })));
+    if (!COS_ALLERGENS.length) COS_ALLERGENS = LCDB.cosAllergens();
+    const list = $('cosAlgList');
+    list.classList.add('long');
+    list.replaceChildren(...COS_ALLERGENS.map(a => {
+      const others = a.names.filter(n => n !== a.name).map(niceName);
+      return tick(a.ref, state.allergens.cos.includes(a.ref), niceName(a.name), others.length ? '(' + others.slice(0, 2).join(', ') + ')' : null, e => {
+        state.allergens.cos = state.allergens.cos.filter(x => x !== a.ref);
+        if (e.target.checked) state.allergens.cos.push(a.ref);
+        store.set('allergens', state.allergens);
+        updateAllergenCounts();
+        settingsChanged();
+      });
+    }));
+    filterCosAllergens();
+    updateAllergenCounts();
+  }
+
+  function filterCosAllergens() {
+    const q = $('cosAlgSearch').value.trim().toLowerCase();
+    $('cosAlgList').querySelectorAll('label').forEach(l => { l.hidden = !!q && !l.dataset.search.includes(q); });
+  }
+
+  function updateAllergenCounts() {
+    $('foodAlgCount').textContent = state.allergens.food.length ? '(' + t('alg.ticked', { n: state.allergens.food.length }) + ')' : '';
+    $('cosAlgCount').textContent = '(' + (state.allergens.cos.length ? t('alg.ticked', { n: state.allergens.cos.length }) + ' / ' : '') + COS_ALLERGENS.length + ')';
+    $('cosAlgClear').hidden = state.allergens.cos.length === 0;
+  }
+
+  // ---------- My list: what the app checks ----------
   function renderRules() {
-    const box = $('rulesList');
-    const groups = {};
-    for (const r of RULES) (groups[r.group] = groups[r.group] || []).push(r);
-    box.replaceChildren(...Object.keys(groups).map(g => el('div', { class: 'rule-group' },
-      el('h3', { text: GROUPS[g] || g }),
-      groups[g].map(r => {
-        const on = !state.rulesOff.includes(r.id);
-        const id = 'rule-' + r.id;
-        return el('div', { class: 'rule' },
-          el('div', {},
-            el('label', { for: id, class: 'r-name' }, r.name),
-            el('span', { class: 'r-level ' + r.level, text: r.level === 'high' ? 'red' : 'orange' })
-          ),
-          el('p', { class: 'r-text', text: r.reason + ' Checks ' + (r.applies.includes('food') ? 'food' : 'cosmetics') + '.' }),
-          el('p', { class: 'r-src' }, 'Source: ', el('a', { href: r.source.url, target: '_blank', rel: 'noopener', text: r.source.label })),
-          el('span', { class: 'switch' },
-            el('input', { type: 'checkbox', id, role: 'switch', checked: on, onchange: e => toggleRule(r.id, e.target.checked) }))
-        );
-      })
-    )));
-    $('rulesMeta').textContent = RULES.length
-      ? RULES.length + ' rules, version ' + RULES_VERSION + '.'
-      : 'Rules did not load. Open the app once with a connection.';
+    const box = $('rulesBox');
+    if (DBINFO === null) { box.replaceChildren(el('p', { class: 'minor', text: t('status.dbLoading') })); return; }
+    if (!DBINFO) { box.replaceChildren(el('p', { class: 'minor', text: t('status.dbFail') })); return; }
+    const m = META();
+    box.replaceChildren(
+      el('ul', { class: 'levels' }, m.levelOrder.map(lv => el('li', {},
+        el('span', { class: 'dot g-' + LEVEL_GROUP[lv] }),
+        el('div', {}, el('strong', { text: levelName(lv) }), el('span', { text: t('rules.lv.' + lv) }))))),
+      el('h4', { class: 'rules-sub', text: t('rules.curated') }),
+      el('ul', { class: 'rulelist' }, Object.values(m.curated).map(c => el('li', {},
+        el('span', { class: 'lvl g-' + LEVEL_GROUP[c.lv], text: levelName(c.lv) + ': ' }), tr(c),
+        el('span', { class: 'src' }, t('d.source') + ': ', link(c.src.url, c.src.label))))),
+      el('h4', { class: 'rules-sub', text: t('rules.sources') }),
+      el('ul', { class: 'rulelist' }, m.sources.map(s => el('li', {},
+        link(s.url, s.label),
+        s.fetched ? el('span', { class: 'src', text: t('rules.fetched', { date: fmtDate(Date.parse(s.fetched)) }) }) : null))),
+      el('p', { class: 'minor', text: t('rules.version', { v: m.version, c: DBINFO.cosmetics.toLocaleString(LOCALE[LANG]), a: DBINFO.additives }) })
+    );
   }
 
-  function toggleRule(id, on) {
-    state.rulesOff = state.rulesOff.filter(x => x !== id);
-    if (!on) state.rulesOff.push(id);
-    store.set('rulesOff', state.rulesOff);
+  function renderCredit() {
+    $('credit').replaceChildren(
+      el('p', {}, tNodes('credit.product', {
+        off: link('https://world.openfoodfacts.org', 'Open Food Facts'),
+        obf: link('https://world.openbeautyfacts.org', 'Open Beauty Facts'),
+        odbl: link('https://opendatacommons.org/licenses/odbl/1-0/', 'ODbL')
+      })),
+      el('p', { text: t('credit.ingredient') }),
+      el('p', { text: t('credit.guide') })
+    );
   }
 
-  // ---------- History ----------
-  function renderHistory() {
-    const ul = $('historyList');
-    ul.replaceChildren(...state.history.map(h => el('li', {},
-      el('span', { class: 'dot ' + (VERDICT[h.verdict] || VERDICT.unknown).cls, 'aria-hidden': 'true' }),
-      el('button', { class: 'open grow', type: 'button', onclick: () => openHistory(h) },
-        el('strong', { text: h.name || 'Unnamed product' }),
-        el('span', { class: 'sub', text: [h.brand, (VERDICT[h.verdict] || VERDICT.unknown).word, fmtDate(h.time)].filter(Boolean).join(', ') })
-      )
-    )));
-    $('historyEmpty').hidden = state.history.length > 0;
-    $('clearHistory').hidden = state.history.length === 0;
+  // ---------- My list: settings ----------
+  function applyTheme() {
+    const root = document.documentElement;
+    if (state.theme === 'light' || state.theme === 'dark') root.dataset.theme = state.theme;
+    else delete root.dataset.theme;
+    const bg = getComputedStyle(root).getPropertyValue('--bg').trim();
+    if (bg) $('themeColor').setAttribute('content', bg);
   }
 
-  function openHistory(h) {
-    go('scan');
-    const p = state.products[h.code];
-    if (p) showProduct(p);
-    else lookup(h.code);
+  function applyBig() { document.documentElement.classList.toggle('big', !!state.bigText); }
+
+  function setLanguage(value) {
+    state.lang = value;
+    store.set('lang', value);
+    LANG = pickLang();
+    verdictCache.clear();
+    applyTexts();
+    renderAll();
+  }
+
+  function renderAll() {
+    renderAvoid();
+    renderAllergens();
+    renderRules();
+    renderFavs();
+    renderHistory();
+    if (state.current) renderResult(state.current.p);
+    if (!$('labelPanel').hidden) $('labelLead').textContent = labelFor && labelFor.code && !String(labelFor.code).startsWith('label-') ? t('label.leadFor', { code: labelFor.code }) : t('label.lead');
   }
 
   // ---------- Backup ----------
   function exportBackup() {
     const data = {
-      app: 'label-check', version: 1, exportedAt: new Date().toISOString(),
-      avoid: state.avoid, rulesOff: state.rulesOff, history: state.history, products: state.products
+      app: 'label-check', version: 2, exportedAt: new Date().toISOString(),
+      avoid: state.avoid, favs: state.favs, allergens: state.allergens, avoidFragrance: state.avoidFragrance,
+      lang: state.lang, theme: state.theme, bigText: state.bigText,
+      history: state.history, products: state.products
     };
     const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' });
     const a = el('a', { href: URL.createObjectURL(blob), download: 'label-check-backup-' + new Date().toISOString().slice(0, 10) + '.json' });
     document.body.append(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-    toast('Backup file saved to your downloads.');
+    toast(t('toast.backupSaved'));
   }
 
   async function importBackup(e) {
@@ -691,31 +1332,48 @@
     if (!file) return;
     let data;
     try { data = JSON.parse(await file.text()); }
-    catch (err) { toast('This file is not a Label Check backup.'); return; }
-    if (!data || data.app !== 'label-check') { toast('This file is not a Label Check backup.'); return; }
-    if (!confirm('Replace your list, rule settings and history with this backup? Saved products are merged.')) return;
+    catch (err) { toast(t('toast.notBackup')); return; }
+    if (!data || data.app !== 'label-check') { toast(t('toast.notBackup')); return; }
+    if (!confirm(t('confirm.import'))) return;
     state.avoid = Array.isArray(data.avoid) ? data.avoid.filter(i => i && typeof i.text === 'string') : [];
-    state.rulesOff = Array.isArray(data.rulesOff) ? data.rulesOff.filter(x => typeof x === 'string') : [];
     state.history = Array.isArray(data.history) ? data.history.slice(0, MAX_HISTORY) : [];
     if (data.products && typeof data.products === 'object') Object.assign(state.products, data.products);
-    store.set('avoid', state.avoid);
-    store.set('rulesOff', state.rulesOff);
-    store.set('history', state.history);
-    store.set('products', state.products);
-    renderAvoid(); renderRules(); renderHistory();
-    toast('Backup imported.');
+    state.favs = Array.isArray(data.favs) ? data.favs.filter(c => typeof c === 'string') : [];
+    if (data.allergens && typeof data.allergens === 'object') {
+      state.allergens = {
+        food: Array.isArray(data.allergens.food) ? data.allergens.food.filter(x => typeof x === 'string') : [],
+        cos: Array.isArray(data.allergens.cos) ? data.allergens.cos.filter(x => typeof x === 'string') : []
+      };
+    }
+    if (typeof data.avoidFragrance === 'boolean') state.avoidFragrance = data.avoidFragrance;
+    if (['auto', 'en', 'de', 'bg'].includes(data.lang)) state.lang = data.lang;
+    if (['auto', 'light', 'dark'].includes(data.theme)) state.theme = data.theme;
+    if (typeof data.bigText === 'boolean') state.bigText = data.bigText;
+    for (const k of ['avoid', 'history', 'products', 'favs', 'allergens', 'avoidFragrance', 'lang', 'theme', 'bigText']) store.set(k, state[k]);
+    verdictCache.clear();
+    syncSettingsControls();
+    applyTheme();
+    applyBig();
+    LANG = pickLang();
+    applyTexts();
+    renderAll();
+    toast(t('toast.imported'));
+  }
+
+  function syncSettingsControls() {
+    $('fragSwitch').checked = !!state.avoidFragrance;
+    $('bigSwitch').checked = !!state.bigText;
+    $('langSelect').value = state.lang;
+    $('themeSelect').value = state.theme;
   }
 
   // ---------- Tabs and toast ----------
   // Each tab change is added to the browser history, so the phone's Back button returns to the previous tab.
-  const TABS = ['scan', 'list', 'rules', 'history'];
+  const TABS = ['scan', 'favs', 'list', 'history'];
   let currentTab = 'scan';
 
-  function go(tab, fromBack) {
+  function setTab(tab) {
     if (!TABS.includes(tab)) tab = 'scan';
-    if (!fromBack && tab !== currentTab) {
-      try { history.pushState({ tab }, '', '#' + tab); } catch (e) { /* ignore */ }
-    }
     currentTab = tab;
     document.querySelectorAll('.tab').forEach(s => { s.hidden = s.dataset.tab !== tab; });
     document.querySelectorAll('.tabbar button').forEach(b => {
@@ -726,30 +1384,53 @@
     window.scrollTo({ top: 0 });
   }
 
+  function go(tab) {
+    hideDetail();
+    if (tab === currentTab) {
+      // Tapping "Scan" on a result goes back to the scanner.
+      if (tab === 'scan' && (!$('result').hidden || !$('labelPanel').hidden)) {
+        if (history.state && history.state.view === 'result') { try { history.back(); } catch (e) { /* ignore */ } }
+        showScanner();
+      }
+      return;
+    }
+    pushState({ tab }, '#' + tab);
+    setTab(tab);
+  }
+
+  window.addEventListener('popstate', e => {
+    const st = e.state || { tab: 'scan' };
+    if (!st.detail) hideDetail();
+    if (st.tab !== currentTab) setTab(st.tab);
+    if (st.tab === 'scan') {
+      if (st.view === 'result') {
+        if (!state.current || state.current.p.code !== st.code) {
+          const p = state.products[st.code];
+          if (p && DBINFO) renderResult(p); else showScanner();
+        }
+      } else if ($('scanner').hidden || !$('result').hidden) {
+        showScanner();
+      }
+    }
+  });
+
   let toastTimer = null;
   function toast(text) {
-    const t = $('toast');
-    t.textContent = text;
-    t.hidden = false;
+    const tt = $('toast');
+    tt.textContent = text;
+    tt.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { t.hidden = true; }, 3800);
+    toastTimer = setTimeout(() => { tt.hidden = true; }, 3800);
   }
 
   // ---------- Start ----------
-  async function loadRules() {
-    try {
-      const r = await fetch('rules.json');
-      const data = await r.json();
-      RULES = Array.isArray(data.rules) ? data.rules : [];
-      GROUPS = data.groups || {};
-      RULES_VERSION = data.version || '';
-    } catch (e) {
-      RULES = [];
-    }
-    renderRules();
-  }
-
   function init() {
+    LANG = pickLang();
+    applyTheme();
+    applyBig();
+    applyTexts();
+    syncSettingsControls();
+
     document.querySelectorAll('.tabbar button').forEach(b => b.addEventListener('click', () => go(b.dataset.go)));
     $('startCam').addEventListener('click', startCamera);
     $('stopCam').addEventListener('click', stopCamera);
@@ -761,7 +1442,7 @@
     $('openLabel').addEventListener('click', () => { hideAll(); openLabel(null); });
     $('photoInput').addEventListener('change', onPhoto);
     $('copyPrompt').addEventListener('click', async () => {
-      toast((await copyText(PROMPT)) ? 'Question copied. Open Claude and paste it.' : 'Copy failed. Long-press to copy instead.');
+      toast((await copyText(PROMPT)) ? t('toast.qCopied2') : t('toast.copyFail'));
     });
     $('pasteBtn').addEventListener('click', onPaste);
     $('checkLabel').addEventListener('click', onCheckLabel);
@@ -770,21 +1451,40 @@
       addAvoid($('avoidInput').value);
       $('avoidInput').value = '';
     });
+    $('fragSwitch').addEventListener('change', e => {
+      state.avoidFragrance = e.target.checked;
+      store.set('avoidFragrance', state.avoidFragrance);
+      settingsChanged();
+    });
+    $('cosAlgSearch').addEventListener('input', filterCosAllergens);
+    $('cosAlgClear').addEventListener('click', () => {
+      state.allergens.cos = [];
+      store.set('allergens', state.allergens);
+      renderAllergens();
+      settingsChanged();
+    });
+    $('langSelect').addEventListener('change', e => setLanguage(e.target.value));
+    $('themeSelect').addEventListener('change', e => { state.theme = e.target.value; store.set('theme', state.theme); applyTheme(); });
+    $('bigSwitch').addEventListener('change', e => { state.bigText = e.target.checked; store.set('bigText', state.bigText); applyBig(); });
+    try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme); } catch (e) { /* old browser */ }
     $('exportBtn').addEventListener('click', exportBackup);
     $('importInput').addEventListener('change', importBackup);
     $('clearHistory').addEventListener('click', () => {
-      if (!confirm('Clear the scan history? Saved products stay.')) return;
+      if (!confirm(t('confirm.clearHist'))) return;
       state.history = [];
       store.set('history', state.history);
       renderHistory();
     });
+    $('detailBack').addEventListener('click', closeDetail);
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('detail').hidden) closeDetail(); });
     document.addEventListener('visibilitychange', () => { if (document.hidden) stopCamera(); });
-    window.addEventListener('popstate', e => go((e.state && e.state.tab) || 'scan', true));
     try { history.replaceState({ tab: 'scan' }, '', location.pathname + location.search); } catch (e) { /* ignore */ }
 
     renderAvoid();
+    renderFavs();
     renderHistory();
-    loadRules();
+    renderRules();
+    dbReady.then(() => { renderRules(); renderAllergens(); renderFavs(); renderHistory(); });
 
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch(() => { /* app still works online */ });
@@ -792,7 +1492,7 @@
   }
 
   // Small test hook (used only by automated checks).
-  window.LC = { norm, termRegex, splitIngredients, analyze, parseClaudeAnswer, state, lookup, rules: () => RULES };
+  window.LC = { analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage };
 
   init();
 })();

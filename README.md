@@ -17,18 +17,24 @@ Later it becomes a part of Jarvis.
 
 | File | What it does |
 |---|---|
-| index.html | The screens: Scan, My list, Rules, History |
-| style.css | Colours and layout (light and dark) |
-| app.js | Scanning, lookup, rule check, label reading, backup |
-| rules.json | Starter rules, each with a source |
+| index.html | The screens: Scan, Favourites, My list (incl. allergens, settings, what the app checks), History |
+| style.css | Colours and layout: "Clear blue" (light) and "Night" (dark) |
+| i18n.js | All screen texts in English, German and Bulgarian |
+| db.js | Offline ingredient database lookup (LCDB) |
+| data/ | The ingredient database (see data/SOURCES.md) |
+| app.js | Scanning, lookup, ingredient check, result screen, detail, favourites, label reading, backup |
 | manifest.json | Makes the app installable |
-| sw.js | Lets the app open without internet |
+| sw.js | Lets the app and the database open without internet |
 | icon-192.png, icon-512.png | App icon |
+| tools/ | Database build script, database test, app test |
+| rules.json | v1 starter rules. Not used since v2 (the database covers them). Can be deleted. |
 
-## Change a rule
+## Change the data or a text
 
-Edit `rules.json`. Each rule needs: `id`, `group`, `name`, `applies` (food or cosmetic), `level` (high = red, medium = orange), `reason`, `terms`, `tags`, `source`.
-After any change, raise `VERSION` in `sw.js` (for example `label-check-v2`), so the phone loads the new files.
+- Database: see `tools/FETCH.md`, then `python tools/build_db.py` and `node tools/test_db.js`.
+- Screen text: edit `i18n.js` (same key in `en`, `de` and `bg`).
+- App test (needs Python Playwright): `python tools/test_app.py`.
+- After any change, raise `VERSION` in `sw.js` (for example `label-check-v4`), so the phone loads the new files.
 
 ## Parked ideas
 
