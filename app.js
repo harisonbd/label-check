@@ -118,6 +118,9 @@
     document.querySelectorAll('[data-t]').forEach(n => { n.textContent = t(n.dataset.t); });
     document.querySelectorAll('[data-t-ph]').forEach(n => { n.placeholder = t(n.dataset.tPh); });
     document.querySelector('.tabbar').setAttribute('aria-label', [t('tab.scan'), t('tab.favs'), t('tab.list'), t('tab.history')].join(', '));
+    $('langSwitch').setAttribute('aria-label', t('set.lang'));
+    $('langSwitch').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === LANG)));
+    if ($('labelTitle')) setLabelTitle();
     renderCredit();
   }
 
@@ -532,8 +535,7 @@
       toast(t('err.digits'));
       return;
     }
-    hideAll();
-    showStatus(t('status.looking', { code }));
+    showChecking(code);
     await ownReady;
 
     const cached = state.products[code];
@@ -628,9 +630,26 @@
 
   function showStatus(text, buttons) {
     const s = $('status');
+    s.className = 'status';
     s.replaceChildren(el('p', { text, class: 'status-text' }));
     if (buttons && buttons.length) s.append(el('div', { class: 'row' }, buttons));
     s.hidden = false;
+  }
+
+  // Big "Checking …" card in the place of the result, while a barcode is looked up.
+  function showChecking(code) {
+    hideAll();
+    $('scanner').hidden = true;
+    const s = $('status');
+    s.className = 'status busy';
+    s.replaceChildren(
+      el('span', { class: 'spin', 'aria-hidden': 'true' }),
+      el('div', {},
+        el('strong', { text: t('status.checking') }),
+        el('p', { text: t('status.barcode', { code }) }),
+        el('p', { class: 'src', text: t('status.searching') })));
+    s.hidden = false;
+    window.scrollTo({ top: 0 });
   }
 
   // ---------- History (Back button) ----------
@@ -651,6 +670,7 @@
     }
     if (!DBINFO) {
       hideAll();
+      $('scanner').hidden = false;
       showStatus(t('status.dbFail'));
       return;
     }
@@ -681,7 +701,7 @@
             el('summary', { text: t('ingredientsTitle') }),
             el('p', { class: 'ingredients', text: p.ingredientsText.replace(/^\s*[\p{L} ]{2,20}[:：]\s*/u, '') }))
         : null,
-      dataLine(p),
+      dbWarn(),
       el('div', { class: 'actions' },
         el('button', { class: 'btn btn-primary', type: 'button', text: t('btn.scanNext'), onclick: scanNext }),
         el('button', { class: 'btn btn-ghost', type: 'button', text: a.verdict === 'unknown' ? t('btn.readLabel') : t('btn.readAgain'), onclick: () => openLabel(p) }),
@@ -792,26 +812,11 @@
     return el('div', {}, chips.length ? el('ul', { class: 'chips' }, chips.map(c => el('li', { text: c }))) : null, allergenLine);
   }
 
-  function dataLine(p) {
-    const sourceName = t('src.' + (p.source || 'label'));
-    return el('p', { class: 'data-line' },
-      isBarcode(p.code) ? t('data.barcode', { code: p.code }) + ' ' : null,
-      (t('data.from', { src: sourceName }) +
-        (p.updated ? t('data.updated', { date: fmtDate(p.updated) })
-          : p.source === 'label' ? t('data.saved', { date: fmtDate(p.fetchedAt) })
-          : p.source === 'own' && p.added ? t('data.added', { date: fmtDate(p.added) }) : '')).replace(/\.?$/, '. '),
-      p.url ? link(p.url, t('data.open')) : null,
-      dbAge()
-    );
-  }
-
-  // "EU data from …", with a warning after 6 months.
-  function dbAge() {
+  // Only when the EU data is more than 6 months old: one orange line (it changes how far a result can be trusted).
+  function dbWarn() {
     const built = META() && Date.parse(META().built);
-    if (!built) return null;
-    const old = Date.now() - built > 183 * 864e5;
-    return el('span', { class: 'dbage' + (old ? ' old' : '') },
-      ' ' + t('data.eu', { date: fmtDate(built) }) + (old ? ' ' + t('data.euOld') : ''));
+    if (!built || Date.now() - built <= 183 * 864e5) return null;
+    return el('p', { class: 'dbage old', text: t('data.eu', { date: fmtDate(built) }) + ' ' + t('data.euOld') });
   }
 
   function setFilter(g) {
@@ -922,10 +927,93 @@
     hideAll();
     showStatus(t('status.notFound', { code }));
     openLabel({ code }, true);
+    renderPick(code);
+    window.scrollTo({ top: 0 });
+  }
+
+  // Products the user may mean: ours without a barcode first, then Recent, then everything saved.
+  function pickPool() {
+    const seen = new Set(), out = [];
+    const add = (p, where) => {
+      if (!p || !p.ingredientsText || seen.has(p.code)) return;
+      seen.add(p.code);
+      out.push({ p, where });
+    };
+    OWN.filter(o => !isBarcode(o.code)).forEach(o => add(ownProduct(o), 'own'));
+    state.history.forEach(h => add(productBy(h.code), 'recent'));
+    Object.values(state.products).forEach(p => add(p, 'saved'));
+    OWN.forEach(o => add(ownProduct(o), 'own'));
+    return out;
+  }
+
+  let pickCode = null, pickQuery = null;
+  function renderPick(code) {
+    if (code !== undefined) { pickCode = code; pickQuery = null; }
+    const box = $('pickBox');
+    const pool = pickPool();
+    if (!pickCode || !pool.length) { box.hidden = true; setLabelTitle(); return; }
+    let items;
+    if (pickQuery === null) {
+      const own = pool.filter(x => x.where === 'own' && !isBarcode(x.p.code));
+      items = own.concat(pool.filter(x => x.where === 'recent').slice(0, 3));
+    } else {
+      const q = LCDB.norm(pickQuery);
+      items = q ? pool.filter(x => LCDB.norm([x.p.brand, x.p.name].join(' ')).includes(q)).slice(0, 8) : [];
+    }
+    const whereText = x => x.where === 'own' ? (isBarcode(x.p.code) ? t('src.ownShort') : t('pick.own')) : t(x.where === 'recent' ? 'start.recent' : 'pick.saved');
+    const row = x => {
+      const v = verdictOf(x.p.code, 'unknown').verdict;
+      return el('li', {},
+        el('span', { class: 'dot ' + VERDICT_DOT[v], 'aria-hidden': 'true' }),
+        el('span', { class: 'nm' },
+          el('strong', { text: x.p.name || t('ph.unnamed') }),
+          el('small', { text: [x.p.brand, whereText(x)].filter(Boolean).join(' · ') })),
+        el('button', {
+          class: 'btn ' + (x.where === 'own' && !isBarcode(x.p.code) ? 'btn-primary' : 'btn-ghost'), type: 'button',
+          text: t('pick.this'), 'aria-label': t('pick.this') + ': ' + (x.p.name || t('ph.unnamed')),
+          onclick: () => linkBarcode(pickCode, x.p)
+        }));
+    };
+    const parts = [el('h3', { text: t('pick.title') }), el('p', { class: 'sub', text: t('pick.sub') })];
+    if (pickQuery === null) {
+      parts.push(el('ul', {}, items.map(row)),
+        el('button', { class: 'linkbtn more', type: 'button', text: t('pick.search'), onclick: () => {
+          pickQuery = '';
+          renderPick();
+          const i = $('pickSearch'); if (i) i.focus();
+        } }));
+    } else {
+      const input = el('input', { id: 'pickSearch', type: 'search', autocomplete: 'off', placeholder: t('pick.ph'), 'aria-label': t('pick.search') });
+      input.value = pickQuery;
+      input.addEventListener('input', () => {
+        pickQuery = input.value;
+        const pos = input.selectionStart;
+        renderPick();
+        const n = $('pickSearch'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) { /* ignore */ } }
+      });
+      parts.push(input, items.length ? el('ul', {}, items.map(row)) : (pickQuery.trim() ? el('p', { class: 'sub none', text: t('pick.none') }) : null));
+    }
+    box.replaceChildren(...parts.filter(Boolean));
+    box.hidden = false;
+    setLabelTitle();
+  }
+
+  // The scanned barcode now opens this product (saved on the phone, also offline; part of the backup).
+  function linkBarcode(code, src) {
+    if (!isBarcode(code) || !src) return;
+    const p = Object.assign({}, src, { code, source: 'label', fetchedAt: Date.now(), linkedFrom: src.code });
+    saveProduct(p);
+    toast(t('toast.linked', { code }));
+    showProduct(p);
+  }
+
+  function setLabelTitle() {
+    $('labelTitle').textContent = t($('pickBox').hidden ? 'label.title' : 'label.titleOr');
   }
 
   function showOffline(code) {
     hideAll();
+    $('scanner').hidden = false;
     showStatus(t('status.offline'), [
       el('button', { class: 'btn btn-primary', type: 'button', text: t('btn.tryAgain'), onclick: () => lookup(code) }),
       el('button', { class: 'btn btn-ghost', type: 'button', text: t('btn.readLabel'), onclick: () => openLabel({ code }, true) })
@@ -1201,6 +1289,9 @@
     labelFor = p && p.code ? p : null;
     const keep = keepStatus && !$('status').hidden;
     showPanel('labelPanel');
+    pickCode = null;
+    $('pickBox').hidden = true;
+    setLabelTitle();
     if (keep) $('status').hidden = false;
     if (!history.state || history.state.view !== 'label') pushState({ tab: 'scan', view: 'label' });
     const panel = $('labelPanel');
@@ -1370,7 +1461,6 @@
     v.hidden = false;
     $('vfIdle').hidden = true;
     $('scanner').classList.add('scanning');
-    $('scanline').hidden = false;
     $('stopCam').hidden = false;
     try { await v.play(); } catch (e) { /* autoplay is allowed for muted video */ }
     scanLoop();
@@ -1401,7 +1491,6 @@
     const v = $('video');
     v.srcObject = null;
     v.hidden = true;
-    $('scanline').hidden = true;
     $('stopCam').hidden = true;
     $('vfIdle').hidden = false;
     $('scanner').classList.remove('scanning');
@@ -1563,6 +1652,7 @@
     if (state.current) renderResult(state.current.p);
     if (!$('searchPanel').hidden) renderSearch();
     if (!$('labelPanel').hidden) $('labelLead').textContent = labelFor && isBarcode(labelFor.code) ? t('label.leadFor', { code: labelFor.code }) : t('label.lead');
+    if (!$('labelPanel').hidden && !$('pickBox').hidden) renderPick();
   }
 
   // ---------- Backup ----------
@@ -1733,6 +1823,10 @@
       settingsChanged();
     });
     $('langSelect').addEventListener('change', e => setLanguage(e.target.value));
+    $('langSwitch').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+      setLanguage(b.dataset.lang);
+      syncSettingsControls();
+    }));
     $('themeSelect').addEventListener('change', e => { state.theme = e.target.value; store.set('theme', state.theme); applyTheme(); });
     $('bigSwitch').addEventListener('change', e => { state.bigText = e.target.checked; store.set('bigText', state.bigText); applyBig(); });
     try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme); } catch (e) { /* old browser */ }

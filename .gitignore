@@ -1,0 +1,12 @@
+# Kept on this PC only, not on GitHub
+HANDOFF*.md
+rules.json
+_sources/
+_proposals/
+_upload-*/
+_v1-backup/
+_to_delete/
+mockups/
+tools/shots/
+push-log.txt
+.commit-msg.txt

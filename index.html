@@ -16,11 +16,17 @@
 <body>
   <header class="topbar">
     <h1>Label Check</h1>
+    <div class="langsw" id="langSwitch" role="group" aria-label="Language">
+      <button type="button" data-lang="en" lang="en" aria-pressed="false">EN</button>
+      <button type="button" data-lang="bg" lang="bg" aria-pressed="false">BG</button>
+    </div>
   </header>
 
   <main>
     <!-- SCAN TAB -->
     <section class="tab" id="tab-scan" data-tab="scan">
+      <div id="status" class="status" role="status" aria-live="polite" hidden></div>
+
       <div id="scanner">
         <div class="startcards">
           <button class="scard primary" id="cardScan" type="button">
@@ -39,7 +45,8 @@
 
         <div class="viewfinder" id="viewfinder">
           <video id="video" playsinline muted hidden></video>
-          <div class="scanline" id="scanline" hidden></div>
+          <div class="vf-box" aria-hidden="true"></div>
+          <p class="vf-tip" data-t="cam.any">Any direction works</p>
           <div class="vf-idle" id="vfIdle">
             <p class="vf-hint" data-t="cam.hint">Point it at the barcode. The scan starts by itself.</p>
           </div>
@@ -62,15 +69,14 @@
         </section>
       </div>
 
-      <div id="status" class="status" hidden></div>
-
       <!-- Result -->
       <article id="result" class="result" hidden aria-live="polite"></article>
 
       <!-- Read a label -->
       <section id="labelPanel" class="panel" hidden>
         <button class="iconbtn panel-back" type="button" data-back><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span data-t="d.back">Back</span></button>
-        <h2 data-t="label.title">Read a label with Claude</h2>
+        <section class="pick" id="pickBox" hidden></section>
+        <h2 id="labelTitle">Read a label with Claude</h2>
         <p class="lead" id="labelLead"></p>
         <ol class="steps">
           <li>
@@ -113,7 +119,6 @@
         <ul class="rows searchlist" id="searchList"></ul>
       </section>
 
-      <div class="credit" id="credit"></div>
     </section>
 
     <!-- FAVOURITES TAB -->
@@ -191,6 +196,7 @@
       <h3 data-t="rules.title">What the app checks</h3>
       <p class="minor" data-t="rules.lead"></p>
       <div id="rulesBox"></div>
+      <div class="credit" id="credit"></div>
 
       <h3 data-t="backup.title">Backup</h3>
       <p class="minor" data-t="backup.lead"></p>
