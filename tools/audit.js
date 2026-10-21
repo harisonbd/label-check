@@ -2,7 +2,9 @@
 // Compares what the app finds in real ingredient lists with the tags that Open Food Facts gives the same products.
 // Open Food Facts tags are made by their own text reader, so a difference is something to look at, not proof of an error.
 // Use:  node tools/audit.js <folder with Open Food Facts search pages (*.json)> [report.md]
-// The GitHub workflow .github/workflows/audit.yml downloads the pages and runs this ("Run workflow" button).
+// Open Food Facts blocks GitHub's servers (503), so there is no workflow for this. Get the pages in a normal browser:
+// https://world.openfoodfacts.org/api/v2/search?countries_tags_en=austria&page_size=100&sort_by=unique_scans_n&fields=code,lang,
+// ingredients_text,ingredients_text_de,ingredients_text_en,ingredients_text_bg,additives_tags,allergens_tags (max 10 searches a minute).
 const fs = require('fs');
 const path = require('path');
 const LCDB = require(path.join(__dirname, '..', 'db.js'));

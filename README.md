@@ -29,9 +29,8 @@ Later it becomes a part of Jarvis.
 | sw.js | Lets the app and the database open without internet |
 | ocr/ | Offline label reader: tesseract.js-core 7.0.0 + language files EN/DE/BG/HU/CS/SK/SL (Apache-2.0, see ocr/README.txt). Loaded only on "Read text" or "Download all languages" |
 | icon-192.png, icon-512.png | App icon |
-| tools/ | Database download (fetch_sources.py), build (build_db.py), tests (test_db.js, test_app.py), IARC list |
+| tools/ | Database download (fetch_sources.py), build (build_db.py), tests (test_db.js, test_app.py), accuracy check (audit.js), IARC list |
 | .github/workflows/update-db.yml | Monthly automatic database update on GitHub |
-| .github/workflows/audit.yml | Accuracy check by hand: compares our finds with Open Food Facts tags on real products (tools/audit.js) |
 
 ## Change the data or a text
 

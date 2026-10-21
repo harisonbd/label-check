@@ -344,13 +344,13 @@
   const ALLERGEN_TAG = /^en:(gluten|crustaceans|eggs|fish|peanuts|soybeans|milk|nuts|celery|mustard|sesame-seeds|sulphur-dioxide-and-sulphites|lupin|molluscs)$/;
 
   function analyzeFood(p, text) {
-    const segs = LCDB.splitIngredients(text);
+    const { segs, traceFrom } = LCDB.labelSegments(text);   // pieces from traceFrom on are "may contain traces"
     const segN = segs.map(nrm);
     const res = LCDB.checkFood(text, LANG);
     const blank = (pos, txt, label) => ({ pos, kind: 'food', text: txt, label, additives: [], rules: [], allergens: [] });
     // Name = the part before any bracket ("Nitritpökelsalz (Speisesalz, …)" -> "Nitritpökelsalz"); full text on the detail screen.
     const shortSeg = s => cleanSeg(s.replace(/\s*[([][^)\]]*[)\]]/g, ' ')) || cleanSeg(s);
-    const rows = segs.map((s, i) => blank(i + 1, s, shortSeg(s)));
+    const rows = segs.map((s, i) => Object.assign(blank(i + 1, s, shortSeg(s)), { trace: i + 1 >= traceFrom }));
     const extra = [];
     const at = pos => (pos && rows[pos - 1]) || null;
 
@@ -398,6 +398,7 @@
       for (const x of [...row.additives, ...row.rules]) if (SEV[x.level] > SEV[level]) level = x.level;
       const mine = matchAvoid([row.text, ...row.additives.map(a => a.e + ' ' + a.name)]);
       const ticked = row.allergens.filter(a => state.allergens.food.includes(a.id));
+      row.traceOnly = row.allergens.length > 0 && row.allergens.every(a => a.trace);   // allergens only from "may contain traces"
       const vg = veganOf(row);
       const veganHit = state.vegan && vg.no.length > 0;
       const why = level === 'b' ? 'b' : mine ? 'mine' : ticked.length ? 'allergen' : veganHit ? 'vegan' : null;
@@ -424,6 +425,7 @@
   // What in this row comes from animals (no) or may come from animals (maybe).
   function veganOf(row) {
     const no = [], maybe = [];
+    if (row.trace) return { no, maybe };   // traces are not ingredients
     for (const a of row.additives) {
       if (a.vegan === 'no') no.push(cap(a.name));
       else if (a.vegan === 'maybe') maybe.push(cap(a.name));
@@ -446,7 +448,7 @@
     if (row.fromData) parts.push(t('tag.fromData'));
     if (row.why === 'b') return { lvl: { text: levelName('b'), g: 'red' }, parts };
     if (row.why === 'mine') return { lvl: { text: t('tag.mine'), g: 'red' }, parts: parts.concat(al) };
-    if (row.why === 'allergen') return { lvl: { text: t('tag.allergenYours'), g: 'red' }, parts: row.tickedAllergens.map(a => cap(a.name)).concat(parts) };
+    if (row.why === 'allergen') return { lvl: { text: t(row.traceOnly ? 'tag.tracesYours' : 'tag.allergenYours'), g: 'red' }, parts: row.tickedAllergens.map(a => cap(a.name)).concat(parts) };
     if (row.why === 'vegan') {
       const what = row.vegan.no.filter(n => n.toLowerCase() !== row.label.toLowerCase());
       return { lvl: { text: t('chip.vegan'), g: 'red' }, parts: (what.length ? what : [t('tag.animal')]).concat(parts.filter(x => !row.vegan.no.some(n => x.includes(n)))) };
@@ -825,8 +827,13 @@
     };
     if (a.verdict === 'avoid') {
       const red = a.rows.filter(r => r.group === 'red');
-      const whys = [...new Set(red.map(r => t('qa.why.' + r.why)))];
-      return [el('p', { class: 'qy', text: t('qa.contains', { names: names(red) }) }), el('p', { class: 'qr', text: t('qa.reason', { why: whys.join(', ') }) })];
+      const trc = red.filter(r => r.why === 'allergen' && r.traceOnly), inn = red.filter(r => !trc.includes(r));
+      const whys = [...new Set(red.map(r => t(r.why === 'allergen' && r.traceOnly ? 'qa.why.traces' : 'qa.why.' + r.why)))];
+      return [
+        inn.length ? el('p', { class: 'qy', text: t('qa.contains', { names: names(inn) }) }) : null,
+        trc.length ? el('p', { class: 'qy', text: t('qa.mayContain', { names: names(trc) }) }) : null,
+        el('p', { class: 'qr', text: t('qa.reason', { why: whys.join(', ') }) })
+      ].filter(Boolean);
     }
     if (a.verdict === 'check') {
       const or = a.rows.filter(r => r.group === 'orange');
@@ -940,12 +947,13 @@
     let allergenLine = null;
     if (p.kind === 'food' || !p.kind) {
       const names = Object.fromEntries(LCDB.foodAllergens(LANG).map(x => [x.id, x.name]));
-      const ids = new Set();
-      a.rows.forEach(r => (r.allergens || []).forEach(x => ids.add(x.id)));
+      const ids = new Set(), inside = new Set();
+      a.rows.forEach(r => (r.allergens || []).forEach(x => { ids.add(x.id); if (!x.trace) inside.add(x.id); }));
+      (p.allergens || []).forEach(tag => { const m = String(tag).match(ALLERGEN_TAG); if (m) inside.add(m[1]); });
       (p.allergens || []).forEach(tag => { const m = String(tag).match(ALLERGEN_TAG); if (m) ids.add(m[1]); });
       if (ids.size) {
         const parts = [...ids].map(id => {
-          const name = cap(names[id] || id);
+          const name = cap(names[id] || id) + (inside.has(id) ? '' : ' (' + t('tag.traceShort') + ')');
           return state.allergens.food.includes(id) ? el('strong', { class: 'lvl g-red', text: name }) : name;
         });
         allergenLine = el('p', { class: 'allergen-line' }, el('strong', { text: t('allergens') + ': ' }),
@@ -1015,10 +1023,10 @@
 
   // Short coloured tag on the right of a row.
   function chipOf(r) {
-    const k = r.why === 'b' ? 'chip.b' : r.why === 'use' ? 'chip.use' : r.why === 'mine' ? 'chip.mine' : r.why === 'allergen' ? 'chip.yourAlg'
+    const k = r.why === 'b' ? 'chip.b' : r.why === 'use' ? 'chip.use' : r.why === 'mine' ? 'chip.mine' : r.why === 'allergen' ? (r.traceOnly ? 'chip.traces' : 'chip.yourAlg')
       : r.why === 'fragrance' ? 'chip.frag' : r.why === 'vegan' ? 'chip.vegan' : r.banCos ? 'chip.banCos'
       : r.group === 'orange' ? (r.level === 'u' ? 'chip.u' : 'chip.c')
-      : r.group === 'info' ? (r.level === 'r' ? 'chip.r' : r.allergen || (r.allergens && r.allergens.length) ? 'chip.alg' : 'chip.maybeVegan') : null;
+      : r.group === 'info' ? (r.level === 'r' ? 'chip.r' : r.traceOnly ? 'chip.traces' : r.allergen || (r.allergens && r.allergens.length) ? 'chip.alg' : 'chip.maybeVegan') : null;
     return k ? t(k) : null;
   }
   // EU rules that are only for cosmetics (CosIng annexes, MI and formaldehyde-releaser rules).
@@ -1411,6 +1419,7 @@
         body.push(el('div', { class: 'd-card' },
           el('h3', { text: t('tag.foodAllergen', { name: cap(al.name) }) }),
           el('p', { text: foodAlText }),
+          al.trace ? el('p', { text: t('d.traces') }) : null,
           el('p', { class: 'minor', text: t(ticked ? 'd.allergenTicked' : 'd.allergenNot') })
         ));
       }

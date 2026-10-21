@@ -25,12 +25,44 @@
   // Names missing in the Open Food Facts data (move into build_db.py later).
   const EXTRA_ALLERGEN_NAMES = {
     milk: ['краве масло', 'масло от краве мляко'],
+    'sesame-seeds': ['сусам', 'сусамово семе', 'сусамови семена'],
     // HU / CS / SK / SL word forms seen on labels that the data lists only in another form
     gluten: ['búzaliszt', 'pšeničná mouka', 'pšeničná múka', 'pšenična moka', 'pšeničný', 'pšeničná', 'pšenična', 'pšenični'],
     soybeans: ['szója', 'szójalecitin', 'sójový', 'sójová', 'sójový lecitin', 'sójový lecitín', 'sojin', 'sojin lecitin']
   };
   // Additive names seen on real labels but missing in the data (move into build_db.py later).
-  const EXTRA_ADDITIVE_NAMES = { e464: { bg: ['хипромелоза'] }, e551: { bg: ['силиконов диоксид', 'силициев двуокис'] }, e322: { hu: ['szójalecitin', 'napraforgó-lecitin'] } };
+  const EXTRA_ADDITIVE_NAMES = {
+    e464: { bg: ['хипромелоза'] }, e551: { bg: ['силиконов диоксид', 'силициев двуокис'] },
+    e322: { hu: ['szójalecitin', 'napraforgó-lecitin'], de: ['sojalecithin', 'sojalecithine', 'sonnenblumenlecithin', 'sonnenblumenlecithine', 'rapslecithin', 'rapslecithine'] },
+    e290: { de: ['kohlensäure'] }, e410: { de: ['johannisbrotkernmehl'] }
+  };
+  // German compound words (v2.9): "Hartweizengrieß", "Vollmilchpulver", "Haselnusskerne" hold an allergen word inside.
+  // [stem, words to skip (regex), mode]: 'in' = anywhere in a longer word (default), 'start' = word starts with it,
+  // 'edge' = word starts or ends with it. Whole words are found by the normal names (with PLANT_BUTTER).
+  // Measured on 342 German Open Food Facts products: missed allergens 95 -> 55, no new wrong finds.
+  const ALLERGEN_STEMS = {
+    gluten: [['weizen', 'buchweizen'], ['dinkel'], ['roggen'], ['gerste'], ['hafer'], ['grunkern'], ['emmer'], ['kamut'], ['einkorn'], ['triticale']],
+    milk: [['milch', 'kokosmilch|mandelmilch|hafermilch|sojamilch|reismilch|cashewmilch|milchsaure'], ['sahne'], ['rahm'],
+      ['butter', 'kakaobutter|cacaobutter|sheabutter|erdnussbutter|mandelbutter|nussbutter|kokosbutter|mangobutter'], ['molke'],
+      ['kase', 'kasein'], ['kasein'], ['joghurt', 'sojajoghurt|kokosjoghurt|joghurtkultur'], ['quark'], ['laktose', 'laktosefrei'],
+      ['lactose', 'lactosefrei'], ['topfen']],
+    soybeans: [['soja']],
+    eggs: [['eigelb'], ['eiklar'], ['eidotter'], ['vollei'], ['huhnerei'], ['eipulver'], ['trockenei'], ['flussigei'], ['eier', '', 'start']],
+    nuts: [['haselnuss'], ['mandel'], ['walnuss'], ['cashew'], ['pistazie'], ['pekannuss'], ['paranuss'], ['macadamia'], ['schalenfrucht']],
+    peanuts: [['erdnuss']], celery: [['sellerie']], mustard: [['senf', '', 'edge']], 'sesame-seeds': [['sesam']], lupin: [['lupine']],
+    fish: [['fisch', 'tintenfisch']], crustaceans: [['garnele'], ['krabbe'], ['krebs'], ['hummer']], molluscs: [['muschel'], ['tintenfisch'], ['kalmar']]
+  };
+  const STEM_LIST = Object.entries(ALLERGEN_STEMS).flatMap(([id, list]) => list.map(([s, ex, mode]) => ({ id, s, ex: ex ? new RegExp(ex) : null, mode: mode || 'in' })));
+  function stemAllergen(word) {
+    for (const x of STEM_LIST) {
+      if (word.length <= x.s.length) continue;          // a whole word is found by the normal names
+      const ok = x.mode === 'start' ? word.startsWith(x.s) : x.mode === 'edge' ? (word.startsWith(x.s) || word.endsWith(x.s)) : word.includes(x.s);
+      if (ok && !(x.ex && x.ex.test(word))) return x;
+    }
+    return null;
+  }
+  // "May contain traces" (v2.9): the part of a label after these words lists traces, not ingredients.
+  const TRACES_RE = /(kann\s+spuren|kann\s+[^.;]{0,40}?spuren|spuren\s+von|may\s+contain|traces\s+of|can\s+contain\s+traces|може\s+да\s+съдържа|следи\s+от|nyomokban|tartalmazhat|může\s+obsahovat|môže\s+obsahovať|lahko\s+vsebuje|sledi)/i;
   const additiveNames = (a, lang) => (a.n[lang] || []).concat((EXTRA_ADDITIVE_NAMES[a.e] || {})[lang] || []);
   // Plant fats called "butter" are not milk: "cocoa butter" -> "cocoa" before the allergen check.
   const PLANT_BUTTER = / (cocoa|cacao|shea|mango|kokum|illipe|sal|peanut|almond|cashew|hazelnut|nut|seed) butter(?= )/g;
@@ -202,9 +234,19 @@
     const body = t.split('*').map(p => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[a-z0-9\\u0430-\\u044f]*');
     return new RegExp('(?:^| )' + body + '(?= |$)');
   }
+  // Label -> ingredient pieces. The text from the first "may contain traces" words on is cut off first
+  // ("Hartweizengrieß. Kann Spuren von Soja …"), so pieces from traceFrom on are traces. The app uses the same pieces.
+  function labelSegments(text) {
+    const s = String(text || ''), m = TRACES_RE.exec(s);
+    const main = splitIngredients(m ? s.slice(0, m.index) : s);
+    const traces = m ? splitIngredients(s.slice(m.index)) : [];
+    return { segs: main.concat(traces), traceFrom: m ? main.length + 1 : Infinity };
+  }
+
   function checkFood(text, lang) {
     lang = lang || 'en';
-    const segs = splitIngredients(text).map(norm);
+    const { segs: rawSegs, traceFrom } = labelSegments(text);
+    const segs = rawSegs.map(norm);
     const whole = ' ' + segs.join(' | ') + ' ';
     const posOf = t => { const i = segs.findIndex(s => (' ' + s + ' ').includes(' ' + t + ' ')); return i >= 0 ? i + 1 : null; };
     const found = new Map();
@@ -214,9 +256,19 @@
       const a = eIndex.get(k) || eIndex.get('e' + m[1]);
       if (a && !found.has(a.e)) found.set(a.e, { a, by: 'e' + m[1] + (m[2] || ''), pos: posOf('e' + m[1] + (m[2] || '')) || posOf(norm(m[0])) });
     }
+    // Longest names first. A shorter name that lies fully inside an already matched name is not found again
+    // ("sodium hydrogen carbonate" is E500, not also E502 "carbonate" and E949 "hydrogen"). Names that only
+    // overlap still count ("Kupferkomplexe der Chlorophylle und Chlorophylline" = E141 and E140).
+    const spans = [];
     for (const [t, a] of foodNames) {
-      if (found.has(a.e)) continue;
-      if (whole.includes(' ' + t + ' ')) found.set(a.e, { a, by: t, pos: posOf(t) });
+      const needle = ' ' + t + ' ';
+      let i = whole.indexOf(needle), hit = false;
+      while (i >= 0) {
+        const s = i + 1, e = i + needle.length - 1;
+        if (!spans.some(([s0, e0]) => s >= s0 && e <= e0)) { spans.push([s, e]); hit = true; }
+        i = whole.indexOf(needle, i + 1);
+      }
+      if (hit && !found.has(a.e)) found.set(a.e, { a, by: t, pos: posOf(t) });
     }
     const additives = [...found.values()].map(({ a, by, pos }) => {
       const reasons = reasonsFor(a.refs, a.fl, lang, a);
@@ -227,17 +279,28 @@
       };
     }).sort((x, y) => (x.pos || 999) - (y.pos || 999));
     const allergens = new Map();
-    const wholeA = whole.replace(PLANT_BUTTER, ' $1');
+    const alById = new Map(FOOD.allergens.map(al => [al.id, al]));
+    const addAl = (al, t, pos) => {
+      const trace = pos !== null && pos >= traceFrom;
+      const old = allergens.get(al.id);
+      // An allergen in the ingredients wins over the same allergen in the traces line.
+      if (!old || (old.trace && !trace)) allergens.set(al.id, { id: al.id, name: allergenName(al, lang), matched: t, pos, trace });
+    };
+    const segsA = segs.map(s => (' ' + s + ' ').replace(PLANT_BUTTER, ' $1'));
     for (const [t, al] of allergenNames) {
-      if (!allergens.has(al.id) && wholeA.includes(' ' + t + ' ')) allergens.set(al.id, { id: al.id, name: allergenName(al, lang), matched: t, pos: posOf(t) });
+      segsA.forEach((s, i) => { if (s.includes(' ' + t + ' ')) addAl(al, t, i + 1); });
     }
+    // German compound words
+    segs.forEach((s, i) => {
+      for (const w of s.split(' ')) { const x = stemAllergen(w); if (x && alById.has(x.id)) addAl(alById.get(x.id), w, i + 1); }
+    });
     const rules = [];
     for (const r of FOOD.rules) {
       const terms = Object.values(r.terms).flat();
       const hit = terms.find(t => termRegex(t).test(segs.join(' ')));
       if (hit) rules.push({ id: r.id, level: r.lv, matched: hit, reasons: reasonsFor(r.refs, '', lang) });
     }
-    return { additives, allergens: [...allergens.values()], rules };
+    return { additives, allergens: [...allergens.values()].sort((x, y) => (x.pos || 999) - (y.pos || 999)), rules, traceFrom };
   }
 
   // ---------- tick lists for the allergen profile
@@ -295,6 +358,6 @@
     return [...hits.values()].sort((x, y) => (x.score - y.score) || (x.name.length - y.name.length)).slice(0, limit);
   }
 
-  const api = { load, norm, splitIngredients, checkCosmetic, checkFood, cosAllergens, foodAllergens, search, meta: () => META, SEV };
+  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, checkFood, cosAllergens, foodAllergens, search, meta: () => META, SEV };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.LCDB = api;
 })(typeof window !== 'undefined' ? window : globalThis);

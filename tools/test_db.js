@@ -119,6 +119,25 @@ const ok = (cond, msg) => { if (!cond) { fails++; console.log('  FAIL: ' + msg);
   ok(f.e('E464') && f.e('E551') && f.e('E572'), 'хипромелоза = E464, силиконов диоксид = E551, магнезиев стеарат = E572');
   ok(LCDB.search('хипромелоза', 5)[0].id === 'e464', 'search хипромелоза -> E464');
 
+  console.log('\n13 German compound words, traces, no double finds (v2.9)');
+  const tr = (r, id) => (r.res.allergens.find(a => a.id === id) || {}).trace;
+  f = food('Hartweizengrieß. Kann Spuren von Soja, Senf und Lupinen enthalten.', 'de');
+  ok(f.al('gluten') && tr(f, 'gluten') === false, 'Hartweizengrieß = gluten, in the ingredients');
+  ok(f.al('soybeans') && tr(f, 'soybeans') === true && tr(f, 'mustard') === true && tr(f, 'lupin') === true, 'Kann Spuren von Soja, Senf, Lupinen = traces');
+  f = food('Vollmilchschokolade 60% (Rohrzucker, Kakaobutter, Vollmilchpulver, Kakaomasse), _Schlagsahne_, Haselnusskerne, Volleipulver, Sojalecithin', 'de');
+  ok(f.al('milk') && f.al('nuts') && f.al('eggs') && f.al('soybeans') && f.e('E322'), 'Vollmilchpulver, Schlagsahne, Haselnusskerne, Volleipulver, Sojalecithin');
+  f = food('Buchweizenmehl, Kokosmilch, Kakaobutter, Erbsenfasern, Joghurtkulturen, Milchsäure, laktosefreier Hüttenkäse aus Mandelmilch', 'de');
+  ok(!f.al('gluten') && !f.al('mustard') && !f.al('eggs'), 'Buchweizen, Erbsenfasern, laktosefreier: no gluten / mustard / eggs');
+  f = food('Buchweizenmehl, Kokosmilch, Kakaobutter, Erbsenfasern, Joghurtkulturen, Milchsäure', 'de');
+  ok(!f.al('milk'), 'Kokosmilch, Kakaobutter, Joghurtkulturen, Milchsäure: not milk');
+  f = food('sugar, milk powder, wheat flour. May contain nuts and milk.', 'en');
+  ok(tr(f, 'milk') === false && tr(f, 'nuts') === true && tr(f, 'gluten') === false, 'EN: milk in the ingredients wins over "may contain milk"; nuts = traces');
+  f = food('Съставки: захар, брашно. Може да съдържа следи от фъстъци и сусам.', 'bg');
+  ok(tr(f, 'peanuts') === true && tr(f, 'sesame-seeds') === true, 'BG: може да съдържа следи от фъстъци и сусам = traces');
+  f = food('raising agents (sodium hydrogen carbonate, ammonium carbonates), Mono- und Diglyceride von Speisefettsäuren', 'en');
+  ok(f.e('E500') && f.e('E503') && f.e('E471') && !f.e('E502') && !f.e('E949') && !f.e('E570'), 'no E502 / E949 / E570 inside longer names');
+  ok(LCDB.labelSegments('Zucker, Mehl. Kann Spuren von Nüssen enthalten.').traceFrom === 3, 'labelSegments: traces start at piece 3');
+
   console.log('\n11 Label languages HU / CS / SK / SL (v2.8)');
   f = food('Összetevők: búzaliszt, cukor, pálmaolaj, tejpor, emulgeálószer: szójalecitin, citromsav, tartósítószer: nátrium-nitrit, mogyoró', 'en');
   ok(f.e('E250') && f.e('E330') && f.e('E322') && f.al('milk') && f.al('gluten') && f.al('soybeans') && f.al('nuts'), 'HU: E250 E330 E322, milk gluten soy nuts');

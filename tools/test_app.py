@@ -456,7 +456,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.8' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.8" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.9' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.9" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -559,6 +559,20 @@ with sync_playwright() as p:
     ok(word(pg) == 'Провери' and pg.inner_text('#answer .qr') == 'Причина: не е разрешено в козметика в ЕС. За битова химия правилата са други.', 'household: an EU cosmetics ban is orange "not in cosmetics", not red')
     ctx.close()
 
+    print('v2.9: German compound words and "may contain traces"')
+    ctx, pg = new_page(b, base, 'bg-BG', dark=True, width=390)
+    pg.evaluate("localStorage.setItem('lc.allergens', JSON.stringify({ food: ['soybeans', 'gluten'], cos: [] }))"); reload_ready(pg)
+    read_label(pg, 'Zutaten: Zucker, Kakaobutter. Kann Spuren von Soja enthalten.', 'food')
+    ok(word(pg) == 'Избягвай' and pg.inner_text('#answer .qy') == 'Може да съдържа следи: Соя' and 'следи от твой алерген' in pg.inner_text('#answer .qr'),
+       'ticked soy only in "Kann Spuren von Soja": red, "Може да съдържа следи", reason "следи от твой алерген" (%s / %s)' % (pg.inner_text('#answer .qy'), pg.inner_text('#answer .qr')))
+    open_details(pg)
+    ok('(следи)' in pg.inner_text('.allergen-line') and pg.inner_text('#groups li:has-text("Soja") .chip') == 'Може да съдържа', 'Details: allergen line "(следи)", row chip "Може да съдържа"')
+    pg.screenshot(path=os.path.join(SHOTS, 'v29-traces-bg.png'))
+    pg.click('.tabbar button[data-go=scan]')
+    read_label(pg, 'Zutaten: Hartweizengrieß, Wasser', 'food')
+    ok(word(pg) == 'Избягвай' and pg.inner_text('#answer .qy') == 'Съдържа: Глутен' and pg.inner_text('#answer .qr') == 'Причина: твой алерген', 'Hartweizengrieß with gluten ticked: red "Съдържа: Глутен"')
+    ctx.close()
+
     print('v2.8: backup note, app shortcuts, text cut at a 2nd heading, 320 px')
     ctx, pg = new_page(b, base, 'bg-BG', dark=False, width=320)
     ok(pg.is_hidden('#bkNote'), 'no backup note while nothing is saved')
@@ -603,7 +617,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v11')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v12')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -646,7 +660,7 @@ with sync_playwright() as p:
     pg = ctx.new_page(); pg.on('pageerror', lambda e: errors.append(str(e)))
     pg.goto(base2); pg.evaluate('navigator.serviceWorker.ready'); pg.reload(); pg.evaluate('LC.dbReady')
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v11'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v12'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
