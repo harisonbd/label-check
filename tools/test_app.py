@@ -94,7 +94,8 @@ def no_side_scroll(pg):
 
 def card_fits(pg):
     # The answer word and lines are not cut and do not stick out of the card
-    return pg.evaluate('(() => { const c = document.getElementById("answer"); return c.scrollWidth <= c.clientWidth + 1 && [...c.querySelectorAll(".qw b, .qy")].every(e => e.scrollWidth <= e.clientWidth + 1); })()')
+    # v2.12.1: also no loose text in the card (a missing legend once showed as the word "null")
+    return pg.evaluate('(() => { const c = document.getElementById("answer"); return c.scrollWidth <= c.clientWidth + 1 && [...c.querySelectorAll(".qw b, .qy")].every(e => e.scrollWidth <= e.clientWidth + 1) && [...c.childNodes].every(n => n.nodeType !== 3 || !n.textContent.trim()); })()')
 
 srv = serve()
 base = 'http://127.0.0.1:%d/index.html' % srv.server_address[1]
@@ -456,7 +457,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.12' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.12" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.12.1' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.12.1" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -752,6 +753,11 @@ with sync_playwright() as p:
     if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
     read_label(pg, 'Zucker, Wsxq lorem, Bnmz ipsum, Plkr dolor', 'food')
     ok(pg.locator('.strip .g-nodata').count() == 0 and pg.locator('#legend').count() == 0, 'food: no grey blocks, no legend')
+    ok(card_fits(pg) and 'null' not in pg.inner_text('#answer'), 'no legend: nothing else under the strip (bug in v2.12: the word "null")')
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    read_label(pg, 'Aqua, Sodium Laureth Sulfate, Glycerin, Citric Acid, Parfum', 'cosmetic')
+    ok(card_fits(pg) and 'null' not in pg.inner_text('#answer') and pg.locator('#legend').count() == 0, 'cosmetic, all names known: no legend, no "null"')
     # My list: taught names, delete; backup
     with pg.expect_download() as dl:
         pg.click('.tabbar button[data-go=list]'); pg.click('#moreFold summary'); pg.click('#exportBtn')
@@ -802,7 +808,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v15')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v16')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -845,7 +851,7 @@ with sync_playwright() as p:
     pg = ctx.new_page(); pg.on('pageerror', lambda e: errors.append(str(e)))
     pg.goto(base2); pg.evaluate('navigator.serviceWorker.ready'); pg.reload(); pg.evaluate('LC.dbReady')
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v15'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v16'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)

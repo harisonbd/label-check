@@ -846,10 +846,13 @@
           'aria-label': (r.pos ? '#' + r.pos + ' ' : '') + r.label + ', ' + t('g.' + r.group),
           onclick: e => { toggleDetails(true); jumpTo(r.i, e.currentTarget); }
         }))),
-        el('div', { class: 'strip-ends', 'aria-hidden': 'true' }, el('span', { text: t('strip.first') }), el('span', { text: t('strip.last') })),
-        a.rows.some(r => r.group === 'nodata') ? el('p', { class: 'legend', id: 'legend' },
+        el('div', { class: 'strip-ends', 'aria-hidden': 'true' }, el('span', { text: t('strip.first') }), el('span', { text: t('strip.last') })));
+      // Only with grey blocks. (append() writes a missing element as the text "null", so no "cond ? el : null" here.)
+      if (a.rows.some(r => r.group === 'nodata')) {
+        card.append(el('p', { class: 'legend', id: 'legend' },
           el('span', {}, el('i', { class: 'g-green', 'aria-hidden': 'true' }), t('legend.green')),
-          el('span', {}, el('i', { class: 'g-nodata', 'aria-hidden': 'true' }), t('legend.nodata'))) : null);
+          el('span', {}, el('i', { class: 'g-nodata', 'aria-hidden': 'true' }), t('legend.nodata'))));
+      }
     }
     return card;
   }
