@@ -1,7 +1,7 @@
 /* Label Check — service worker.
    Keeps the app files and the ingredient database on the phone so the app opens without internet.
    When you change any app file or the database, raise the version number below. */
-const VERSION = 'label-check-v18';
+const VERSION = 'label-check-v19';
 const SHARE = 'lc-share';   // a photo shared to the app waits here until the page picks it up
 const FILES = [
   './',
@@ -27,7 +27,8 @@ self.addEventListener('install', event => {
 // They never change under the same name, so a new VERSION takes them over from the old cache.
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
-    const keys = (await caches.keys()).filter(k => k !== VERSION && k !== SHARE);
+    // Other apps on this website (Pocket Docs, Sun Launcher) share Cache Storage: touch only our own old caches.
+    const keys = (await caches.keys()).filter(k => k.startsWith('label-check-') && k !== VERSION);
     const now = await caches.open(VERSION);
     for (const k of keys) {
       const old = await caches.open(k);
