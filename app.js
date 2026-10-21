@@ -80,6 +80,7 @@
     lang: store.get('lang', 'auto'),
     theme: store.get('theme', 'auto'),
     bigText: store.get('bigText', false),
+    vibrate: store.get('vibrate', true),        // v2.13: buzz on a new result (1 = no warnings, 2 = check, 3 = avoid)
     current: null,   // { p, a } shown on the scan tab
     detailsOpen: false, // "Details" under the answer card
     filter: null,    // group shown alone, or null
@@ -244,10 +245,13 @@
     const listed = rows.filter(r => r.kind === 'cosmetic' && r.pos);
     const unknown = listed.filter(isUnknown).length, known = listed.length - unknown;
     const partial = listed.length >= 3 && known / listed.length < PARTIAL_MIN;
-    const verdict = counts.red ? 'avoid' : counts.orange ? 'check' : rows.length ? (partial ? 'partial' : 'ok') : 'unknown';
+    // v2.13: text read from a photo where the app found no ingredients heading ("Zutaten:", "Съставки:" …) may be the
+    // wrong text (a nutrition table, another language, no list at all). It is never shown as "No warnings".
+    const noList = !!(p.read && p.read.photo && !p.read.list);
+    const verdict = counts.red ? 'avoid' : counts.orange ? 'check' : rows.length ? (partial || noList ? 'partial' : 'ok') : 'unknown';
     return {
-      verdict, rows, counts, known, unknown,
-      summary: summarize(verdict, rows, counts, { n: known, of: listed.length }),
+      verdict, rows, counts, known, unknown, noList,
+      summary: summarize(verdict, rows, counts, { n: known, of: listed.length, noList }),
       total: rows.filter(r => r.pos).length,
       fragrance: rows.filter(r => r.fragrance || r.allergen).length
     };
@@ -304,31 +308,60 @@
     return LCDB.checkCosmetic(text, LANG).map(r => {
       const det = household && !r.found ? detergentTerm(r.text) : null;
       if (det) r = Object.assign({}, r, { found: true, name: null, functions: [t('det.fn') + (det.range ? ' · ' + det.range : '')], reasons: [] });
-      // A name you taught the app ("GLYCERN" = Glycerin): checked as that ingredient, the label text stays as it is
+      // A name you taught the app ("GLYCERN" = Glycerin): checked as that ingredient, the label text stays as it is.
+      // An entry without "to" means: you said the app's correction is wrong, so it stays unknown.
       const taught = !r.found && !det ? taughtFor(r.text) : null;
-      if (taught) {
-        const k = LCDB.checkCosmetic(taught.to + (r.nano ? ' (nano)' : ''), LANG).find(x => x.found);
-        if (k) r = Object.assign({}, k, { pos: r.pos, text: r.text, mayContain: r.mayContain });
-      }
-      // Household: an EU cosmetics ban is shown as orange "not in cosmetics" (detergents have other EU rules).
-      const banCos = household && r.level === 'b';
-      const level = banCos ? 'c' : r.level;
-      const mine = matchAvoid([r.text, r.found && r.name ? r.name : '']);
-      const tickedAllergen = !!(r.allergen && state.allergens.cos.includes(r.allergenRef));
-      const fragAvoid = !!(state.avoidFragrance && (r.fragrance || r.allergen));
-      const useHit = !household && use === 'leave' && (r.reasons || []).some(rinseOnly);
-      const why = level === 'b' ? 'b' : useHit ? 'use' : mine ? 'mine' : tickedAllergen ? 'allergen' : fragAvoid ? 'fragrance' : null;
-      const row = {
-        pos: r.pos, kind: 'cosmetic', text: r.text, household, banCos, det, taught: taught && r.found ? taught : null,
-        label: det ? t('det.' + det.key) : r.found ? niceName(r.name) : cleanSeg(r.text),
-        level, why, mine, tickedAllergen, fragAvoid, useHit,
-        fragrance: r.fragrance, allergen: r.allergen, nano: r.nano, mayContain: r.mayContain, found: r.found, src: r
+      const asIngredient = name => {
+        const k = LCDB.checkCosmetic(name + (r.nano ? ' (nano)' : ''), LANG).find(x => x.found);
+        return k ? Object.assign({}, k, { pos: r.pos, text: r.text, mayContain: r.mayContain }) : null;
       };
-      // Grey "No data": the app knows nothing about the name. Green: a known name with nothing on the EU lists.
-      row.group = why ? 'red' : isUnknown(row) ? 'nodata' : LEVEL_GROUP[level] || 'green';
-      row.sub = cosmeticSub(row);
+      if (taught && taught.to) { const k = asIngredient(taught.to); if (k) r = k; }
+      const row = cosRow(r, use, household, det);
+      row.taught = taught && taught.to && r.found ? taught : null;
+      // v2.13: names the photo reader got a little wrong. EU cosmetic labels must use the EU / INCI names, so an
+      // unknown name with one clear close name is almost always that name.
+      if (isUnknown(row) && !taught) {
+        const sug = LCDB.suggestCosmetic(r.text, true);
+        if (sug && sug.choices) row.choices = sug.choices;                    // (c) two or more close names: you choose
+        else if (sug && sug.inci) {
+          const k = asIngredient(sug.inci);
+          const cand = k ? cosRow(k, use, household, null) : null;
+          if (cand && cand.group !== 'red' && cand.group !== 'orange') {    // (a) no warning: the app corrects it
+            cand.auto = { from: sug.from, to: sug.inci };
+            cand.sub = cosmeticSub(cand);
+            return cand;
+          }
+          if (cand) {                                                        // (b) a warning: never decided alone
+            row.ask = { from: sug.from, to: sug.inci, group: cand.group, level: cand.level, why: cand.why, src: cand.src };
+            row.group = 'orange';
+            row.label = niceName(sug.inci) + '?';
+            row.sub = cosmeticSub(row);
+          }
+        }
+      }
       return row;
     });
+  }
+
+  function cosRow(r, use, household, det) {
+    // Household: an EU cosmetics ban is shown as orange "not in cosmetics" (detergents have other EU rules).
+    const banCos = household && r.level === 'b';
+    const level = banCos ? 'c' : r.level;
+    const mine = matchAvoid([r.text, r.found && r.name ? r.name : '']);
+    const tickedAllergen = !!(r.allergen && state.allergens.cos.includes(r.allergenRef));
+    const fragAvoid = !!(state.avoidFragrance && (r.fragrance || r.allergen));
+    const useHit = !household && use === 'leave' && (r.reasons || []).some(rinseOnly);
+    const why = level === 'b' ? 'b' : useHit ? 'use' : mine ? 'mine' : tickedAllergen ? 'allergen' : fragAvoid ? 'fragrance' : null;
+    const row = {
+      pos: r.pos, kind: 'cosmetic', text: r.text, household, banCos, det,
+      label: det ? t('det.' + det.key) : r.found ? niceName(r.name) : cleanSeg(r.text),
+      level, why, mine, tickedAllergen, fragAvoid, useHit,
+      fragrance: r.fragrance, allergen: r.allergen, nano: r.nano, mayContain: r.mayContain, found: r.found, src: r
+    };
+    // Grey "No data": the app knows nothing about the name. Green: a known name with nothing on the EU lists.
+    row.group = why ? 'red' : isUnknown(row) ? 'nodata' : LEVEL_GROUP[level] || 'green';
+    row.sub = cosmeticSub(row);
+    return row;
   }
 
   // A cosmetic name on the label that is not in our data (fragrance words count as known: the app knows they are fragrance)
@@ -348,6 +381,7 @@
   function cosmeticTags(row) {
     const tags = [];
     if (row.taught) tags.push(t('tag.taught'));
+    if (row.auto) tags.push(t('tag.auto'));
     if (row.allergen) tags.push(t('tag.allergen'));
     else if (row.fragrance) tags.push(t('tag.fragrance'));
     if (row.nano) tags.push(t('tag.nano'));
@@ -359,6 +393,7 @@
   function cosmeticSub(row) {
     const r = row.src, tags = cosmeticTags(row);
     const firstReason = r.reasons && r.reasons[0] ? r.reasons[0].text : '';
+    if (row.ask) return { lvl: { text: t('chip.ask'), g: 'orange' }, parts: [t('ask.maybe', { name: niceName(row.ask.to) })] };
     if (row.why === 'b') return { lvl: { text: levelName('b'), g: 'red' }, parts: tags.length ? tags : (r.functions || []).slice(0, 1) };
     if (row.why === 'use') return { lvl: { text: t('chip.use'), g: 'red' }, parts: [t('use.why')] };
     if (row.why === 'mine') return { lvl: { text: t('tag.mine'), g: 'red' }, parts: tags };
@@ -505,7 +540,7 @@
 
   function summarize(verdict, rows, counts, kn) {
     if (verdict === 'unknown') return t('sum.unknown');
-    if (verdict === 'partial') return t('sum.partial', kn);
+    if (verdict === 'partial') return t(kn.noList && !(kn.of && kn.n < kn.of) ? 'sum.noList' : 'sum.partial', kn);
     if (verdict === 'avoid') {
       if (counts.red > 1) return t('sum.redN', { n: counts.red });
       const r = rows.find(x => x.group === 'red');
@@ -515,6 +550,7 @@
     if (verdict === 'check') {
       if (counts.orange > 1) return t('sum.orN', { n: counts.orange });
       const r = rows.find(x => x.group === 'orange');
+      if (r.ask) return t('sum.ask', { name: niceName(r.ask.to) });
       return t(r.level === 'u' ? 'sum.or1.u' : 'sum.or1.c', { name: shortName(r) });
     }
     return counts.info ? t('sum.okInfo', { n: counts.info }) : t('sum.ok');
@@ -668,6 +704,8 @@
   }
   const ICON = {
     chev: 'M9 6l6 6-6 6',
+    info: 'M21 12a9 9 0 1 1-18 0a9 9 0 1 1 18 0zM12 11v6M12 7.5h.01',
+    again: 'M4 12a8 8 0 0 1 13.7-5.6L20 8.7M20 4v4.7h-4.7M20 12a8 8 0 0 1-13.7 5.6L4 15.3M4 20v-4.7h4.7',
     heart: 'M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z',
     share: 'M12 15V4M8 8l4-4 4 4M5 13v5.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V13',
     close: 'M6 6l12 12M18 6L6 18',
@@ -747,6 +785,13 @@
   }
 
   // ---------- Result screen ----------
+  // v2.13: a new result can be felt without looking: 1 short buzz = no warnings, 2 = check, 3 = avoid (Android).
+  let buzzNext = false;
+  function buzz(verdict) {
+    const pat = { ok: [70], check: [70, 90, 70], avoid: [70, 90, 70, 90, 70] }[verdict];
+    if (!pat || !state.vibrate || !navigator.vibrate) return;
+    try { navigator.vibrate(pat); } catch (e) { /* not allowed here */ }
+  }
   async function showProduct(p, note) {
     if (DBINFO === null) {
       showStatus(t('status.dbLoading'));
@@ -765,6 +810,7 @@
     state.detailsOpen = false;
     const a = renderResult(p, note);
     addHistory(p, a.verdict);
+    if (buzzNext) { buzzNext = false; buzz(a.verdict); }
     $('result').scrollIntoView({ behavior: smooth(), block: 'start' });
   }
 
@@ -779,14 +825,24 @@
 
     const r = $('result');
     const known = a.verdict !== 'unknown';
+    const grey = a.verdict === 'partial' || a.verdict === 'unknown';
     r.replaceChildren(...[
       answerCard(p, a),
+      // v2.14: two doors – more info / photo again – and the next product
+      el('div', { class: 'doors' },
+        known ? el('button', {
+          class: 'btn btn-ghost', id: 'detBtn', type: 'button', 'aria-expanded': String(state.detailsOpen), 'aria-controls': 'details',
+          onclick: () => toggleDetails(undefined, true)
+        }, icon(ICON.info), el('span', { text: t('qa.details') })) : null,
+        el('button', { class: 'btn ' + (grey ? 'btn-primary' : 'btn-ghost'), id: 'againBtn', type: 'button', onclick: () => openLabel(p) },
+          icon(ICON.again), el('span', { text: t(p.source === 'label' ? 'btn.again' : 'btn.photoLabel') }))),
+      el('button', { class: 'btn ' + (grey ? 'btn-ghost' : 'btn-primary') + ' nextwide', id: 'nextBtn', type: 'button', text: t('btn.nextProduct'), onclick: scanNext }),
+      p.source === 'label' && isBarcode(p.code)
+        ? el('button', { class: 'btn btn-ghost nextwide', type: 'button', text: t('btn.lookupOnline'), onclick: () => lookup(p.code, true) })
+        : null,
       p.kind === 'cosmetic' && known && needsUse(p, a) ? useBar(p) : null,
-      known ? el('button', {
-        class: 'qdet', id: 'detBtn', type: 'button', 'aria-expanded': String(state.detailsOpen), 'aria-controls': 'details',
-        onclick: () => toggleDetails()
-      }, el('span', { text: t('qa.details') + ' · ' + tn('ph.ingredients', a.total) }), icon(ICON.chev, 'chev')) : null,
       el('div', { id: 'details', class: 'details', hidden: known ? !state.detailsOpen : null }, ...[
+        known ? detailsTop(p, a) : null,
         known ? detailsHead(p, a) : null,
         productChips(p, a),
         el('div', { id: 'groups' }),
@@ -796,25 +852,19 @@
               el('p', { class: 'ingredients', text: p.ingredientsText.replace(/^\s*[\p{L} ]{2,20}[:：]\s*/u, '') }))
           : null,
         dbWarn()
-      ].filter(Boolean)),
-      el('div', { class: 'actions' },
-        el('button', { class: 'btn btn-primary', type: 'button', text: t('btn.scanNext'), onclick: scanNext }),
-        el('button', { class: 'btn btn-ghost', type: 'button', text: known ? t('btn.readAgain') : t('btn.readLabel'), onclick: () => openLabel(p) }),
-        p.source === 'label' && isBarcode(p.code)
-          ? el('button', { class: 'btn btn-ghost', type: 'button', text: t('btn.lookupOnline'), onclick: () => lookup(p.code, true) })
-          : null
-      )
+      ].filter(Boolean))
     ].filter(Boolean));
     renderGroups();
     r.hidden = false;
     return a;
   }
 
-  function toggleDetails(open) {
+  function toggleDetails(open, scroll) {
     state.detailsOpen = open === undefined ? !state.detailsOpen : !!open;
     const d = $('details'), b = $('detBtn');
     if (d && b) d.hidden = !state.detailsOpen;
     if (b) b.setAttribute('aria-expanded', String(state.detailsOpen));
+    if (scroll && d && state.detailsOpen) d.scrollIntoView({ behavior: smooth(), block: 'start' });
   }
 
   // The answer: one word, why, "instead" and the colour strip. Everything else is under "Details".
@@ -830,35 +880,53 @@
       el('div', { class: 'qw' },
         el('span', { class: 'qi' }, icon(QA_ICON[v])),
         el('b', { class: word.length > 12 ? 'long' : null, text: word })),
-      ...answerLines(a),
-      knownLine(p, a)
+      frontLine(a)   // v2.14: one short line; the rest is under "Подробности"
     );
     const alt = v === 'avoid' || v === 'check' ? alternatives(p) : [];
     if (alt.length) {
       card.append(el('p', { class: 'qalt' }, el('b', { text: t('qa.instead') + ':' }),
         alt.map(q => el('button', { class: 'altbtn', type: 'button', text: q.name || t('ph.unnamed'), onclick: () => openSaved(q.code) }))));
     }
-    if (v !== 'unknown' && a.rows.length) {
+    // the strip: not when the photo text may not be the list (it would show colours of the wrong text)
+    if (v !== 'unknown' && a.rows.length && !a.noList) {
       card.append(el('div', { class: 'strip' + (a.rows.length > 30 ? ' dense' : ''), role: 'group', 'aria-label': t('strip.aria') },
         a.rows.map(r => el('button', {
           type: 'button', class: 'g-' + r.group,
           title: (r.pos ? '#' + r.pos + ' ' : '') + r.label,
           'aria-label': (r.pos ? '#' + r.pos + ' ' : '') + r.label + ', ' + t('g.' + r.group),
           onclick: e => { toggleDetails(true); jumpTo(r.i, e.currentTarget); }
-        }))),
-        el('div', { class: 'strip-ends', 'aria-hidden': 'true' }, el('span', { text: t('strip.first') }), el('span', { text: t('strip.last') })));
-      // Only with grey blocks. (append() writes a missing element as the text "null", so no "cond ? el : null" here.)
-      if (a.rows.some(r => r.group === 'nodata')) {
-        card.append(el('p', { class: 'legend', id: 'legend' },
-          el('span', {}, el('i', { class: 'g-green', 'aria-hidden': 'true' }), t('legend.green')),
-          el('span', {}, el('i', { class: 'g-nodata', 'aria-hidden': 'true' }), t('legend.nodata'))));
-      }
+        }))));
     }
     return card;
   }
 
+  // v2.14: the one line on the card. Red / orange: only the names; grey: what to do; green: nothing.
+  function frontLine(a) {
+    const names = list => {
+      const n = [...new Set(list)];
+      return n.slice(0, 3).join(', ') + (n.length > 3 ? ' ' + t('qa.more', { n: n.length - 3 }) : '');
+    };
+    let text = null;
+    if (a.verdict === 'avoid') {
+      const red = a.rows.filter(r => r.group === 'red');
+      text = names(red.map(r => shortName(r) + (r.why === 'allergen' && r.traceOnly ? ' (' + t('qa.traceMark') + ')' : '')));
+    } else if (a.verdict === 'check') text = names(a.rows.filter(r => r.group === 'orange').map(shortName));
+    else if (a.verdict === 'partial') text = t('qa.recheckLine');
+    else if (a.verdict === 'unknown') text = a.summary;
+    return text ? el('p', { class: 'qy one', id: 'oneLine', text }) : null;
+  }
+
+  // v2.14: the top of "Подробности": why, what was checked, how many names are known, what the colours mean.
+  function detailsTop(p, a) {
+    const legend = a.rows.length && a.verdict !== 'unknown'
+      ? el('p', { class: 'legend', id: 'legend' }, GROUPS.filter(g => a.counts[g]).map(g =>
+          el('span', {}, el('i', { class: 'g-' + g, 'aria-hidden': 'true' }), el('b', { text: String(a.counts[g]) }), ' ' + t('legend.' + g))))
+      : null;
+    return el('div', { class: 'dtop', id: 'dtop' }, ...answerLines(a, p), knownLine(p, a), legend);
+  }
+
   // Red: what and why. Orange: what. Green: what was checked. Never "safe".
-  function answerLines(a) {
+  function answerLines(a, p) {
     const names = list => {
       const n = [...new Set(list.map(shortName))];
       return n.slice(0, 3).join(', ') + (n.length > 3 ? ' ' + t('qa.more', { n: n.length - 3 }) : '');
@@ -875,25 +943,42 @@
     }
     if (a.verdict === 'check') {
       const or = a.rows.filter(r => r.group === 'orange');
-      return [el('p', { class: 'qy', text: names(or) }), el('p', { class: 'qr', text: t(or.every(r => r.banCos) ? 'qa.orReasonCos' : 'qa.orReason') })];
+      return [el('p', { class: 'qy', text: names(or) }), el('p', { class: 'qr', text: t(or.every(r => r.ask) ? 'qa.orReasonAsk' : or.every(r => r.banCos) ? 'qa.orReasonCos' : 'qa.orReason') })];
     }
-    if (a.verdict === 'ok') return [el('p', { class: 'qy', text: t('qa.okLine') })];
-    if (a.verdict === 'partial') return [el('p', { class: 'qy', text: t('qa.partialLine') })];
+    if (a.verdict === 'ok') return [checkedLine(p)];
+    if (a.verdict === 'partial' && a.noList && !a.unknown) {
+      return [el('p', { class: 'qy', text: t('qa.noListLine') }),
+        p ? el('p', { class: 'qkl' }, el('button', { class: 'linkbtn inline', type: 'button', id: 'fixTextBtn2', text: t('qa.fixText'), onclick: () => fixText(p) })) : null];
+    }
+    if (a.verdict === 'partial') return [el('p', { class: 'qy', text: t(a.noList ? 'qa.noListLine' : 'qa.partialLine') })];
     return [el('p', { class: 'qy', text: a.summary })];
+  }
+
+  // v2.13: what was checked, in one line of chips (instead of "Nothing from your list, your allergens or the EU lists.")
+  function checkedLine(p) {
+    const cos = p && (p.kind === 'cosmetic' || p.kind === 'household');
+    const chips = [t('chk.eu')];
+    if (state.avoid.length) chips.push(t('start.list', { n: state.avoid.length }));
+    const alg = cos ? state.allergens.cos.length : state.allergens.food.length;
+    if (alg) chips.push(t('start.alg', { n: alg }));
+    if (cos && state.avoidFragrance) chips.push(t('start.frag'));
+    if (!cos && state.vegan) chips.push(t('start.vegan'));
+    return el('p', { class: 'qchk', id: 'chkLine', 'aria-label': t('qa.okLine') },
+      el('span', { text: t('chk.label') }), chips.map(c => el('b', { text: '✓ ' + c })));
   }
 
   // Cosmetics / household: "11 of 14 ingredients recognised", with "See 3 unknown" and "Fix the text".
   function knownLine(p, a) {
-    const taughtN = a.rows.filter(r => r.taught).length;
-    if (!a.unknown && !taughtN) return null;
+    const taughtN = a.rows.filter(r => r.taught).length, autoN = a.rows.filter(r => r.auto).length;
+    if (!a.unknown && !taughtN && !autoN) return null;
     // Two causes: the photo reader got a name wrong (the app has a close name), or the name is not in the data.
     const unk = a.rows.filter(isUnknown), mis = unk.filter(misreadOf).length, nod = unk.length - mis;
-    return el('div', { class: 'qk' },
-      el('p', { text: t('qa.known', { n: a.known, of: a.known + a.unknown }) }),
-      el('p', { class: 'qks', text: [mis ? tn('qa.misread', mis) : null, nod ? tn('qa.noData', nod) : null, taughtN ? tn('qa.taught', taughtN) : null].filter(Boolean).join(' · ') }),
-      !a.unknown ? null : el('p', { class: 'qkl' },
-        el('button', { class: 'linkbtn inline', type: 'button', id: 'unkBtn', text: tn('qa.seeUnknown', a.unknown), onclick: showUnknown }),
-        el('button', { class: 'linkbtn inline', type: 'button', id: 'fixTextBtn', text: t('qa.fixText'), onclick: () => fixText(p) })));
+    const parts = [mis ? tn('qa.misread', mis) : null, nod ? tn('qa.noData', nod) : null, taughtN ? tn('qa.taught', taughtN) : null, autoN ? tn('qa.auto', autoN) : null].filter(Boolean);
+    return el('p', { class: 'qk1', id: 'knownLine' },
+      el('strong', { class: 'qkn', text: t('qa.known', { n: a.known, of: a.known + a.unknown }) }),
+      parts.length ? el('span', { class: 'qks', text: ' · ' + parts.join(' · ') }) : null,
+      a.unknown ? [' · ', el('button', { class: 'linkbtn inline', type: 'button', id: 'unkBtn', text: t('qa.see'), 'aria-label': tn('qa.seeUnknown', a.unknown), onclick: showUnknown }),
+        ' · ', el('button', { class: 'linkbtn inline', type: 'button', id: 'fixTextBtn', text: t('qa.fixText'), onclick: () => fixText(p) })] : null);
   }
   function misreadOf(r) {
     if (r.fixS === undefined) r.fixS = isUnknown(r) ? LCDB.suggestCosmetic(r.text) : null;
@@ -1101,7 +1186,7 @@
 
   // Short coloured tag on the right of a row.
   function chipOf(r) {
-    const k = r.why === 'b' ? 'chip.b' : r.why === 'use' ? 'chip.use' : r.why === 'mine' ? 'chip.mine' : r.why === 'allergen' ? (r.traceOnly ? 'chip.traces' : 'chip.yourAlg')
+    const k = r.ask ? 'chip.ask' : r.why === 'b' ? 'chip.b' : r.why === 'use' ? 'chip.use' : r.why === 'mine' ? 'chip.mine' : r.why === 'allergen' ? (r.traceOnly ? 'chip.traces' : 'chip.yourAlg')
       : r.why === 'fragrance' ? 'chip.frag' : r.why === 'vegan' ? 'chip.vegan' : r.banCos ? 'chip.banCos'
       : r.group === 'orange' ? (r.level === 'u' ? 'chip.u' : 'chip.c')
       : r.group === 'info' ? (r.level === 'r' ? 'chip.r' : r.traceOnly ? 'chip.traces' : r.allergen || (r.allergens && r.allergens.length) ? 'chip.alg' : 'chip.maybeVegan') : null;
@@ -1114,6 +1199,7 @@
     if (r.kind === 'cosmetic') {
       const s = r.src, tags = cosmeticTags(r), fn = (s.functions || [])[0];
       const cosRule = rs => (r.household && isCosRule(rs) ? t('hh.cosRule') + ' ' : '');
+      if (r.ask) return t('ask.maybeWhy', { name: niceName(r.ask.to), level: levelName(r.ask.level) || '' });
       if (r.why === 'use') return t('use.why');
       if (r.banCos) return t('why.banCos');
       if (r.group === 'orange' && !r.why) return cosRule(s.reasons[0]) + ((s.reasons[0] || {}).text || '');
@@ -1306,7 +1392,7 @@
     if (verdictCache.has(code)) return verdictCache.get(code);
     const p = productBy(code);
     if (DBINFO && p) {
-      try { const a = analyze(p); const v = { verdict: a.verdict, summary: a.summary }; verdictCache.set(code, v); return v; }
+      try { const a = analyze(p); const v = { verdict: a.verdict, summary: a.summary, groups: a.rows.map(r => r.group) }; verdictCache.set(code, v); return v; }
       catch (e) { /* use the saved one */ }
     }
     return { verdict: fallback || 'unknown', summary: '' };
@@ -1320,7 +1406,10 @@
       el('button', { class: 'open', type: 'button', onclick: () => openSaved(item.code) },
         el('strong', { text: p.name || t('ph.unnamed') }),
         el('span', { class: 'sub', text: [p.brand, t('v.' + v.verdict), opts && opts.time ? fmtDate(opts.time) : null].filter(Boolean).join(' · ') }),
-        opts && opts.summary && v.summary ? el('span', { class: 'sub one', text: v.summary }) : null
+        opts && opts.summary && v.summary ? el('span', { class: 'sub one', text: v.summary }) : null,
+        // v2.13: the colour strip in small, so products can be compared at a glance (History)
+        opts && opts.time && v.groups && v.groups.length ? el('span', { class: 'mstrip' + (v.groups.length > 30 ? ' dense' : ''), 'aria-hidden': 'true' },
+          v.groups.map(g => el('i', { class: 'g-' + g }))) : null
       ),
       opts && opts.remove ? opts.remove : null
     );
@@ -1446,7 +1535,7 @@
 
     const top = r.why === 'mine' ? t('tag.mine') : r.why === 'allergen' ? t('tag.allergenYours')
       : r.why === 'fragrance' ? t('tag.fragranceAvoid') : r.why === 'vegan' ? t('chip.vegan') : r.why === 'use' ? t('chip.use')
-      : r.group === 'nodata' ? t('tile.nodata') : levelName(r.level);
+      : r.ask ? t('chip.ask') : r.group === 'nodata' ? t('tile.nodata') : levelName(r.level);
     body.push(badge(r.group, top));
 
     // Personal reasons (your list, allergens, fragrance)
@@ -1464,8 +1553,10 @@
       const tags = cosmeticTags(r);
       if (tags.length) body.push(el('ul', { class: 'd-tags' }, tags.map(x => el('li', { text: x }))));
       if (r.taught) body.push(taughtCard(r));
+      else if (r.auto) body.push(autoCard(r));
+      else if (r.ask && !r.fromSearch) body.push(askCard(r));
       else if (isUnknown(r) && !r.fromSearch) body.push(teachCard(r));
-      if (r.found && !r.taught && niceName(r.src.name) !== cleanSeg(r.text)) {
+      if (r.found && !r.taught && !r.auto && niceName(r.src.name) !== cleanSeg(r.text)) {
         body.push(el('p', { class: 'd-meta' }, t('d.asOnLabel') + ': ', el('em', { text: r.text })));
       }
       if (r.src.functions && r.src.functions.length) {
@@ -1536,13 +1627,44 @@
 
   // ---------- Teach the app (v2.12): "GLYCERN is Glycerin", saved on this phone for all products ----------
   function teachCard(r) {
-    const s = misreadOf(r);
+    const no = (taughtFor(r.text) || {}).no;
+    let s = misreadOf(r);
+    if (s && (!s.inci || s.inci === no)) s = null;
+    const choices = (r.choices || []).filter(n => n !== no);
     return el('div', { class: 'd-card teach', id: 'teachCard' },
       el('h3', { text: t('teach.title') }),
       s ? el('button', { class: 'btn btn-primary', type: 'button', id: 'teachYes', text: t('teach.yes', { name: niceName(s.inci) }), onclick: () => { teach(r.text, s.inci); closeDetail(); } })
+        : choices.length ? [el('p', { text: t('teach.choose') }), ...choices.map((n, k) => el('button', { class: 'btn btn-ghost', type: 'button', id: 'teachChoice' + k, text: niceName(n), onclick: () => { teach(r.text, n); closeDetail(); } }))]
         : el('p', { text: t('teach.none') }),
       el('button', { class: 'btn ' + (s ? 'btn-ghost' : 'btn-primary'), type: 'button', id: 'teachOther', text: t(s ? 'teach.other' : 'teach.pick'), onclick: () => openPicker(r) }),
       el('p', { class: 'minor', text: t('teach.note') }));
+  }
+  // (b) the closest name has a warning: you decide, the app does not
+  function askCard(r) {
+    const a = r.ask, name = niceName(a.to);
+    return el('div', { class: 'd-card teach', id: 'askCard' },
+      el('h3', { text: t('ask.title') }),
+      el('p', { text: t('ask.text', { from: a.from, name, level: levelName(a.level) || '' }) }),
+      el('button', { class: 'btn btn-primary', type: 'button', id: 'askYes', text: t('teach.yes', { name }), onclick: () => { teach(r.text, a.to); closeDetail(); } }),
+      el('button', { class: 'btn btn-ghost', type: 'button', id: 'askNo', text: t('ask.no'), onclick: () => openPicker(r) }),
+      el('p', { class: 'minor', text: t('teach.note') }),
+      (a.src.reasons || []).length ? el('div', { class: 'askif' }, el('h3', { text: t('ask.ifTitle', { name }) }), (a.src.reasons || []).map(reasonBlock)) : null);
+  }
+  // (a) corrected by the app: you can say it is wrong
+  function autoCard(r) {
+    return el('div', { class: 'd-card teach', id: 'autoCard' },
+      el('p', {}, ...tNodes('d.auto', { from: el('em', { text: r.auto.from }), to: el('b', { text: niceName(r.auto.to) }) })),
+      el('button', { class: 'btn btn-ghost', type: 'button', id: 'notThis', text: t('d.notThis'), onclick: () => { noAuto(r.text, r.auto.to); closeDetail(); } }));
+  }
+  function noAuto(text, to) {
+    const k = teachKey(text);
+    if (!k) return;
+    const from = teachName(text);
+    state.taught[k] = { from, to: '', no: to };
+    store.set('taught', state.taught);
+    renderTaught();
+    settingsChanged();
+    toast(t('toast.noAuto', { from }));
   }
   function taughtCard(r) {
     return el('div', { class: 'd-card teach', id: 'taughtCard' },
@@ -1575,7 +1697,7 @@
     const items = Object.entries(state.taught).sort((x, y) => x[1].from.localeCompare(y[1].from));
     $('taughtCount').textContent = '(' + items.length + ')';
     box.replaceChildren(...(items.length ? items.map(([k, v]) => el('div', { class: 'taughtrow' },
-      el('div', { class: 'tr-main' }, el('s', { text: v.from }), el('b', { text: niceName(v.to) })),
+      el('div', { class: 'tr-main' }, el('s', { text: v.from }), el('b', { text: v.to ? niceName(v.to) : t('taught.noAuto') })),
       el('button', { class: 'x', type: 'button', 'aria-label': t('taught.del', { from: v.from }), title: t('taught.del', { from: v.from }), text: '✕', onclick: () => untaught(v.from) })))
       : [el('p', { class: 'empty', text: t('taught.empty') })]));
   }
@@ -1701,6 +1823,8 @@
     if (!history.state || history.state.view !== 'label') pushState({ tab: 'scan', view: 'label' });
     const panel = $('labelPanel');
     $('labelText').value = '';
+    lastRead = null;
+    setPhotoMode(false);
     renderFixes();
     ocrFile = null;
     $('ocrArea').hidden = true;
@@ -1793,6 +1917,7 @@
   const OCR_LOW = 60;   // reader confidence below this: read again with the other alphabet
   const OCR_BAD = 50;   // below this: orange line instead of "Done" (wrong alphabet gave 31–48, good reads 75–95)
   let ocrFile = null, ocrWorker = null, ocrSeq = 0, ocrBusy = false, claudeNext = false;
+  let lastRead = null;   // v2.13: { photo: true, list: heading found } for the text now in the box (null after typing)
   const ocrWait = {};
   const crop = { x: 0.06, y: 0.3, w: 0.88, h: 0.4 };   // part of the photo, 0..1
 
@@ -1819,6 +1944,13 @@
     n.hidden = !text; n.textContent = text || ''; n.className = 'ocrstatus' + (cls ? ' ' + cls : '');
   }
 
+  // v2.13: with a photo, "Check" reads and checks in one step; the text part is shown only when something went wrong
+  // (or from "Fix the text" on the result).
+  function setPhotoMode(on) {
+    $('textPart').hidden = !!on;
+    $('oneNote').hidden = !on;
+  }
+
   function onPhoto(e) {
     const file = e.target.files && e.target.files[0];
     e.target.value = '';
@@ -1826,6 +1958,8 @@
   }
   function loadPhoto(file) {
     ocrFile = file;
+    lastRead = null;
+    setPhotoMode(true);
     if (claudeNext) { claudeNext = false; shareToClaude(file); }
     const img = $('cropImg');
     if (img.dataset.url) URL.revokeObjectURL(img.dataset.url);
@@ -1917,14 +2051,33 @@
     return t2 === t2.toUpperCase() ? t2.toLowerCase().replace(/(^|[\s-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase()) : t2;
   }
 
+  // The whole photo as PNG, at most `width` px wide; gray = grey with stretched contrast (small or light-on-dark print).
+  async function photoPng(bmp, width, gray) {
+    const k = Math.min(1, width / bmp.width), W = Math.round(bmp.width * k), H = Math.round(bmp.height * k);
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const cx = cv.getContext('2d', { willReadFrequently: !!gray });
+    cx.imageSmoothingQuality = 'high';
+    cx.drawImage(bmp, 0, 0, W, H);
+    if (gray) {
+      const im = cx.getImageData(0, 0, W, H), d = im.data, n = W * H, g = new Uint8ClampedArray(n), hist = new Uint32Array(256);
+      for (let i = 0, j = 0; i < n; i++, j += 4) { g[i] = (d[j] * 299 + d[j + 1] * 587 + d[j + 2] * 114) / 1000; hist[g[i]]++; }
+      let lo = 0, hi = 255, acc = 0;
+      const cut = n * 0.01;
+      while (lo < 255 && (acc += hist[lo]) <= cut) lo++;
+      acc = 0;
+      while (hi > 0 && (acc += hist[hi]) <= cut) hi--;
+      const span = Math.max(1, hi - lo);
+      for (let i = 0, j = 0; i < n; i++, j += 4) d[j] = d[j + 1] = d[j + 2] = Math.min(255, Math.max(0, ((g[i] - lo) * 255) / span));
+      cx.putImageData(im, 0, 0);
+    }
+    const png = new Uint8Array(await (await new Promise(res => cv.toBlob(res, 'image/png'))).arrayBuffer());
+    return { png, W, H };
+  }
+
   async function findList(file) {
     const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
-    const k = Math.min(1, 1200 / bmp.width), W = Math.round(bmp.width * k), H = Math.round(bmp.height * k);
-    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-    cv.getContext('2d').drawImage(bmp, 0, 0, W, H);
-    if (bmp.close) bmp.close();
-    const png = new Uint8Array(await (await new Promise(res => cv.toBlob(res, 'image/png'))).arrayBuffer());
-    if (file !== ocrFile) return null;
+    let { png, W, H } = await photoPng(bmp, 1200, false);
+    if (file !== ocrFile) { if (bmp.close) bmp.close(); return null; }
     ocrStatus(t('ocr.finding'), 'busy');
     // Auto: a Latin reader first (most labels; it also reads the end of a Latin list right), the Bulgarian reader only
     // when no heading was found. A language you picked in the menu is used alone.
@@ -1937,6 +2090,7 @@
       list = listPieces(pieces);
       if (list) break;
     }
+    if (bmp.close) bmp.close();
     nameHint = nameFromPieces(pieces, list || []);
     lastFind = { W, H, list: (list || []).map(p => ({ box: p.box, text: p.text.slice(0, 60) + ' … ' + p.text.slice(-25) })) };   // for tests
     if (!list) { ocrStatus(t('ocr.notFound'), ''); return null; }
@@ -2003,7 +2157,9 @@
       const v = (d[j] * 299 + d[j + 1] * 587 + d[j + 2] * 114) / 1000;
       g[i] = v; hist[g[i]]++; sum += v;
     }
-    if (sum / n >= 110) {   // light label: grey + stretch contrast. Dark labels stay in colour (the reader handles them better).
+    // Grey + stretched contrast for every label. (v2.13: dark labels were kept in colour before; on a real photo of
+    // white text on red the reader then found 0 words, in grey it reads the list.)
+    {
       let lo = 0, hi = 255, acc = 0;
       const cut = n * 0.01;
       while (lo < 255 && (acc += hist[lo]) <= cut) lo++;
@@ -2135,8 +2291,12 @@
         }
       }
       if (auto) { store.set('ocrLast', used); if (used !== 'bul') store.set('ocrLastLatin', used); }
-      const text = cleanOcr(listFromPieces(tsvPieces(r.tsv)) || r.text);
+      const fromList = listFromPieces(tsvPieces(r.tsv));
+      const text = cleanOcr(fromList || r.text);
+      // The list was found when the read text has its heading (in the read box, or as "Zutaten:" in the text)
+      lastRead = { photo: true, list: !!fromList || new RegExp(HEAD_RE.source, 'iu').test(r.text) };
       const secs = ((performance.now() - t0) / 1000).toFixed(1).replace('.', LANG === 'en' ? '.' : ',');
+      let good = false;
       if (text.replace(/[^\p{L}]/gu, '').length < 12 || r.conf < OCR_BAD) {
         ocrStatus(t('ocr.little'), 'warn');
         if (text) $('labelText').value = text;
@@ -2144,12 +2304,16 @@
         $('labelText').value = text;
         ocrStatus(t('ocr.done', { s: secs }) + (auto ? ' ' + t('ocr.readAs', { lang: OCR_NAMES[used] })
           : switched ? ' ' + t('ocr.switched', { lang: OCR_NAMES[used] }) : ''));
+        good = true;
       }
       updateKindGuess();
       renderFixes();
+      if (good) { buzzNext = true; onCheckLabel(); return; }   // one step: straight to the answer
+      setPhotoMode(false);                                     // little text: show it, you can fix or paste it
       $('labelText').scrollIntoView({ behavior: 'smooth', block: 'center' });
     } catch (err) {
       ocrStatus(t('ocr.fail'), 'warn');
+      setPhotoMode(false);
     } finally {
       ocrBusy = false;
       $('ocrRead').disabled = false;
@@ -2208,6 +2372,7 @@
       brand: (base && base.brand) || '',
       image: (base && base.image) || '',
       ingredientsText: main,
+      read: ocrFile && lastRead ? lastRead : undefined,   // v2.13: how the text was read (photo, list heading found)
       texts: [main, extra].filter(Boolean),
       tags: [],
       allergens: [],
@@ -2219,6 +2384,7 @@
       url: ''
     };
     saveProduct(p);
+    buzzNext = true;   // a new answer: you can feel it (vibration)
     showProduct(p);
   }
 
@@ -2281,6 +2447,7 @@
         if (hit) {
           if (navigator.vibrate) navigator.vibrate(60);
           stopCamera();
+          buzzNext = true;
           lookup(hit.rawValue);
           return;
         }
@@ -2483,7 +2650,7 @@
     const data = {
       app: 'label-check', version: 2, exportedAt: new Date().toISOString(),
       avoid: state.avoid, favs: state.favs, names: state.names, taught: state.taught, allergens: state.allergens, avoidFragrance: state.avoidFragrance, vegan: state.vegan,
-      lang: state.lang, theme: state.theme, bigText: state.bigText,
+      lang: state.lang, theme: state.theme, bigText: state.bigText, vibrate: state.vibrate,
       history: state.history, products: state.products
     };
     const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' });
@@ -2514,7 +2681,10 @@
     }
     if (data.taught && typeof data.taught === 'object') {
       for (const [k, v] of Object.entries(data.taught)) {
-        if (v && typeof v.from === 'string' && typeof v.to === 'string' && v.from.trim() && v.to.trim()) state.taught[k] = { from: v.from.slice(0, 120), to: v.to.slice(0, 200) };
+        if (v && typeof v.from === 'string' && typeof v.to === 'string' && v.from.trim()) {
+          state.taught[k] = { from: v.from.slice(0, 120), to: v.to.slice(0, 200) };
+          if (!v.to.trim() && typeof v.no === 'string') state.taught[k].no = v.no.slice(0, 200);
+        }
       }
     }
     if (data.allergens && typeof data.allergens === 'object') {
@@ -2528,7 +2698,8 @@
     if (['auto', 'en', 'de', 'bg'].includes(data.lang)) state.lang = data.lang;
     if (['auto', 'light', 'dark'].includes(data.theme)) state.theme = data.theme;
     if (typeof data.bigText === 'boolean') state.bigText = data.bigText;
-    for (const k of ['avoid', 'history', 'products', 'favs', 'names', 'taught', 'allergens', 'avoidFragrance', 'vegan', 'lang', 'theme', 'bigText']) store.set(k, state[k]);
+    if (typeof data.vibrate === 'boolean') state.vibrate = data.vibrate;
+    for (const k of ['avoid', 'history', 'products', 'favs', 'names', 'taught', 'allergens', 'avoidFragrance', 'vegan', 'lang', 'theme', 'bigText', 'vibrate']) store.set(k, state[k]);
     verdictCache.clear();
     syncSettingsControls();
     applyTheme();
@@ -2542,6 +2713,7 @@
   function syncSettingsControls() {
     $('veganSwitch').checked = !!state.vegan;
     $('bigSwitch').checked = !!state.bigText;
+    $('vibSwitch').checked = !!state.vibrate;
     $('langSelect').value = state.lang;
     $('themeSelect').value = state.theme;
   }
@@ -2654,6 +2826,7 @@
     $('ocrLang').addEventListener('change', e => store.set('ocrPick', e.target.value));
     document.querySelectorAll('input[name="kind"]').forEach(i => i.addEventListener('change', () => { kindTouched = true; $('kindNote').hidden = true; renderFixes(); }));
     $('labelText').addEventListener('input', () => {
+      lastRead = null;   // you typed or pasted: it is your text now
       clearTimeout(kindTimer); kindTimer = setTimeout(updateKindGuess, 400);
       clearTimeout(fixTimer); fixTimer = setTimeout(renderFixes, 700);
     });
@@ -2691,6 +2864,7 @@
     }));
     $('themeSelect').addEventListener('change', e => { state.theme = e.target.value; store.set('theme', state.theme); applyTheme(); });
     $('bigSwitch').addEventListener('change', e => { state.bigText = e.target.checked; store.set('bigText', state.bigText); applyBig(); });
+    $('vibSwitch').addEventListener('change', e => { state.vibrate = e.target.checked; store.set('vibrate', state.vibrate); if (state.vibrate) buzz('ok'); });
     try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme); } catch (e) { /* old browser */ }
     $('exportBtn').addEventListener('click', exportBackup);
     $('importInput').addEventListener('change', importBackup);

@@ -69,6 +69,13 @@ def open_details(pg):
     while pg.locator(sel).count():   # each tap redraws the groups, so look again every time
         pg.locator(sel).first.click()
 
+def show_details(pg):
+    # v2.14: "Подробности" (ⓘ) opens the details under the answer
+    if pg.get_attribute('#detBtn', 'aria-expanded') != 'true': pg.click('#detBtn')
+
+def see_unknown(pg):
+    show_details(pg); pg.click('#unkBtn')
+
 def word(pg):
     return pg.inner_text('#answer .qw b')
 
@@ -108,7 +115,7 @@ with sync_playwright() as p:
     ok(word(pg) == 'Avoid', 'verdict Avoid (Lilial is banned)')
     ok(counts(pg) == [1, 1, 5, 7], 'groups 1 / 1 / 5 / 7')
     ok(pg.locator('.tile').count() == 0, 'v2.8: no count squares')
-    ok(pg.inner_text('#answer .qy') == 'Contains: Butylphenyl Methylpropional' and pg.inner_text('#answer .qr') == 'Reason: banned in the EU', 'v2.8: red answer names the ingredient and the reason')
+    ok(pg.inner_text('#dtop .qy') == 'Contains: Butylphenyl Methylpropional' and pg.inner_text('#dtop .qr') == 'Reason: banned in the EU', 'v2.8: red answer names the ingredient and the reason')
     ok(pg.is_visible('#nameBtn') and pg.inner_text('#nameBtn') == 'Shower gel', 'product name inside the answer card (renamed with the pencil)')
     ok(pg.is_hidden('#details') and pg.get_attribute('#detBtn', 'aria-expanded') == 'false', 'v2.8: "Details" start closed')
     open_details(pg)
@@ -117,7 +124,7 @@ with sync_playwright() as p:
     pg.click('#groups .grp.g-green .grp-head')
     ok(pg.locator('#groups .chiplist .gchip').count() == 7, 'Clear group shows 7 name chips')
     ok('Fragrance · Fragrance' not in pg.inner_text('#result'), 'no "Fragrance · Fragrance"')
-    ok(pg.locator('.strip-ends').count() == 1 and pg.get_attribute('.strip button:nth-child(14)', 'title').startswith('#14'), 'strip stays in label order')
+    ok(pg.locator('.strip-ends').count() == 0 and pg.get_attribute('.strip button:nth-child(14)', 'title').startswith('#14'), 'strip stays in label order (v2.14: no "first / last" words)')
     ok(pg.locator('.strip button').count() == 14, '14 blocks in the strip')
     ok(no_side_scroll(pg), 'no sideways scroll')
     pg.screenshot(path=os.path.join(SHOTS, 'en-cosmetic.png'))
@@ -307,7 +314,7 @@ with sync_playwright() as p:
     ok(pg.get_attribute('#themeColor', 'content').upper() == '#121417', 'phone bar colour = graphite')
     pg.screenshot(path=os.path.join(SHOTS, 'de-dark-start.png'))
     read_label(pg, SHOWER, 'cosmetic', 'Duschgel')
-    ok(word(pg) == 'Meiden' and pg.inner_text('#answer .qr') == 'Grund: in der EU verboten', 'German verdict and reason')
+    ok(word(pg) == 'Meiden' and pg.inner_text('#dtop .qr') == 'Grund: in der EU verboten', 'German verdict and reason')
     open_details(pg)
     ok('Anhang' in pg.inner_text('#groups') or 'Grenzwert' in pg.inner_text('#groups'), 'German row texts')
     ok(card_fits(pg), 'German answer card fits at 360 px')
@@ -383,6 +390,10 @@ with sync_playwright() as p:
         bb = pg.locator(sel).bounding_box(); pg.mouse.move(bb['x'] + bb['width'] / 2, bb['y'] + bb['height'] / 2)
         pg.mouse.down(); pg.mouse.move(tx, ty, steps=6); pg.mouse.up()
     def read_photo(pg, lang='eng', box=(0.03, 0.44, 0.97, 0.62), file=None):
+        if pg.is_hidden('#labelPanel'):            # v2.13: one step shows the answer; open "Read a label" again
+            pg.click('.tabbar button[data-go=scan]')
+            if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+            pg.click('#cardLabel')
         pg.set_input_files('#photoPick', file or photo)
         pg.wait_for_selector('#ocrArea:not([hidden])')
         pg.evaluate("document.getElementById('cropWrap').scrollIntoView({block: 'center'})")
@@ -403,15 +414,15 @@ with sync_playwright() as p:
     ok(pg.inner_text('#ocrStatus').startswith('Done in'), 'status "Done in … s" (%s)' % pg.inner_text('#ocrStatus'))
     ok(txt.startswith('ingredients:') and all(w in txt for w in ('sugar', 'wheat flour', 'palm oil', 'soya lecithin', 'tartrazine', 'milk')), 'text read from the box, starts at "Ingredients:"')
     ok('crunchy' not in txt and 'nutrition' not in txt, 'text outside the box is not read')
-    pg.click('#checkLabel'); pg.wait_for_selector('#result:not([hidden]) #answer')
-    ok('Tartrazine' in pg.text_content('#result') or 'E102' in pg.text_content('#result'), 'Check ingredients works with the read text (tartrazine found)')
+    pg.wait_for_selector('#result:not([hidden]) #answer')   # v2.13: "Check" reads and checks in one step
+    ok('Tartrazine' in pg.text_content('#result') or 'E102' in pg.text_content('#result'), 'one step: the answer shows right after reading (tartrazine found)')
     pg.click('#cardLabel') if pg.is_visible('#cardLabel') else None
     ctx.close()
 
     ctx, pg = new_page(b, base, 'bg-BG')
     pg.click('#cardLabel')
     pg.set_input_files('#photoPick', photo)
-    ok(pg.inner_text('#ocrRead') == 'Прочети текста' and pg.input_value('#ocrLang') == 'auto' and pg.inner_text('#ocrLang option[value=auto]') == 'Авто', 'BG: button text + label language "Авто" by default (v2.8)')
+    ok(pg.inner_text('#ocrRead') == 'Провери' and pg.is_hidden('#textPart') and pg.is_visible('#oneNote') and pg.input_value('#ocrLang') == 'auto' and pg.inner_text('#ocrLang option[value=auto]') == 'Авто', 'BG: button text + label language "Авто" by default (v2.8)')
     ok(pg.eval_on_selector_all('#ocrLang option', 'o => o.map(x => x.textContent)')[1:] == ['EN', 'DE', 'BG', 'HU', 'CZ', 'SK', 'SL'], 'v2.8: menu has EN DE BG HU CZ SK SL')
     pg.select_option('#ocrLang', 'deu')
     pg.reload(); pg.evaluate('LC.dbReady'); pg.click('#cardLabel'); pg.set_input_files('#photoPick', photo)
@@ -457,7 +468,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.12.1' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.12.1" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.14' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.14" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -483,7 +494,7 @@ with sync_playwright() as p:
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(150)
         h = pg.evaluate("document.getElementById('tab-list').getBoundingClientRect().height")
-        ok(h < 1500 and no_side_scroll(pg), '%s: My list is short (%d px, was about 4500) and has no sideways scroll' % (tag, h))
+        ok(h < 1700 and no_side_scroll(pg), '%s: My list is short (%d px, was about 4500; v2.12/13 added "Taught names" + vibration) and has no sideways scroll' % (tag, h))
         ok(pg.locator('#fragSwitch').count() == 0 and pg.locator('#picks .frag-chip').count() == 1, '%s: fragrance is the first Quick pick chip, no separate switch' % tag)
         ok(all(not pg.eval_on_selector(f, 'd => d.open') for f in ('#foodAlgBox', '#cosAlgBox', '#rulesFold', '#moreFold')), '%s: allergens, "What the app checks" and "More" start closed' % tag)
         ok('ODbL' in pg.text_content('#rulesFold') and pg.text_content('#moreFold summary').strip() != '', '%s: credit line (ODbL) is still in "What the app checks"; "More" has a title' % tag)
@@ -513,7 +524,8 @@ with sync_playwright() as p:
     ctx, pg = new_page(b, base, 'bg-BG', dark=True, width=390)
     read_label(pg, 'Съставки: овесени ядки 100%, сол, канела', 'food')
     ok(pg.inner_text('#nameBtn') == '+ Добави име' and word(pg) == 'Без предупреждения', 'green answer, product without a name')
-    ok(pg.inner_text('#answer .qy') == 'Нищо от твоя списък, алергените ти и предупрежденията на ЕС.', 'green line says what was checked (never "safe")')
+    ok(pg.inner_text('#chkLine span') == 'Проверено:' and pg.inner_text('#chkLine b') == '✓ ЕС' and pg.get_attribute('#chkLine', 'aria-label') == 'Нищо от твоя списък, алергените ти и предупрежденията на ЕС.',
+       'v2.13: green answer says what was checked in one line of chips ("Проверено: ✓ ЕС"), never "safe"')
     rename(pg, 'Овесени ядки')
     ok(pg.inner_text('#nameBtn') == 'Овесени ядки' and pg.evaluate('LC.state.history[0].name') == 'Овесени ядки', 'pencil: name saved on the result and in History')
     ok(pg.locator('#labelName').count() == 0, 'no name field on "Read a label" any more')
@@ -523,7 +535,7 @@ with sync_playwright() as p:
     ok(pg.inner_text('#nameBtn') == 'Овесени ядки', 'name stays after a reload')
     pg.click('.tabbar button[data-go=scan]')
     type_code(pg, '9001234567890'); pg.wait_for_selector('#result:not([hidden]) #answer')
-    ok(word(pg) == 'Провери' and 'Натриев нитрит' in pg.inner_text('#answer .qy'), 'orange answer names the ingredient')
+    ok(word(pg) == 'Провери' and 'Натриев нитрит' in pg.inner_text('#dtop .qy'), 'orange answer names the ingredient')
     ok(pg.inner_text('#answer .qalt') .startswith('Вместо това:') and 'Овесени ядки' in pg.inner_text('#answer .qalt'), '"Вместо това" shows the saved green food product')
     pg.screenshot(path=os.path.join(SHOTS, 'v28-orange-bg.png'))
     open_details(pg)
@@ -549,7 +561,7 @@ with sync_playwright() as p:
     # household result
     pg.evaluate("localStorage.setItem('lc.avoidFragrance', 'true')"); reload_ready(pg)
     pg.click('#cardLabel'); pg.fill('#labelText', DISH); pg.wait_for_timeout(700); pg.click('#checkLabel'); pg.wait_for_selector('#result:not([hidden]) #answer')
-    ok(word(pg) == 'Избягвай' and 'Duftstoffe' in pg.inner_text('#answer .qy') and 'аромат' in pg.inner_text('#answer .qr'), 'household: Duftstoffe is fragrance -> red with "I avoid fragrance"')
+    ok(word(pg) == 'Избягвай' and 'Duftstoffe' in pg.inner_text('#dtop .qy') and 'аромат' in pg.inner_text('#dtop .qr'), 'household: Duftstoffe is fragrance -> red with "I avoid fragrance"')
     ok(pg.is_hidden('.usebar'), 'household: no "stays on skin" question')
     open_details(pg); pg.click('#groups .grp.g-green .grp-head')
     ok('Анионни ПАВ' in pg.inner_text('#groups') and 'Битова химия' in pg.inner_text('.det-head'), 'household: detergent words get plain names, type shown in Details')
@@ -557,21 +569,21 @@ with sync_playwright() as p:
     pg.screenshot(path=os.path.join(SHOTS, 'v28-household-bg.png'), full_page=True)
     pg.evaluate("localStorage.setItem('lc.avoidFragrance', 'false')"); reload_ready(pg)
     read_label(pg, 'Inhaltsstoffe: 5-15% anionische Tenside, Aqua, Butylphenyl Methylpropional', 'household')
-    ok(word(pg) == 'Провери' and pg.inner_text('#answer .qr') == 'Причина: не е разрешено в козметика в ЕС. За битова химия правилата са други.', 'household: an EU cosmetics ban is orange "not in cosmetics", not red')
+    ok(word(pg) == 'Провери' and pg.inner_text('#dtop .qr') == 'Причина: не е разрешено в козметика в ЕС. За битова химия правилата са други.', 'household: an EU cosmetics ban is orange "not in cosmetics", not red')
     ctx.close()
 
     print('v2.9: German compound words and "may contain traces"')
     ctx, pg = new_page(b, base, 'bg-BG', dark=True, width=390)
     pg.evaluate("localStorage.setItem('lc.allergens', JSON.stringify({ food: ['soybeans', 'gluten'], cos: [] }))"); reload_ready(pg)
     read_label(pg, 'Zutaten: Zucker, Kakaobutter. Kann Spuren von Soja enthalten.', 'food')
-    ok(word(pg) == 'Избягвай' and pg.inner_text('#answer .qy') == 'Може да съдържа следи: Соя' and 'следи от твой алерген' in pg.inner_text('#answer .qr'),
-       'ticked soy only in "Kann Spuren von Soja": red, "Може да съдържа следи", reason "следи от твой алерген" (%s / %s)' % (pg.inner_text('#answer .qy'), pg.inner_text('#answer .qr')))
+    ok(word(pg) == 'Избягвай' and pg.inner_text('#dtop .qy') == 'Може да съдържа следи: Соя' and 'следи от твой алерген' in pg.inner_text('#dtop .qr'),
+       'ticked soy only in "Kann Spuren von Soja": red, "Може да съдържа следи", reason "следи от твой алерген" (%s / %s)' % (pg.inner_text('#dtop .qy'), pg.inner_text('#dtop .qr')))
     open_details(pg)
     ok('(следи)' in pg.inner_text('.allergen-line') and pg.inner_text('#groups li:has-text("Soja") .chip') == 'Може да съдържа', 'Details: allergen line "(следи)", row chip "Може да съдържа"')
     pg.screenshot(path=os.path.join(SHOTS, 'v29-traces-bg.png'))
     pg.click('.tabbar button[data-go=scan]')
     read_label(pg, 'Zutaten: Hartweizengrieß, Wasser', 'food')
-    ok(word(pg) == 'Избягвай' and pg.inner_text('#answer .qy') == 'Съдържа: Глутен' and pg.inner_text('#answer .qr') == 'Причина: твой алерген', 'Hartweizengrieß with gluten ticked: red "Съдържа: Глутен"')
+    ok(word(pg) == 'Избягвай' and pg.inner_text('#dtop .qy') == 'Съдържа: Глутен' and pg.inner_text('#dtop .qr') == 'Причина: твой алерген', 'Hartweizengrieß with gluten ticked: red "Съдържа: Глутен"')
     ctx.close()
 
     print('v2.8: backup note, app shortcuts, text cut at a 2nd heading, 320 px')
@@ -627,7 +639,7 @@ with sync_playwright() as p:
        'only the list is kept: starts with AQUA, ends with SODIUM HYDROXIDE, no German / Polish text, joined heading removed (%s)' % txt[:80])
     ok(sum(rows) >= 9 and len(rows) <= 11, 'dots read as - : » are separators again: %d of %d names known (ISO-PROPYL joined)' % (sum(rows), len(rows)))
     ok(pg.eval_on_selector('input[name=kind]:checked', 'i => i.value') == 'cosmetic', 'type guess: cosmetic')
-    pg.click('#checkLabel'); pg.wait_for_selector('#result:not([hidden]) #answer')
+    pg.wait_for_selector('#result:not([hidden]) #answer')   # v2.13: one step
     ok(pg.inner_text('#nameBtn span') == 'Soft Hand Cream' and pg.inner_text('#nameBtn .fromphoto') == 'от снимката', 'name from the photo: "Soft Hand Cream", tag "от снимката" (%s)' % pg.inner_text('.qn'))
     pg.screenshot(path=os.path.join(SHOTS, 'v210-name-from-photo-bg.png'))
     rename(pg, 'Ръчен крем')
@@ -655,28 +667,31 @@ with sync_playwright() as p:
     ctx.close()
     ctx, pg = new_page(b, base, 'en-GB', width=320)
     MISREAD = 'AQUA, GLYCERN, Phenoxyetanol, Bienenwachs, Wsxq lorem, CETYL ALCOHOL, PARFUM'
+    # v2.13: GLYCERN and Phenoxyetanol are corrected by the app (one clear close name, no warning); still 2 no data
     read_label(pg, MISREAD, 'cosmetic')
-    ok(word(pg) == 'Incomplete result' and pg.evaluate('LC.state.current.a.verdict') == 'partial' and card_fits(pg) and no_side_scroll(pg),
-       'only 3 of 7 names known: grey "Incomplete result" instead of green, fits at 320 px')
-    ok(pg.inner_text('.qk p') == '3 of 7 ingredients recognised' and pg.inner_text('.qk .qks') == '2 probably misread · 2 not in our data',
-       'known line: "3 of 7 ingredients recognised", "2 probably misread · 2 not in our data" (%s)' % pg.inner_text('.qk'))
-    pg.screenshot(path=os.path.join(SHOTS, 'v211-partial-en.png'))
-    pg.click('#unkBtn'); pg.wait_for_timeout(400)
+    ok(word(pg) == 'No warnings' and card_fits(pg) and no_side_scroll(pg), 'v2.13: 2 misread names corrected by the app: 5 of 7 known = "No warnings", fits at 320 px')
+    ok(pg.inner_text('#knownLine .qkn') == '5 of 7 ingredients recognised' and pg.inner_text('#knownLine .qks') == ' · 2 not in our data · 2 corrected by the app'
+       and pg.inner_text('#unkBtn') == 'See' and pg.get_attribute('#unkBtn', 'aria-label') == 'See 2 unknown',
+       'known line in one line: "5 of 7 … · 2 not in our data · 2 corrected by the app · See · Fix the text" (%s)' % pg.inner_text('#knownLine'))
+    pg.screenshot(path=os.path.join(SHOTS, 'v213-auto-en.png'))
+    see_unknown(pg); pg.wait_for_timeout(400)
     ok(pg.get_attribute('#detBtn', 'aria-expanded') == 'true' and pg.is_visible('#groups .grp.g-nodata .chiplist') and pg.locator('#groups li.flash .gchip.nf').count() == 1,
-       '"See 4 unknown": Details open at the first unknown name (v2.12: in the grey "No data" group)')
-    pg.locator('#groups li.flash .gchip').click(); pg.wait_for_selector('#detail:not([hidden])')
-    ok('Probably misread. Maybe: Glycerin.' in pg.inner_text('#detail'), 'detail of GLYCERN: "Probably misread. Maybe: Glycerin."')
+       '"See": Details open at the first unknown name (grey "No data" group)')
+    if pg.locator('#groups .grp.g-green .grp-head[aria-expanded=false]').count(): pg.click('#groups .grp.g-green .grp-head')
+    pg.locator('#groups .grp.g-green .gchip', has_text='Glycerin').click(); pg.wait_for_selector('#detail:not([hidden])')
+    ok('Corrected by the app' in pg.inner_text('#detail .d-tags') and pg.inner_text('#autoCard p') == 'The label was read as GLYCERN. The app counts it as Glycerin.',
+       'detail of GLYCERN: tag "Corrected by the app", "The label was read as GLYCERN. The app counts it as Glycerin."')
     pg.click('#detailBack')
     pg.wait_for_selector('#detail', state='hidden')
     code = pg.evaluate('LC.state.current.p.code')
-    pg.evaluate('window.scrollTo(0, 0)'); pg.click('#fixTextBtn'); pg.wait_for_selector('#fixBox:not([hidden])')
-    ok(pg.is_visible('#labelPanel') and pg.input_value('#labelText') == MISREAD and pg.eval_on_selector('input[name=kind]:checked', 'i => i.value') == 'cosmetic',
+    pg.evaluate('window.scrollTo(0, 0)'); show_details(pg); pg.click('#fixTextBtn'); pg.wait_for_selector('#fixBox:not([hidden])')
+    ok(pg.is_visible('#labelPanel') and pg.is_visible('#textPart') and pg.input_value('#labelText') == MISREAD and pg.eval_on_selector('input[name=kind]:checked', 'i => i.value') == 'cosmetic',
        '"Fix the text": the form opens with the saved text and type')
     pg.click('#fixAll')
-    ok(pg.input_value('#labelText') == 'AQUA, GLYCERIN, Phenoxyethanol, Bienenwachs, Wsxq lorem, CETYL ALCOHOL, PARFUM', '"Fix all (2)": both names fixed (%s)' % pg.input_value('#labelText'))
+    ok(pg.input_value('#labelText') == 'AQUA, GLYCERIN, Phenoxyethanol, Bienenwachs, Wsxq lorem, CETYL ALCOHOL, PARFUM', '"Fix all (2)": both names fixed in the text (%s)' % pg.input_value('#labelText'))
     pg.click('#checkLabel'); pg.wait_for_selector('#result:not([hidden]) #answer')
-    ok(word(pg) == 'No warnings' and pg.inner_text('.qk p') == '5 of 7 ingredients recognised' and pg.inner_text('.qk .qks') == '2 not in our data' and pg.evaluate('LC.state.current.p.code') == code,
-       'after the fix: 5 of 7 known = "No warnings" with "2 not in our data"; the same product is updated')
+    ok(word(pg) == 'No warnings' and pg.inner_text('#knownLine .qkn') == '5 of 7 ingredients recognised' and pg.inner_text('#knownLine .qks') == ' · 2 not in our data' and pg.evaluate('LC.state.current.p.code') == code,
+       'after the fix: 5 of 7 known with "2 not in our data" (nothing left to correct); the same product is updated')
     pg.click('.tabbar button[data-go=history]'); pg.wait_for_timeout(300)
     ok(pg.locator('#historyList li').count() == 1 and pg.locator('#historyList li .dot.g-green').count() == 1, 'History: one entry (same product), green dot')
     pg.click('.tabbar button[data-go=scan]')
@@ -686,89 +701,121 @@ with sync_playwright() as p:
     pg.click('.tabbar button[data-go=scan]')
     if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
     read_label(pg, 'Aqua, Sodium Laureth Sulfate, Glycern, 5-15% anionic surfactants, Parfum', 'household')
-    ok(pg.inner_text('.qk .qks') == '1 probably misread', 'household: the detergent words are known, Glycern = probably misread (%s)' % pg.inner_text('.qk'))
+    ok(pg.inner_text('#knownLine .qks') == ' · 1 corrected by the app', 'household: the detergent words are known, Glycern is corrected by the app (%s)' % pg.inner_text('#knownLine'))
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    read_label(pg, 'Aqua, Wsxq lorem, Bnmz ipsum, Bienenwachs, Cetyl Alcohol, Parfum, Plkr dolor', 'cosmetic')
+    ok(word(pg) == 'Incomplete result' and pg.evaluate('LC.state.current.a.verdict') == 'partial' and card_fits(pg) and no_side_scroll(pg),
+       'only 3 of 7 names known (no close names): grey "Incomplete result" instead of green, fits at 320 px')
     ctx.close()
 
-    print('v2.12: "No data" (grey) apart from "nothing found" (green) + legend; teach the app')
+    print('v2.12/v2.13: "No data" (grey), legend with counts, corrected by the app, check the label, teach the app')
     ctx, pg = new_page(b, base, 'bg-BG', dark=True)
     TEACH = 'AQUA, GLYCERN, CETEARYL ALCOHOL, Bienenwachs, PANTHENOL, PHENOXYETANOL, PARFUM'
     read_label(pg, TEACH, 'cosmetic')
-    ok(pg.locator('.strip .g-nodata').count() == 3 and pg.locator('.strip .g-green').count() == 4 and pg.locator('.strip .nf').count() == 0,
-       'strip: unknown names are grey blocks (3), known names green (4)')
-    ok('позната, нищо открито' in pg.text_content('#legend') and 'няма данни' in pg.text_content('#legend') and card_fits(pg) and no_side_scroll(pg),
-       'legend under the strip: "позната, нищо открито" / "няма данни"')
-    pg.screenshot(path=os.path.join(SHOTS, 'v212-legend-bg.png'))
-    pg.click('#unkBtn'); pg.wait_for_timeout(400)
-    ok(pg.evaluate("[...document.querySelectorAll('#groups .grp')].map(g => g.classList[1] + ':' + g.querySelector('.num').textContent).join(' ')") == 'g-nodata:3 g-green:4',
-       'Details: own grey group "Няма данни" (3) above the green group (4)')
+    ok(pg.locator('.strip .g-nodata').count() == 1 and pg.locator('.strip .g-green').count() == 5 and pg.locator('.strip .g-info').count() == 1 and pg.locator('.strip .nf').count() == 0,
+       'strip: Bienenwachs grey (no data); GLYCERN and PHENOXYETANOL corrected by the app (green / info)')
+    ok(pg.text_content('#legend') == '1 инфо1 няма данни5 нищо открито' and card_fits(pg) and no_side_scroll(pg),
+       'v2.13 legend with a count for every colour shown: "1 инфо · 1 няма данни · 5 нищо открито" (%s)' % pg.text_content('#legend'))
+    ok(pg.inner_text('#knownLine .qkn') == '6 от 7 съставки разпознати' and pg.inner_text('#knownLine .qks') == ' · 1 липсва в данните ни · 2 поправени от приложението',
+       'known line in one line: "6 от 7 … · 1 липсва в данните ни · 2 поправени от приложението" (%s)' % pg.inner_text('#knownLine'))
+    pg.screenshot(path=os.path.join(SHOTS, 'v213-card-bg.png'))
+    see_unknown(pg); pg.wait_for_timeout(400)
+    ok(pg.evaluate("[...document.querySelectorAll('#groups .grp')].map(g => g.classList[1] + ':' + g.querySelector('.num').textContent).join(' ')") == 'g-info:1 g-nodata:1 g-green:5',
+       'Details: grey group "Няма данни" (1) above the green group (5)')
     ok(pg.inner_text('#groups .grp.g-nodata .ttl') == 'Няма данни' and pg.inner_text('#groups .grp.g-nodata .grpnote') == 'Приложението не знае нищо за тези имена – нито добро, нито лошо.'
-       and pg.locator('#groups li.flash .gchip.nf').count() == 1, '"Виж 3 непознати" opens the grey group at the first unknown name; meaning line')
+       and pg.locator('#groups li.flash .gchip.nf').count() == 1, '"Виж" opens the grey group at the unknown name; meaning line')
     pg.screenshot(path=os.path.join(SHOTS, 'v212-groups-bg.png'))
     pg.click('#groups .grp.g-green .grp-head')
     ok(pg.inner_text('#groups .grp.g-green .grpnote') == 'Познати съставки. Не са в списъците на ЕС, които приложението проверява.', 'green group: "Познати съставки. …" (cosmetics)')
-    pg.locator('#groups .grp.g-nodata .gchip').first.click(); pg.wait_for_selector('#detail:not([hidden])')   # GLYCERN
+    # (d) no close name: grey badge, "Какво знае приложението: Нищо", teach with the picker
+    pg.locator('#groups .grp.g-nodata .gchip').first.click(); pg.wait_for_selector('#detail:not([hidden])')
     ok(pg.inner_text('#detail .badge') == 'Няма данни' and pg.inner_text('#nothingLine').startswith('Нищо. Това име не е в данните ни'),
-       'detail of GLYCERN: grey badge "Няма данни" (not green "Не са открити опасения") + "Нищо. …"')
-    ok(pg.inner_text('#teachCard h3') == 'Какво е това?' and pg.inner_text('#teachYes') == 'Да, това е Glycerin' and pg.inner_text('#teachOther') == 'Друга съставка…'
-       and 'Вероятно грешно прочетено. Може би: Glycerin.' in pg.inner_text('#detail'), 'teach card: "Да, това е Glycerin" + "Друга съставка…"; short "Може би" line')
-    pg.screenshot(path=os.path.join(SHOTS, 'v212-teach-card-bg.png'))
-    pg.click('#teachYes'); pg.wait_for_selector('#detail', state='hidden'); pg.wait_for_timeout(200)
-    ok(pg.inner_text('#toast') == 'Научено: GLYCERN = Glycerin' and pg.evaluate("JSON.parse(localStorage.getItem('lc.taught')).glycern.to") == 'GLYCERIN',
-       'one tap: saved on the phone (GLYCERN = GLYCERIN), toast "Научено: …"')
-    ok(pg.inner_text('.qk p') == '5 от 7 съставки разпознати' and '1 научена от теб' in pg.inner_text('.qk .qks') and pg.locator('.strip .g-nodata').count() == 2,
-       'result checked again at once: 5 of 7, "1 научена от теб", 2 grey blocks')
-    # A name with no guess: the picker (Find screen, cosmetic names only, food names lead to the cosmetic name)
-    if pg.get_attribute('#detBtn', 'aria-expanded') != 'true': pg.click('#detBtn')
-    if pg.locator('#groups .grp.g-nodata .grp-head[aria-expanded=false]').count(): pg.click('#groups .grp.g-nodata .grp-head')
-    pg.locator('#groups .grp.g-nodata .gchip', has_text='Bienenwachs').click(); pg.wait_for_selector('#detail:not([hidden])')
+       'detail of Bienenwachs: grey badge "Няма данни" (not green) + "Нищо. …"')
     ok(pg.inner_text('#teachCard p') == 'Приложението не познава това име. Кажи му коя съставка е.' and pg.inner_text('#teachOther') == 'Избери съставката…' and pg.locator('#teachYes').count() == 0,
        'no guess: "Приложението не познава това име…" + "Избери съставката…"')
+    pg.screenshot(path=os.path.join(SHOTS, 'v212-teach-card-bg.png'))
     pg.click('#teachOther'); pg.wait_for_selector('#searchPanel:not([hidden])'); pg.wait_for_timeout(300)
     rows = pg.evaluate("[...document.querySelectorAll('#searchList li')].map(l => l.innerText)")
     ok(pg.inner_text('#searchPanel h2') == 'Какво е „Bienenwachs“?' and pg.input_value('#searchInput') == 'Bienenwachs' and rows and rows[0].startswith('Beeswax')
        and not any('Добавка' in r for r in rows), 'picker: "Какво е „Bienenwachs“?", name typed in, Beeswax found through E901, no food rows (%s)' % rows[:3])
     pg.screenshot(path=os.path.join(SHOTS, 'v212-picker-bg.png'))
     pg.locator('#searchList li button').first.click(); pg.wait_for_selector('#result:not([hidden]) #answer'); pg.wait_for_timeout(300)
-    ok(word(pg) == 'Без предупреждения' and '2 научени от теб' in pg.inner_text('.qk .qks') and pg.evaluate('history.state.view') == 'result' and pg.is_hidden('#searchPanel'),
-       'pick Beeswax: back on the result, 6 of 7 known = "Без предупреждения", "2 научени от теб"')
-    pg.screenshot(path=os.path.join(SHOTS, 'v212-after-teach-bg.png'))
-    # Taught name: tag + card with undo
+    ok(word(pg) == 'Без предупреждения' and pg.inner_text('#knownLine .qkn') == '7 от 7 съставки разпознати' and '1 научена от теб' in pg.inner_text('#knownLine')
+       and pg.evaluate('history.state.view') == 'result' and pg.is_hidden('#searchPanel'), 'pick Beeswax: back on the result, 7 of 7 known, "1 научена от теб"')
+    ok(pg.inner_text('#toast') == 'Научено: Bienenwachs = Beeswax' and pg.evaluate("JSON.parse(localStorage.getItem('lc.taught')).bienenwachs.to") == 'BEESWAX',
+       'saved on the phone (Bienenwachs = BEESWAX), toast "Научено: …"')
+    # taught name: tag + card with undo
     if pg.get_attribute('#detBtn', 'aria-expanded') != 'true': pg.click('#detBtn')
     if pg.locator('#groups .grp.g-green .grp-head[aria-expanded=false]').count(): pg.click('#groups .grp.g-green .grp-head')
     pg.locator('#groups .grp.g-green .gchip', has_text='Beeswax').click(); pg.wait_for_selector('#detail:not([hidden])')
     ok('Научено от теб' in pg.inner_text('#detail .d-tags') and pg.inner_text('#taughtCard p') == 'На етикета пише Bienenwachs. Ти научи приложението, че това е Beeswax.',
        'detail of a taught name: tag "Научено от теб", "На етикета пише Bienenwachs…"')
     pg.click('#undoTeach'); pg.wait_for_selector('#detail', state='hidden'); pg.wait_for_timeout(200)
-    ok(pg.inner_text('#toast') == 'Премахнато: Bienenwachs' and '1 научена от теб' in pg.inner_text('.qk .qks') and pg.locator('.strip .g-nodata').count() == 2,
-       '"Отмени": Bienenwachs is unknown again (grey), GLYCERN stays taught')
-    # Another product: the taught name works at once; the fix box does not offer it again
+    ok(pg.inner_text('#toast') == 'Премахнато: Bienenwachs' and pg.locator('.strip .g-nodata').count() == 1, '"Отмени": Bienenwachs is unknown (grey) again')
+    # (a) corrected by the app: "Не е това" keeps it unknown and remembers that
+    if pg.get_attribute('#detBtn', 'aria-expanded') != 'true': pg.click('#detBtn')
+    if pg.locator('#groups .grp.g-green .grp-head[aria-expanded=false]').count(): pg.click('#groups .grp.g-green .grp-head')
+    pg.locator('#groups .grp.g-green .gchip', has_text='Glycerin').click(); pg.wait_for_selector('#detail:not([hidden])')
+    ok('Поправено от приложението' in pg.inner_text('#detail .d-tags') and pg.inner_text('#autoCard p') == 'Прочетено е GLYCERN. Приложението го брои като Glycerin.',
+       'detail of GLYCERN: tag "Поправено от приложението", "Прочетено е GLYCERN. Приложението го брои като Glycerin."')
+    pg.screenshot(path=os.path.join(SHOTS, 'v213-auto-detail-bg.png'))
+    pg.click('#notThis'); pg.wait_for_selector('#detail', state='hidden'); pg.wait_for_timeout(200)
+    ok(pg.inner_text('#toast') == 'Добре: GLYCERN остава непознато.' and pg.locator('.strip .g-nodata').count() == 2
+       and pg.evaluate("JSON.parse(localStorage.getItem('lc.taught')).glycern.no") == 'GLYCERIN', '"Не е това": GLYCERN stays unknown (grey), remembered on the phone')
+    if pg.get_attribute('#detBtn', 'aria-expanded') != 'true': pg.click('#detBtn')
+    if pg.locator('#groups .grp.g-nodata .grp-head[aria-expanded=false]').count(): pg.click('#groups .grp.g-nodata .grp-head')
+    pg.locator('#groups .grp.g-nodata .gchip', has_text='GLYCERN').click(); pg.wait_for_selector('#detail:not([hidden])')
+    ok(pg.locator('#teachYes').count() == 0 and pg.inner_text('#teachOther') == 'Избери съставката…', 'after "Не е това": no "Да, това е Glycerin" again, only "Избери съставката…"')
+    pg.click('#detailBack'); pg.wait_for_selector('#detail', state='hidden')
+    # (b) the closest name has a warning: orange "check the label", you decide
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    read_label(pg, 'Aqua, Glycerin, BUTYLPHENYL METHYLPROPI0NAL, Parfum', 'cosmetic')
+    ok(word(pg) == 'Провери' and pg.inner_text('#dtop .qy') == 'Butylphenyl Methylpropional?' and 'погледни етикета' in pg.inner_text('#dtop .qr'),
+       '(b) close name with an EU warning (Lilial): orange "Провери", "Butylphenyl Methylpropional?", "погледни етикета" – never decided alone')
+    pg.click('#detBtn')
+    if pg.locator('#groups .grp.g-orange .grp-head[aria-expanded=false]').count(): pg.click('#groups .grp.g-orange .grp-head')
+    pg.locator('#groups .grp.g-orange .row-btn').first.click(); pg.wait_for_selector('#detail:not([hidden])')
+    ok(pg.inner_text('#detail .badge') == 'Провери етикета' and 'Прочетено е „BUTYLPHENYL METHYLPROPI0NAL“' in pg.inner_text('#askCard') and pg.inner_text('#askYes') == 'Да, това е Butylphenyl Methylpropional'
+       and pg.inner_text('#askNo') == 'Не, друго е' and 'Ако е Butylphenyl Methylpropional:' in pg.inner_text('#askCard'), 'detail: "Провери етикета", what was read, "Да, това е …" / "Не, друго е", the EU reason if it is')
+    pg.screenshot(path=os.path.join(SHOTS, 'v213-ask-bg.png'))
+    pg.click('#askYes'); pg.wait_for_selector('#detail', state='hidden'); pg.wait_for_timeout(200)
+    ok(word(pg) == 'Избягвай' and 'Butylphenyl Methylpropional' in pg.inner_text('#dtop .qy'), '"Да, това е": taught, now red "Избягвай" (banned in the EU)')
+    # (c) several close names: you choose
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    read_label(pg, 'Aqua, Glycerin, Laureth-B, Parfum', 'cosmetic')
+    pg.click('#detBtn')
+    if pg.locator('#groups .grp.g-nodata .grp-head[aria-expanded=false]').count(): pg.click('#groups .grp.g-nodata .grp-head')
+    pg.locator('#groups .grp.g-nodata .gchip').first.click(); pg.wait_for_selector('#detail:not([hidden])')
+    ok('Коя от тези е?' in pg.inner_text('#teachCard') and pg.inner_text('#teachChoice0') == 'Laureth-1' and pg.locator('#teachCard [id^=teachChoice]').count() == 3,
+       '(c) Laureth-B: "Коя от тези е?" with Laureth-1 / -2 / -3')
+    pg.click('#teachChoice1'); pg.wait_for_selector('#detail', state='hidden'); pg.wait_for_timeout(200)
+    ok(pg.evaluate("JSON.parse(localStorage.getItem('lc.taught'))['laureth b'].to") == 'LAURETH-2' and pg.locator('.strip .g-nodata').count() == 0, 'choosing Laureth-2: taught, nothing grey left')
+    # the fix box does not offer a name you answered
     pg.click('.tabbar button[data-go=scan]')
     if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
     pg.click('#cardLabel'); pg.fill('#labelText', 'Aqua, Glycern, Phenoxyetanol, Parfum'); pg.check('input[name=kind][value=cosmetic]'); pg.wait_for_timeout(900)
-    ok(pg.locator('#fixBox li').count() == 1 and pg.inner_text('#fixBox li b') == 'Phenoxyethanol', 'fix box: the taught Glycern is not offered again, only Phenoxyetanol')
-    pg.click('#checkLabel'); pg.wait_for_selector('#result:not([hidden]) #answer')
-    ok(pg.locator('.strip .g-nodata').count() == 1 and '1 научена от теб' in pg.inner_text('.qk .qks'), 'other product with "Glycern": known at once (taught), 1 grey (Phenoxyetanol)')
-    # Food: no grey, no legend
+    ok(pg.locator('#fixBox li').count() == 1 and pg.inner_text('#fixBox li b') == 'Phenoxyethanol', 'fix box: Glycern ("Не е това") is not offered again, only Phenoxyetanol')
+    # Food: legend, no grey, no "corrected"
     pg.click('.tabbar button[data-go=scan]')
     if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
     read_label(pg, 'Zucker, Wsxq lorem, Bnmz ipsum, Plkr dolor', 'food')
-    ok(pg.locator('.strip .g-nodata').count() == 0 and pg.locator('#legend').count() == 0, 'food: no grey blocks, no legend')
-    ok(card_fits(pg) and 'null' not in pg.inner_text('#answer'), 'no legend: nothing else under the strip (bug in v2.12: the word "null")')
-    pg.click('.tabbar button[data-go=scan]')
-    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
-    read_label(pg, 'Aqua, Sodium Laureth Sulfate, Glycerin, Citric Acid, Parfum', 'cosmetic')
-    ok(card_fits(pg) and 'null' not in pg.inner_text('#answer') and pg.locator('#legend').count() == 0, 'cosmetic, all names known: no legend, no "null"')
-    # My list: taught names, delete; backup
+    ok(pg.locator('.strip .g-nodata').count() == 0 and pg.text_content('#legend') == '4 нищо открито' and card_fits(pg), 'food: no grey blocks; legend "4 нищо открито"')
+    # My list: taught names (incl. "не поправяй"), delete; backup
     with pg.expect_download() as dl:
         pg.click('.tabbar button[data-go=list]'); pg.click('#moreFold summary'); pg.click('#exportBtn')
     bk = json.load(open(dl.value.path(), encoding='utf-8'))
-    ok(bk.get('taught', {}).get('glycern', {}).get('to') == 'GLYCERIN', 'backup file includes the taught names')
+    ok(bk.get('taught', {}).get('glycern', {}).get('no') == 'GLYCERIN' and bk.get('vibrate') is True, 'backup file includes the taught names and the vibration setting')
     pg.click('#taughtBox summary'); pg.wait_for_timeout(200)
-    ok(pg.inner_text('#taughtCount') == '(1)' and pg.inner_text('#taughtList .taughtrow s') == 'GLYCERN' and pg.inner_text('#taughtList .taughtrow b') == 'Glycerin',
-       'My list: "Научени имена" fold with GLYCERN → Glycerin')
+    names = pg.evaluate("[...document.querySelectorAll('#taughtList .taughtrow')].map(r => r.querySelector('s').textContent + '>' + r.querySelector('b').textContent)")
+    ok(pg.inner_text('#taughtCount') == '(3)' and 'GLYCERN>не поправяй' in names and 'BUTYLPHENYL METHYLPROPI0NAL>Butylphenyl Methylpropional' in names,
+       'My list: "Научени имена" (3), GLYCERN → "не поправяй" (%s)' % names)
     pg.evaluate("document.getElementById('taughtBox').scrollIntoView({block: 'center'})"); pg.screenshot(path=os.path.join(SHOTS, 'v212-mylist-bg.png'))
-    pg.click('#taughtList .taughtrow .x'); pg.wait_for_timeout(200)
-    ok(pg.inner_text('#taughtCount') == '(0)' and 'Още няма' in pg.inner_text('#taughtList') and pg.evaluate("localStorage.getItem('lc.taught')") == '{}', '✕ deletes it; empty text')
+    for k in range(3): pg.locator('#taughtList .taughtrow .x').first.click(); pg.wait_for_timeout(150)
+    ok(pg.inner_text('#taughtCount') == '(0)' and 'Още няма' in pg.inner_text('#taughtList') and pg.evaluate("localStorage.getItem('lc.taught')") == '{}', '✕ deletes them; empty text')
+    ok(pg.is_visible('#vibSwitch') or pg.is_visible('#vibRow'), 'v2.13: "Вибрация при резултат" switch in My list')
     ok(no_side_scroll(pg), 'My list: no sideways scroll')
     for tab in ['list', 'history']:   # bug found 21 Oct: 🔍 on My list / History showed nothing
         pg.click('.tabbar button[data-go=%s]' % tab); pg.wait_for_timeout(200); pg.click('#topSearch'); pg.wait_for_timeout(300)
@@ -776,18 +823,97 @@ with sync_playwright() as p:
            '🔍 on %s: switches to Scan and shows the Find screen (empty box)' % tab)
         pg.go_back(); pg.wait_for_timeout(300)
     ctx.close()
+    # v2.13: History mini strip, vibration patterns, "Checked:" chips with your settings, one step after a photo
+    ctx, pg = new_page(b, base, 'bg-BG', dark=True)
+    pg.evaluate("window.__buzz = []; navigator.vibrate = p => { window.__buzz.push(p); return true; }; 0")
+    pg.evaluate("localStorage.setItem('lc.avoid', JSON.stringify([{id:'a1', text:'palm oil, palmöl'}])); localStorage.setItem('lc.allergens', JSON.stringify({food:['milk'], cos:[]}))")
+    reload_ready(pg); pg.evaluate("window.__buzz = []; navigator.vibrate = p => { window.__buzz.push(p); return true; }; 0")
+    read_label(pg, 'Съставки: овесени ядки, сол, канела', 'food')
+    ok(pg.evaluate("[...document.querySelectorAll('#chkLine b')].map(b => b.textContent).join('|')") == '✓ ЕС|✓ Твоят списък · 1|✓ Алергени · 1',
+       '"Проверено:" chips show what was checked: ЕС, your list (1), allergens (1)')
+    ok(pg.evaluate('window.__buzz') == [[70]], 'vibration: 1 short buzz on a new "Без предупреждения" (%s)' % pg.evaluate('window.__buzz'))
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    read_label(pg, 'Zutaten: Zucker, Palmöl, Natriumnitrit', 'food')
+    ok(pg.evaluate('window.__buzz')[-1] == [70, 90, 70, 90, 70], 'vibration: 3 buzzes on "Избягвай"')
+    pg.click('.tabbar button[data-go=history]'); pg.wait_for_timeout(300)
+    ok(pg.locator('#historyList li').nth(0).locator('.mstrip i.g-red').count() >= 1 and pg.locator('#historyList li').nth(1).locator('.mstrip i').count() == 3,
+       'History: a mini colour strip under each product (red block for the palm oil product)')
+    n = len(pg.evaluate('window.__buzz')); pg.locator('#historyList li .open').first.click(); pg.wait_for_selector('#result:not([hidden]) #answer')
+    ok(len(pg.evaluate('window.__buzz')) == n, 'opening a saved product from History: no vibration')
+    pg.screenshot(path=os.path.join(SHOTS, 'v213-history-bg.png'))
+    pg.click('.tabbar button[data-go=list]'); pg.click('#vibSwitch')
+    ok(pg.evaluate("localStorage.getItem('lc.vibrate')") == 'false', 'vibration switch off is saved')
+    # safety: a photo read without the list heading is never green
+    v = pg.evaluate("[LC.analyze({kind:'food', ingredientsText:'Zucker, Salz', read:{photo:true, list:false}}).verdict, LC.analyze({kind:'food', ingredientsText:'Zucker, Salz', read:{photo:true, list:true}}).verdict, LC.analyze({kind:'food', ingredientsText:'Zucker, Salz'}).verdict]")
+    ok(v == ['partial', 'ok', 'ok'], 'v2.13 safety: photo read without a list heading -> "Непълен резултат", with heading or typed text -> "Без предупреждения" (%s)' % v)
+    pg.click('.tabbar button[data-go=scan]')
+    pg.evaluate("LC.showProduct({code:'t-nolist', kind:'food', source:'label', ingredientsText:'Brennwert 0 kJ, Salz 0,02 g', texts:['Brennwert 0 kJ, Salz 0,02 g'], read:{photo:true, list:false}, tags:[], allergens:[], analysis:[]})")
+    pg.wait_for_selector('#result:not([hidden]) #answer')
+    ok(word(pg) == 'Непълен резултат' and pg.inner_text('#dtop .qy') == 'Не намерих заглавието на списъка със съставки на снимката. Прочетеният текст може да не е списъкът.'
+       and pg.locator('#fixTextBtn2').count() == 1 and card_fits(pg), 'no list heading on the photo: grey card says so, with "Поправи текста"')
+    pg.screenshot(path=os.path.join(SHOTS, 'v213-nolist-bg.png'))
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    pg.click('#cardLabel')
+    ok(pg.inner_text('#photoTip') == 'Съвет: снимай отблизо, така че списъкът със съставки да запълва снимката.' and pg.is_visible('#textPart'),
+       'Read a label: close-up tip under the photo buttons; without a photo the text part is shown (paste)')
+    ctx.close()
     # EN and DE, light, 320 px
-    for loc, lang, nd, yes in [('en-GB', 'en', 'No data', 'Yes, it is Glycerin'), ('de-DE', 'de', 'Keine Daten', 'Ja, das ist Glycerin')]:
+    for loc, lang, nd, pick in [('en-GB', 'en', 'No data', 'Choose the ingredient…'), ('de-DE', 'de', 'Keine Daten', 'Zutat auswählen…')]:
         ctx, pg = new_page(b, base, loc, width=320)
         read_label(pg, 'Aqua, Glycern, Bienenwachs, Cetearyl Alcohol, Parfum', 'cosmetic')
-        ok(card_fits(pg) and no_side_scroll(pg) and pg.locator('.strip .g-nodata').count() == 2, '%s 320 px light: card fits, 2 grey blocks' % lang.upper())
-        pg.click('#unkBtn'); pg.wait_for_timeout(300)
+        ok(card_fits(pg) and no_side_scroll(pg) and pg.locator('.strip .g-nodata').count() == 1, '%s 320 px light: card fits, 1 grey block (Glycern corrected)' % lang.upper())
+        see_unknown(pg); pg.wait_for_timeout(300)
         ok(pg.inner_text('#groups .grp.g-nodata .ttl') == nd, '%s: grey group "%s"' % (lang.upper(), nd))
         pg.locator('#groups li.flash .gchip').click(); pg.wait_for_selector('#detail:not([hidden])')
-        ok(pg.inner_text('#detail .badge') == nd and pg.inner_text('#teachYes') == yes and pg.evaluate("document.getElementById('detail').scrollWidth <= window.innerWidth"),
-           '%s: detail badge "%s", "%s", no sideways scroll' % (lang.upper(), nd, yes))
+        ok(pg.inner_text('#detail .badge') == nd and pg.inner_text('#teachOther') == pick and pg.evaluate("document.getElementById('detail').scrollWidth <= window.innerWidth"),
+           '%s: detail badge "%s", "%s", no sideways scroll' % (lang.upper(), nd, pick))
         pg.screenshot(path=os.path.join(SHOTS, 'v212-teach-%s-320.png' % lang))
         ctx.close()
+
+    print('v2.14: simpler card – word + one line + strip; ⓘ Подробности / ↻ Снимай пак; Следващ продукт')
+    ctx, pg = new_page(b, base, 'bg-BG', dark=True)
+    pg.evaluate("localStorage.setItem('lc.avoid', JSON.stringify([{id:'a1', text:'methylisothiazolinone'}])); 0"); reload_ready(pg)
+    read_label(pg, 'AQUA, GLYCERIN, PANTHENOL, CETYL ALCOHOL, ALLANTOIN, CITRIC ACID', 'cosmetic', 'Крем')
+    ok(word(pg) == 'Без предупреждения' and pg.locator('#oneLine').count() == 0 and pg.locator('#answer .qr, #answer #chkLine, #answer #knownLine, #answer #legend, #answer .strip-ends').count() == 0
+       and pg.locator('#answer .strip button').count() == 6, 'green card: only the word and the strip (no line, no chips, no legend)')
+    ok(pg.inner_text('#detBtn') == 'Подробности' and pg.inner_text('#againBtn') == 'Снимай пак' and pg.inner_text('#nextBtn') == 'Следващ продукт'
+       and 'btn-primary' in pg.get_attribute('#nextBtn', 'class') and 'btn-ghost' in pg.get_attribute('#againBtn', 'class'), 'two doors "Подробности" / "Снимай пак", blue "Следващ продукт"')
+    ok(pg.is_hidden('#details') and pg.evaluate("[...document.querySelectorAll('#chkLine b')].length") == 2, 'the "Проверено" chips are in Подробности (closed)')
+    pg.click('#detBtn'); pg.wait_for_timeout(300)
+    ok(pg.is_visible('#dtop #chkLine') and pg.is_visible('#dtop #legend') and pg.get_attribute('#detBtn', 'aria-expanded') == 'true', 'ⓘ Подробности opens the info: Проверено chips + legend at the top')
+    pg.screenshot(path=os.path.join(SHOTS, 'v214-green-details-bg.png'))
+    pg.click('#detBtn')
+    ok(pg.is_hidden('#details'), 'a second tap closes it')
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    read_label(pg, SHOWER, 'cosmetic', 'Душ гел')
+    ok(word(pg) == 'Избягвай' and pg.inner_text('#oneLine') == 'Methylisothiazolinone, Butylphenyl Methylpropional' and card_fits(pg) and no_side_scroll(pg),
+       'red card: one line with the names only (%s)' % pg.inner_text('#oneLine'))
+    ok(pg.inner_text('#dtop .qr') == 'Причина: в твоя списък, забранено в ЕС', 'the reason is in Подробности')
+    pg.screenshot(path=os.path.join(SHOTS, 'v214-red-bg.png'))
+    pg.click('#againBtn'); pg.wait_for_selector('#labelPanel:not([hidden])')
+    ok(pg.is_visible('#photoInput') or pg.is_visible('.filebtn'), '"Снимай пак" opens Read a label')
+    pg.go_back(); pg.wait_for_selector('#result:not([hidden]) #answer')
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    pg.evaluate("localStorage.setItem('lc.allergens', JSON.stringify({food:['soybeans', 'gluten'], cos:[]})); 0"); reload_ready(pg)
+    read_label(pg, 'Zutaten: Hartweizengrieß, Zucker. Kann Spuren von Soja enthalten.', 'food')
+    ok(word(pg) == 'Избягвай' and pg.inner_text('#oneLine') == 'Глутен, Соя (следи)', 'red with traces: "Глутен, Соя (следи)" in one line (%s)' % pg.inner_text('#oneLine'))
+    pg.click('.tabbar button[data-go=scan]')
+    pg.evaluate("LC.showProduct({code:'t-nolist2', kind:'food', source:'label', ingredientsText:'Brennwert 0 kJ, Salz 0,02 g', texts:['Brennwert 0 kJ, Salz 0,02 g'], read:{photo:true, list:false}, tags:[], allergens:[], analysis:[]})")
+    pg.wait_for_selector('#result:not([hidden]) #answer')
+    ok(word(pg) == 'Непълен резултат' and pg.inner_text('#oneLine') == 'Снимай отблизо само списъка.' and pg.locator('#answer .strip').count() == 0
+       and 'btn-primary' in pg.get_attribute('#againBtn', 'class') and 'btn-ghost' in pg.get_attribute('#nextBtn', 'class'),
+       'grey (no list on the photo): "Снимай отблизо само списъка.", no strip, "Снимай пак" is the blue button')
+    pg.screenshot(path=os.path.join(SHOTS, 'v214-grey-bg.png'))
+    ctx.close()
+    ctx, pg = new_page(b, base, 'en-GB', width=320)
+    type_code(pg, '9001234567890'); pg.wait_for_selector('#result:not([hidden]) #answer')
+    ok(pg.inner_text('#againBtn') == 'Photo the label' and pg.inner_text('#nextBtn') == 'Next product' and card_fits(pg) and no_side_scroll(pg),
+       'EN 320 px, barcode product: "Photo the label" / "Next product", fits')
+    ctx.close()
 
     print('v2.8: Auto reads a German label with DE (BG app)')
     DE_LINES = ['Zutaten: Zucker, Weizenmehl, Palmöl, Glukosesirup,', 'Emulgator: Sojalecithin, Farbstoff: Tartrazin,', 'Salz, Aroma. Kann Spuren von Milch und', 'Haselnüssen enthalten.']
@@ -808,7 +934,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v16')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v18')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -851,7 +977,7 @@ with sync_playwright() as p:
     pg = ctx.new_page(); pg.on('pageerror', lambda e: errors.append(str(e)))
     pg.goto(base2); pg.evaluate('navigator.serviceWorker.ready'); pg.reload(); pg.evaluate('LC.dbReady')
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v16'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v18'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)

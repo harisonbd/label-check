@@ -343,7 +343,7 @@
     return prev[b.length];
   }
   const OCR_DIGIT = { 0: 'o', 1: 'i', 5: 's', 8: 'b' };   // the reader sees O as 0, I as 1 ("150PROPYL" = ISOPROPYL)
-  function suggestCosmetic(seg) {
+  function suggestCosmetic(seg, all) {
     if (!cosIndex) return null;
     // The name before a bracket, without marks like * or °
     const from = String(seg || '').replace(/\s*[\[(].*$/, '').replace(/[\s*°¹²³†‡.:]+$/, '').replace(/^[\s*°.:\-–]+/, '');
@@ -366,18 +366,21 @@
     const tries = [k];
     const kd = k.replace(/[0158]/g, d => OCR_DIGIT[d]);
     if (kd !== k) tries.push(kd);
-    let best = null, tie = false;
+    let best = null, tie = false, ties = [];
     for (const q of tries) {
       for (let len = q.length - max; len <= q.length + max; len++) {
         for (const [nk, name] of fuzzyByLen.get(len) || []) {
           const d = lev(q, nk, best ? Math.min(max, best.d) : max);
           if (d > max) continue;
-          if (!best || d < best.d) { best = { d, name, it: cosIndex.get(nk) }; tie = false; }
-          else if (d === best.d && cosIndex.get(nk) !== best.it) tie = true;
+          const it = cosIndex.get(nk);
+          if (!best || d < best.d) { best = { d, name, it }; tie = false; ties = [it]; }
+          else if (d === best.d && it !== best.it) { tie = true; if (it && !ties.includes(it)) ties.push(it); }
         }
       }
     }
-    if (!best || tie || !best.it) return null;
+    if (!best || !best.it) return null;
+    // all: also the case of two or more equally close names (v2.13: the app asks which one it is)
+    if (tie) return all ? { from, tie: true, d: best.d, choices: ties.filter(Boolean).slice(0, 3).map(it => it[0]) } : null;
     return { from, to: best.name, inci: best.it[0], d: best.d };
   }
 

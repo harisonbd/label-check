@@ -755,8 +755,12 @@ details.claudebox .steps { margin-top: 2px; }
 .grpnote { margin: 0 14px 10px; color: var(--muted); font-size: 0.88rem; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0 0; font-size: 0.78rem; color: var(--muted); }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.legend i.g-red { background: var(--red); }
+.legend i.g-orange { background: var(--orange); }
+.legend i.g-info { background: var(--info); }
 .legend i.g-green { background: var(--green); }
 .legend i.g-nodata { background: var(--muted); }
+.legend b { color: var(--ink); font-weight: 700; margin-right: 1px; }
 
 /* ---------- v2.12: teach the app ---------- */
 .d-card.teach { border: 1px solid var(--line); }
@@ -769,3 +773,37 @@ details.claudebox .steps { margin-top: 2px; }
 .taughtrow s { color: var(--muted); }
 .taughtrow b { display: block; }
 .taughtrow .x { flex: 0 0 auto; width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: var(--ink); font-size: 1.1rem; cursor: pointer; }
+
+/* ---------- v2.13: corrected by the app / check the label ---------- */
+.teach .askif { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.teach .askif h3 { font-size: 0.95rem; }
+
+/* ---------- v2.13: more in fewer lines ---------- */
+.qchk { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 4px; font-size: 0.9rem; }
+.qchk > span { color: var(--muted); }
+.qchk b { font-weight: 600; padding: 3px 9px; border-radius: 999px; background: color-mix(in srgb, var(--green) 16%, transparent); }
+.qk1 { margin: 8px 0 2px; font-size: 0.9rem; color: var(--muted); }
+.qk1 .qkn { color: var(--ink); }
+.qk1 .linkbtn.inline { font-size: inherit; }
+.mstrip { display: flex; gap: 2px; margin-top: 6px; height: 8px; }
+.mstrip.dense { gap: 1px; }
+.mstrip i { flex: 1; min-width: 2px; border-radius: 2px; background: var(--green); }
+.mstrip i.g-red { background: var(--red); }
+.mstrip i.g-orange { background: var(--orange); }
+.mstrip i.g-info { background: var(--info); }
+.mstrip i.g-nodata { background: var(--muted); }
+.tip { margin: 6px 0 10px; padding: 8px 12px; border-radius: 12px; background: color-mix(in srgb, var(--accent) 12%, var(--card)); font-size: 0.9rem; }
+
+/* ---------- v2.14: simpler card – one line, two doors, next product ---------- */
+.qa .qy.one { font-size: 1.05rem; margin: 2px 0 6px; }
+.doors { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.25rem), 1fr)); gap: 10px; margin: 0 0 10px; }
+.doors .btn { min-height: 56px; padding: 8px 10px; font-size: 1.02rem; display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; }
+.doors .btn:only-child { grid-column: 1 / -1; }
+.doors svg { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#detBtn[aria-expanded="true"] { border-color: var(--accent); }
+.nextwide { width: 100%; min-height: 54px; margin: 0 0 10px; }
+.dtop { background: var(--card); border-radius: 14px; padding: 12px 14px; margin: 0 0 12px; }
+.dtop .qy { margin: 0 0 4px; font-weight: 650; }
+.dtop .qr { margin: 0 0 6px; color: var(--muted); }
+.dtop .qchk { margin-top: 0; }
+.dtop .legend { margin-top: 8px; }
