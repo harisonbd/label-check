@@ -723,3 +723,8 @@ details.claudebox .steps { margin-top: 2px; }
   .langsw button { min-width: 40px; padding: 6px 8px; }
 }
 .qa.v-check .qi svg { stroke: #241600; }   /* dark "!" on orange: readable in light and dark */
+/* v2.10: name from the photo, add-name button */
+.fromphoto { font-size: 0.72rem; font-weight: 700; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 999px; padding: 1px 7px; white-space: nowrap; flex: none; }
+.addname { flex: 1; min-width: 0; display: inline-flex; align-items: center; min-height: 44px; padding: 0; border: 0; background: none; font: inherit; cursor: pointer; text-align: left; }
+.addname span { display: inline-block; padding: 5px 14px; border-radius: 999px; font-weight: 700; font-size: 0.95rem; color: var(--accent-ink); background: var(--accent); }

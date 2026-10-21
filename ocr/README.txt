@@ -10,6 +10,9 @@ Language files: tessdata_fast (eng, deu, bul), gzip-packed, unchanged otherwise
   Added in v2.8: hun, ces, slk, slv (same repository, commit 8741641; eng there is byte-identical)
   Licence: Apache License 2.0
 
+ocr-worker-2.js (v2.10, used by the app): same as ocr-worker.js plus word positions (TSV), a page-layout mode
+for finding the ingredient list and the product name, and a queue (one image at a time). ocr-worker.js stays only for
+phones that still run an older app version.
 ocr-worker.js: written for Label Check. It loads the program and one language file,
 reads the image and sends back the text. No internet is used after the first time.
 

@@ -846,8 +846,11 @@
   function nameRow(p) {
     const isFav = state.favs.includes(p.code), nm = p.name || t('ph.unnamed');
     return el('div', { class: 'qn' },
-      el('button', { class: 'nameedit' + (p.name ? '' : ' none'), type: 'button', id: 'nameBtn', 'aria-label': t('name.edit') + ': ' + nm, onclick: () => editName(p) },
-        el('span', { text: nm }), icon(ICON.pen)),
+      p.name
+        ? el('button', { class: 'nameedit', type: 'button', id: 'nameBtn', 'aria-label': t('name.edit') + ': ' + nm, onclick: () => editName(p) },
+            el('span', { text: nm }), p.nameFrom === 'photo' ? el('small', { class: 'fromphoto', text: t('name.fromPhoto') }) : null, icon(ICON.pen))
+        : el('button', { class: 'addname', type: 'button', id: 'nameBtn', 'aria-label': t('name.add'), onclick: () => editName(p) },
+            el('span', { text: t('name.add') })),
       el('div', { class: 'acts' },
         el('button', {
           class: 'iconbtn' + (isFav ? ' on' : ''), type: 'button', id: 'favBtn',
@@ -880,6 +883,7 @@
     if (name) state.names[p.code] = name; else delete state.names[p.code];
     store.set('names', state.names);
     p.name = name;
+    delete p.nameFrom;                                     // you checked or wrote the name yourself
     if (state.products[p.code]) saveProduct(p);
     state.history.forEach(h => { if (h.code === p.code) h.name = name; });
     store.set('history', state.history);
@@ -1609,11 +1613,124 @@
     img.dataset.url = URL.createObjectURL(file);
     img.src = img.dataset.url;
     Object.assign(crop, { x: 0.06, y: 0.3, w: 0.88, h: 0.4 });
+    cropTouched = false;
+    nameHint = '';
     drawCrop();
     renderOcrLang();
     ocrStatus('');
     $('ocrArea').hidden = false;
     $('ocrArea').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    findTask = findList(file).catch(() => null);
+  }
+
+  // ---------- v2.10: find the ingredient list (and the product name) on the photo ----------
+  // A fast read of the whole photo (1200 px wide) gives the text blocks with their positions. The block with the
+  // heading word ("Ingredients", "Zutaten", "INGREDIENTS/SASTOJCI/СЪСТАВКИ" …) gets the box. You can still move it.
+  const LIST_HEAD = /^(ingredients?|ingr[eé]dients?|zutaten|inhaltsstoffe|bestandteile|sastojci|съставки|състав|inci|skład|składniki|összetevők|osszetevok|složení|slozeni|zloženie|zlozenie|sestavine|ingrediente|ingredienti|ingredientes|ingrediënten|sastav)$/i;
+  const isListHead = w => String(w || '').split(/[\/:|,.;]+/).some(p => LIST_HEAD.test(p.trim()));
+  const NOT_NAME = /zutaten|ingredient|inhaltsstoff|nährwert|nahrwert|nutrition|energie|energy|brennwert|хранителна|съставки|mindestens|haltbar|verpackung|recycl|hergestellt|made in|www\.|@/i;
+  let cropTouched = false, nameHint = '', findTask = null, lastFind = null;
+
+  // TSV from the reader -> pieces (paragraphs) with their lines, words and box (pixels of the image that was read).
+  function tsvPieces(tsv) {
+    const pieces = new Map();
+    for (const row of String(tsv || '').split('\n')) {
+      const c = row.split('\t');
+      if (c[0] !== '5' || !c[11] || !c[11].trim()) continue;
+      const key = c[2] + '.' + c[3], line = c[4];
+      const w = { x: +c[6], y: +c[7], w: +c[8], h: +c[9], conf: +c[10], t: c[11] };
+      if (!pieces.has(key)) pieces.set(key, { lines: new Map(), words: [] });
+      const p = pieces.get(key);
+      p.words.push(w);
+      if (!p.lines.has(line)) p.lines.set(line, []);
+      p.lines.get(line).push(w);
+    }
+    return [...pieces.values()].map(p => ({
+      words: p.words,
+      lines: [...p.lines.values()],
+      text: [...p.lines.values()].map(ws => ws.map(w => w.t).join(' ')).join('\n'),
+      head: p.words.some(w => isListHead(w.t)),
+      box: [Math.min(...p.words.map(w => w.x)), Math.min(...p.words.map(w => w.y)), Math.max(...p.words.map(w => w.x + w.w)), Math.max(...p.words.map(w => w.y + w.h))]
+    }));
+  }
+
+  // From the piece with the heading to the first piece that ends with a full stop. A "may contain" piece right after
+  // stays (traces). Pieces before the heading and other languages after the list are left out.
+  function listPieces(pieces) {
+    const start = pieces.findIndex(p => p.head);
+    if (start < 0) return null;
+    const out = [];
+    for (let i = start, done = false; i < pieces.length; i++) {
+      const tx = pieces[i].text.trim();
+      if (!/\p{L}{3}/u.test(tx)) continue;                 // lines, icons, noise
+      if (done) { if (LCDB.labelSegments(tx).traceFrom === 1) out.push(pieces[i]); break; }
+      out.push(pieces[i]);
+      if (/[.!]["'”)]*\s*$/.test(tx)) done = true;
+    }
+    return out;
+  }
+  function listFromPieces(pieces) {
+    const ps = listPieces(pieces);
+    return ps ? ps.map(p => p.text.trim()).join('\n') : null;
+  }
+
+  // The biggest clear text outside the list is usually the product name ("CRUNCHY WAFERS", "Balea med Ultra Sensitive").
+  function nameFromPieces(pieces, listPs) {
+    // only text clearly bigger than the normal text on the photo (captions and small print are never the name)
+    const hs = pieces.flatMap(p => p.words).filter(w => w.conf >= 50).map(w => w.h).sort((a, b) => a - b);
+    const minH = hs.length ? Math.max(hs[Math.floor(hs.length / 2)] * 1.35, hs[Math.floor(hs.length * 0.9)] * 1.25) : 0;
+    let best = null;
+    for (const p of pieces) {
+      if (listPs.includes(p)) continue;
+      for (const ws of p.lines) {
+        const good = ws.filter(w => w.conf >= 70 && /\p{L}{2}/u.test(w.t));
+        if (good.length < ws.length * 0.6) continue;       // too many unsure words: skip the line
+        const text = good.map(w => w.t).join(' ').split(/[,.;:!]/)[0].replace(/[^\p{L}\p{N}&'’ -]/gu, '').replace(/\s+/g, ' ').trim();
+        const h = Math.max(...good.map(w => w.h));
+        const ys = good.map(w => w.y + w.h);                // word bottoms: one line of text has one baseline
+        if (Math.max(...ys) - Math.min(...ys) > h * 0.45) continue;
+        if (h < minH || text.replace(/[^\p{L}]/gu, '').length < 3 || text.length > 40 || NOT_NAME.test(text) || isListHead(text)) continue;
+        if (!best || h > best.h) best = { text, h };
+      }
+    }
+    if (!best) return '';
+    const t2 = best.text;
+    return t2 === t2.toUpperCase() ? t2.toLowerCase().replace(/(^|[\s-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase()) : t2;
+  }
+
+  async function findList(file) {
+    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const k = Math.min(1, 1200 / bmp.width), W = Math.round(bmp.width * k), H = Math.round(bmp.height * k);
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    cv.getContext('2d').drawImage(bmp, 0, 0, W, H);
+    if (bmp.close) bmp.close();
+    const png = new Uint8Array(await (await new Promise(res => cv.toBlob(res, 'image/png'))).arrayBuffer());
+    if (file !== ocrFile) return null;
+    ocrStatus(t('ocr.finding'), 'busy');
+    // Auto: a Latin reader first (most labels; it also reads the end of a Latin list right), the Bulgarian reader only
+    // when no heading was found. A language you picked in the menu is used alone.
+    const latin = store.get('ocrLastLatin', LANG === 'en' ? 'eng' : 'deu');
+    const langs = ocrChoice() === 'auto' ? [OCR_ALL.includes(latin) && latin !== 'bul' ? latin : 'deu', 'bul'] : [ocrChoice()];
+    let pieces = [], list = null;
+    for (const lang of langs) {
+      try { pieces = tsvPieces((await ocrRun(png.slice(), lang, { layout: true })).tsv); } catch (e) { pieces = []; }
+      if (file !== ocrFile) return null;
+      list = listPieces(pieces);
+      if (list) break;
+    }
+    nameHint = nameFromPieces(pieces, list || []);
+    lastFind = { W, H, list: (list || []).map(p => ({ box: p.box, text: p.text.slice(0, 60) + ' … ' + p.text.slice(-25) })) };   // for tests
+    if (!list) { ocrStatus(t('ocr.notFound'), ''); return null; }
+    if (!cropTouched) {
+      // all pieces of the list (a short line can end a piece early): one box around them
+      const pad = 0.025, x0 = Math.min(...list.map(p => p.box[0])), y0 = Math.min(...list.map(p => p.box[1])),
+        x1 = Math.max(...list.map(p => p.box[2])), y1 = Math.max(...list.map(p => p.box[3]));
+      const x = Math.max(0, x0 / W - pad), y = Math.max(0, y0 / H - pad);
+      Object.assign(crop, { x, y, w: Math.min(1, x1 / W + pad) - x, h: Math.min(1, y1 / H + pad) - y });
+      drawCrop();
+    }
+    ocrStatus(t('ocr.found'), '');
+    return list;
   }
 
   // Drag the box (move) or its corners (resize). Works with finger and mouse.
@@ -1621,6 +1738,7 @@
     const box = $('cropBox'), wrap = $('cropInner');
     let drag = null;
     box.addEventListener('pointerdown', e => {
+      cropTouched = true;                                  // the app does not move the box after you moved it
       const r = wrap.getBoundingClientRect();
       drag = { h: e.target.dataset.h || 'move', x: e.clientX, y: e.clientY, w: r.width, hh: r.height, c: Object.assign({}, crop) };
       box.setPointerCapture(e.pointerId);
@@ -1683,9 +1801,10 @@
     return new Uint8Array(await blob.arrayBuffer());
   }
 
-  function ocrRun(image, lang) {
+  function ocrRun(image, lang, opts) {
+    opts = opts || {};
     if (!ocrWorker) {
-      ocrWorker = new Worker('ocr/ocr-worker.js');
+      ocrWorker = new Worker('ocr/ocr-worker-2.js');
       ocrWorker.onmessage = e => {
         const m = e.data, w = ocrWait[m.id];
         if (!w) return;
@@ -1700,8 +1819,8 @@
     }
     const id = ++ocrSeq;
     return new Promise((resolve, reject) => {
-      ocrWait[id] = { resolve, reject, step: s => ocrStatus(t(s === 'load' ? 'ocr.loading' : 'ocr.reading'), 'busy') };
-      ocrWorker.postMessage({ id, image, lang }, [image.buffer]);
+      ocrWait[id] = { resolve, reject, step: s => ocrStatus(t(s === 'load' ? 'ocr.loading' : opts.layout ? 'ocr.finding' : 'ocr.reading'), 'busy') };
+      ocrWorker.postMessage({ id, image, lang, psm: opts.psm, layout: !!opts.layout }, [image.buffer]);
     });
   }
 
@@ -1710,22 +1829,56 @@
   const HEADS = { en: 'ingredients', fr: 'ingrédients', it: 'ingredienti', es: 'ingredientes', nl: 'ingrediënten', ro: 'ingrediente',
     sv: 'ingredienser', de: 'zutaten|inhaltsstoffe|bestandteile', bg: 'съставки|състав', hr: 'sastojci', sl: 'sestavine', cs: 'složení',
     sk: 'zloženie', hu: 'összetevők', pl: 'składniki', fi: 'ainesosat', ru: 'состав' };
-  const HEAD_RE = new RegExp('(?<!\\p{L})(' + Object.values(HEADS).join('|') + ')\\s*[:：]', 'giu');
+  // A heading can be several words joined by "/" ("INGREDIENTS/SASTOJCI/СЪСТАВКИ:"); group 1 is the first word.
+  const HEAD_RE = new RegExp('(?<!\\p{L})(' + Object.values(HEADS).join('|') + ')(?:\\s*\\/\\s*[\\p{L}]+)*\\s*[:：]', 'giu');
+  // Words that end an ingredient name: a "-" right after them at a line end is a separator, not a split word.
+  const INCI_END = /(oil|acid|alcohol|extract|water|aqua|glycerin|oxide|sulfate|chloride|citrate|benzoate|parfum|butter|wax|gum|ester|glycol|stearate|silica|starch|juice|powder|protein|salt|sugar|e\d{3,4})$/i;
+  const SEP = '[·•\\-–:»«°*|]';
   const headLang = w => Object.keys(HEADS).find(k => new RegExp('^(' + HEADS[k] + ')$', 'iu').test(w));
 
   // Reader text -> one line; start at the first heading ("Zutaten:") and stop at a heading in another language.
+  // A dot the reader lost leaves two names in one piece ("GLYCERIN PANTHENOL"). A piece that is not a known
+  // ingredient is cut after its longest known start, again for the rest ("GLYCERIN, PANTHENOL, CEIL ALCOHOL").
+  function splitKnown(s) {
+    const known = x => { const r = LCDB.checkCosmetic(x, 'en'); return r.length === 1 && r[0].found; };
+    return s.split(',').map(seg => {
+      let rest = seg.trim(); const out = [];
+      while (rest && !known(rest)) {
+        const w = rest.split(' ');
+        let cut = 0;
+        for (let i = w.length - 1; i >= 1 && !cut; i--) if (known(w.slice(0, i).join(' '))) cut = i;
+        if (!cut) break;
+        out.push(w.slice(0, cut).join(' '));
+        rest = w.slice(cut).join(' ');
+      }
+      if (rest) out.push(rest);
+      return out.join(', ');
+    }).join(', ');
+  }
+
   function cleanOcr(text) {
     let s = String(text || '').replace(/[­]/g, '').replace(/(\p{L})-\s*\n\s*(\p{Ll})/gu, '$1$2');
-    s = s.replace(/\s*\n\s*/g, ' ').replace(/[|_]{1,}/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    // Lists with dots between the names ("AQUA · GLYCERIN"): the reader turns the dots into - : » ° and so on.
+    // When there are almost no commas but many such marks between words, they become commas (also at line ends).
+    const sepMode = (s.match(/,/g) || []).length < 3 && (s.match(new RegExp('\\s' + SEP + '\\s', 'g')) || []).length >= 3;
+    if (sepMode) {
+      s = s.replace(/(\p{L}+)[-*~]\s*\n\s*(\p{Lu})/gu, (m, a, b) => (INCI_END.test(a) ? a + ', ' + b : a + b));   // ISO-\nPROPYL -> ISOPROPYL
+      s = s.replace(new RegExp('\\s' + SEP + '\\s*\\n\\s*', 'g'), ', ').replace(new RegExp('\\n\\s*' + SEP + '\\s*', 'g'), ', ');
+      s = s.replace(new RegExp('\\s' + SEP + '(?=\\s)', 'g'), ',');
+      s = splitKnown(s.replace(/\s*\n\s*/g, ' '));
+    }
+    s = s.replace(/\s*\n\s*/g, ' ').replace(/[|_]{1,}/g, ' ').replace(/\s{2,}/g, ' ').replace(/\s+,/g, ',').trim();
     let heads = [...s.matchAll(HEAD_RE)];
     if (!heads.length) return s;
     if (heads[0].index > 0) { s = s.slice(heads[0].index); heads = [...s.matchAll(HEAD_RE)]; }
     const first = headLang(heads[0][1]), start = heads[0][0].length;
+    // A joined heading ("INGREDIENTS/SASTOJCI/СЪСТАВКИ:") is taken away, so the list starts with the first name.
+    const joined = heads[0][0].includes('/');
     for (const h of heads.slice(1)) {
       const between = s.slice(start, h.index).replace(/[^\p{L}]/gu, '');
-      if (between.length >= 15 && headLang(h[1]) !== first) return s.slice(0, h.index).trim();
+      if (between.length >= 15 && headLang(h[1]) !== first) { s = s.slice(0, h.index).trim(); break; }
     }
-    return s;
+    return joined ? s.slice(start).trim() : s;
   }
 
   async function onOcrRead() {
@@ -1736,6 +1889,8 @@
     const t0 = performance.now();
     ocrStatus(t('ocr.reading'), 'busy');
     try {
+      if (findTask) await findTask;                        // the box may still move onto the list
+      ocrStatus(t('ocr.reading'), 'busy');
       const image = await ocrImage(), pick = ocrChoice(), auto = pick === 'auto';
       const lastLatin = store.get('ocrLastLatin', LANG === 'en' ? 'eng' : 'deu');
       let lang = auto ? store.get('ocrLast', OCR_LANGS[LANG] || 'eng') : pick;
@@ -1761,7 +1916,7 @@
         }
       }
       if (auto) { store.set('ocrLast', used); if (used !== 'bul') store.set('ocrLastLatin', used); }
-      const text = cleanOcr(r.text);
+      const text = cleanOcr(listFromPieces(tsvPieces(r.tsv)) || r.text);
       const secs = ((performance.now() - t0) / 1000).toFixed(1).replace('.', LANG === 'en' ? '.' : ',');
       if (text.replace(/[^\p{L}]/gu, '').length < 12 || r.conf < OCR_BAD) {
         ocrStatus(t('ocr.little'), 'warn');
@@ -1828,7 +1983,8 @@
       code,
       kind,
       source: 'label',
-      name: (base && base.name) || '',
+      name: (base && base.name) || (ocrFile && nameHint) || '',
+      nameFrom: !(base && base.name) && ocrFile && nameHint ? 'photo' : undefined,
       brand: (base && base.brand) || '',
       image: (base && base.image) || '',
       ingredientsText: main,
@@ -2338,7 +2494,7 @@
   // ---------- Label reader without internet (all 7 languages on the phone) ----------
   const OCR_MB = { eng: 2.0, deu: 0.9, bul: 0.8, hun: 2.4, ces: 1.7, slk: 1.9, slv: 1.2 };
   const hasSimd = () => { try { return WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11])); } catch (e) { return false; } };
-  const ocrCore = () => { const c = hasSimd() ? 'tesseract-core-simd-lstm' : 'tesseract-core-lstm'; return ['ocr/ocr-worker.js', 'ocr/' + c + '.js', 'ocr/' + c + '.wasm']; };
+  const ocrCore = () => { const c = hasSimd() ? 'tesseract-core-simd-lstm' : 'tesseract-core-lstm'; return ['ocr/ocr-worker-2.js', 'ocr/' + c + '.js', 'ocr/' + c + '.wasm']; };
   async function offlineMissing() {
     if (!('caches' in window)) return null;
     const files = ocrCore().concat(OCR_ALL.map(l => 'ocr/lang/' + l + '.traineddata.gz')), missing = [];
@@ -2403,7 +2559,7 @@
 
   // Small test hook (used only by automated checks).
   window.LC = { analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
-    cleanOcr, headingLang, guessKind, detergentTerm, alternatives, setName, renderStart };
+    cleanOcr, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
 
   init();
 })();

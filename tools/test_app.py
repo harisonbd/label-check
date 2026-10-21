@@ -424,7 +424,7 @@ with sync_playwright() as p:
     img = Image.new('RGB', (1200, 1600), (70, 30, 110)); dr = ImageDraw.Draw(img)     # dark label, light letters
     for i, line in enumerate(BG_LINES): dr.text((60, 740 + i * 62), line, fill=(240, 235, 245), font=font(44))
     photo_bg = os.path.join(SHOTS, 'v26-test-label-bg.jpg'); img.rotate(-2, fillcolor=(70, 30, 110)).save(photo_bg, quality=88)
-    COUNT = "(() => { const W = window.Worker; window.__reads = 0; window.Worker = function (u, o) { const w = new W(u, o); w.addEventListener('message', e => { if (!e.data.step) window.__reads++; }); return w; }; })();"
+    COUNT = "(() => { const W = window.Worker; window.__reads = 0; window.Worker = function (u, o) { const w = new W(u, o); w.addEventListener('message', e => { if (!e.data.step && !e.data.layout) window.__reads++; }); return w; }; })();"
     pressed = lambda pg: pg.input_value('#ocrLang')
     ctx = b.new_context(viewport={'width': 390, 'height': 844}, locale='bg-BG', service_workers='block'); ctx.add_init_script(COUNT)
     pg = ctx.new_page(); pg.on('pageerror', lambda e: errors.append(str(e))); pg.goto(base); pg.evaluate('LC.dbReady'); pg.click('#cardLabel')
@@ -456,7 +456,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.9' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.9" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.10' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.10" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -511,7 +511,7 @@ with sync_playwright() as p:
     DISH = 'Inhaltsstoffe: 5-15% anionische Tenside, <5% nichtionische Tenside, Duftstoffe, Benzisothiazolinone, Methylisothiazolinone, Limonene, Linalool'
     ctx, pg = new_page(b, base, 'bg-BG', dark=True, width=390)
     read_label(pg, 'Съставки: овесени ядки 100%, сол, канела', 'food')
-    ok(pg.inner_text('#nameBtn') == 'Продукт без име' and word(pg) == 'Без предупреждения', 'green answer, product without a name')
+    ok(pg.inner_text('#nameBtn') == '+ Добави име' and word(pg) == 'Без предупреждения', 'green answer, product without a name')
     ok(pg.inner_text('#answer .qy') == 'Нищо от твоя списък, алергените ти и предупрежденията на ЕС.', 'green line says what was checked (never "safe")')
     rename(pg, 'Овесени ядки')
     ok(pg.inner_text('#nameBtn') == 'Овесени ядки' and pg.evaluate('LC.state.history[0].name') == 'Овесени ядки', 'pencil: name saved on the result and in History')
@@ -598,6 +598,44 @@ with sync_playwright() as p:
     ok(man['share_target']['params']['files'][0]['name'] == 'photo' and [s['url'] for s in man['shortcuts']] == ['./?go=scan', './?go=label', './?go=search'], 'manifest: share target + 3 shortcuts')
     ctx.close()
 
+    print('v2.10: the box finds the ingredient list by itself; only the list is kept; name from the photo')
+    img = Image.new('RGB', (1200, 1700), (252, 252, 250)); dr = ImageDraw.Draw(img)
+    dr.text((150, 120), 'SOFT HAND CREAM', fill=(30, 60, 140), font=font(84, True))
+    for i, line in enumerate(['Die Handcreme mit Panthenol unterstützt das', 'Gleichgewicht der Hautflora und fördert den Erhalt.']):
+        dr.text((70, 420 + i * 52), line, fill=(40, 40, 40), font=font(38))
+    dr.line((60, 560, 1140, 560), fill=(30, 60, 140), width=4)
+    LIST = ['INGREDIENTS/SASTOJCI/СЪСТАВКИ: AQUA · GLYCERIN ·', 'PANTHENOL · CETYL ALCOHOL · GLYCERYL STEARATE ·', 'DICAPRYLYL ETHER · ISO-', 'PROPYL MYRISTATE · ALLANTOIN · CITRIC ACID ·', 'SODIUM HYDROXIDE.']
+    for i, line in enumerate(LIST): dr.text((70, 590 + i * 56), line, fill=(25, 25, 25), font=font(40))
+    dr.line((60, 890, 1140, 890), fill=(30, 60, 140), width=4)
+    for i, line in enumerate(['(PL) Krem do rąk z pantenolem. (IT) Crema mani al', 'pantenolo per pelli sensibili. Senza profumi.', '(HU) Ultra szenzitív kézkrém panthenollal.']):
+        dr.text((70, 930 + i * 52), line, fill=(40, 40, 40), font=font(38))
+    photo_hc = os.path.join(SHOTS, 'v210-test-handcream.jpg'); img.rotate(-1.5, fillcolor=(252, 252, 250)).save(photo_hc, quality=90)
+    ctx = b.new_context(viewport={'width': 390, 'height': 844}, locale='bg-BG', service_workers='block', color_scheme='dark')
+    pg = ctx.new_page(); pg.on('pageerror', lambda e: errors.append(str(e))); pg.goto(base); pg.evaluate('LC.dbReady')
+    pg.click('#cardLabel'); pg.set_input_files('#photoPick', photo_hc); pg.wait_for_selector('#ocrArea:not([hidden])')
+    pg.wait_for_function("() => { const s = document.getElementById('ocrStatus'); return !s.hidden && !s.classList.contains('busy'); }", timeout=90000)
+    box = pg.evaluate("(() => { const b = document.getElementById('cropBox').style; return [parseFloat(b.top), parseFloat(b.height)]; })()")
+    ok(pg.inner_text('#ocrStatus') == 'Рамката е върху съставките. Премести я, ако трябва.' and 30 < box[0] < 36 and box[1] < 25,
+       'box moved onto the ingredient list by itself (top %.0f %%, height %.0f %%)' % tuple(box))
+    pg.evaluate("document.getElementById('cropWrap').scrollIntoView({block:'center'})"); pg.screenshot(path=os.path.join(SHOTS, 'v210-autobox-bg.png'))
+    pg.click('#ocrRead')
+    pg.wait_for_function("() => { const s = document.getElementById('ocrStatus'); return !s.hidden && !s.classList.contains('busy'); }", timeout=90000)
+    txt = pg.input_value('#labelText')
+    rows = pg.evaluate("t => LCDB.checkCosmetic(t, 'en').map(r => r.found)", txt)
+    ok(txt.startswith('AQUA') and 'SODIUM HYDROXIDE' in txt and 'Handcreme' not in txt and 'Krem' not in txt and 'INGREDIENTS' not in txt,
+       'only the list is kept: starts with AQUA, ends with SODIUM HYDROXIDE, no German / Polish text, joined heading removed (%s)' % txt[:80])
+    ok(sum(rows) >= 9 and len(rows) <= 11, 'dots read as - : » are separators again: %d of %d names known (ISO-PROPYL joined)' % (sum(rows), len(rows)))
+    ok(pg.eval_on_selector('input[name=kind]:checked', 'i => i.value') == 'cosmetic', 'type guess: cosmetic')
+    pg.click('#checkLabel'); pg.wait_for_selector('#result:not([hidden]) #answer')
+    ok(pg.inner_text('#nameBtn span') == 'Soft Hand Cream' and pg.inner_text('#nameBtn .fromphoto') == 'от снимката', 'name from the photo: "Soft Hand Cream", tag "от снимката" (%s)' % pg.inner_text('.qn'))
+    pg.screenshot(path=os.path.join(SHOTS, 'v210-name-from-photo-bg.png'))
+    rename(pg, 'Ръчен крем')
+    ok(pg.inner_text('#nameBtn') == 'Ръчен крем' and pg.locator('#nameBtn .fromphoto').count() == 0, 'pencil: you can still change the name; the tag goes away')
+    pg.click('.tabbar button[data-go=scan]'); pg.click('#cardLabel'); pg.fill('#labelText', 'Zutaten: Zucker, Salz, Hafer'); pg.check('input[name=kind][value=food]'); pg.click('#checkLabel')
+    pg.wait_for_selector('#result:not([hidden]) #answer')
+    ok(pg.inner_text('#nameBtn') == '+ Добави име', 'pasted text without photo: "+ Добави име" button instead of grey "Продукт без име"')
+    ctx.close()
+
     print('v2.8: Auto reads a German label with DE (BG app)')
     DE_LINES = ['Zutaten: Zucker, Weizenmehl, Palmöl, Glukosesirup,', 'Emulgator: Sojalecithin, Farbstoff: Tartrazin,', 'Salz, Aroma. Kann Spuren von Milch und', 'Haselnüssen enthalten.']
     img = Image.new('RGB', (1200, 1600), (250, 248, 240)); dr = ImageDraw.Draw(img)
@@ -617,8 +655,8 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v12')).keys()).map(r => r.url.split('/').pop())")
-    ok(all(f in cached for f in ('ocr-worker.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v13')).keys()).map(r => r.url.split('/').pop())")
+    ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
     reload_ready(pg); pg.click('#cardLabel'); read_photo(pg)
@@ -660,7 +698,7 @@ with sync_playwright() as p:
     pg = ctx.new_page(); pg.on('pageerror', lambda e: errors.append(str(e)))
     pg.goto(base2); pg.evaluate('navigator.serviceWorker.ready'); pg.reload(); pg.evaluate('LC.dbReady')
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v12'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v13'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
