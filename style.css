@@ -728,3 +728,22 @@ details.claudebox .steps { margin-top: 2px; }
   border-radius: 999px; padding: 1px 7px; white-space: nowrap; flex: none; }
 .addname { flex: 1; min-width: 0; display: inline-flex; align-items: center; min-height: 44px; padding: 0; border: 0; background: none; font: inherit; cursor: pointer; text-align: left; }
 .addname span { display: inline-block; padding: 5px 14px; border-radius: 999px; font-weight: 700; font-size: 0.95rem; color: var(--accent-ink); background: var(--accent); }
+/* v2.11: incomplete result, how many names are known, fix suggestions for misread names */
+.qa.v-partial { --c: var(--muted); }
+.qk { margin: 10px 0 0; padding: 8px 12px; border-radius: 12px; background: var(--card); font-size: 0.92rem; }
+.qk p { margin: 0; font-weight: 650; }
+.qk .qkl { display: flex; flex-wrap: wrap; gap: 0 18px; font-weight: 600; }
+.qk .linkbtn { min-height: 40px; }
+.fixbox { margin: 8px 0 0; padding: 10px 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); background: var(--card); }
+.fixhead { margin: 0 0 6px; font-weight: 700; font-size: 0.95rem; }
+.fixbox ul { list-style: none; margin: 0; padding: 0; }
+.fixbox li { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); }
+.fixbox li:first-child { border-top: 0; }
+.fixpair { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; overflow-wrap: anywhere; }
+.fixpair s { color: var(--muted); font-size: 0.88rem; }
+.fixok { flex: none; width: 44px; height: 44px; border: 0; border-radius: 10px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; cursor: pointer; }
+.fixok svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.fixall { width: 100%; margin-top: 8px; min-height: 44px; }
+.qk .qks { margin-top: 2px; color: var(--muted); font-weight: 500; }
+.qk .qks:empty { display: none; }
+.d-maybe { font-weight: 700; }

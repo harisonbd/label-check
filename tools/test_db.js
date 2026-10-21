@@ -157,6 +157,14 @@ const ok = (cond, msg) => { if (!cond) { fails++; console.log('  FAIL: ' + msg);
   ok(['парфюм', 'аромат', 'етерично масло', 'лавандулово масло'].every(n => frag(n, 'bg')), 'BG: парфюм, аромат, етерично масло');
   ok(!['Helianthus Annuus Seed Oil', 'Olea Europaea Fruit Oil', 'Cocos Nucifera Oil', 'Parfümfrei', 'Olivenöl', 'лимонена киселина'].some(n => frag(n, 'en')), 'fatty oils, "parfümfrei", citric acid: not fragrance');
 
+  console.log('\n14 Fix suggestions for misread cosmetic names (v2.11)');
+  const sug = s => { const r = LCDB.suggestCosmetic(s); return r ? r.inci : null; };
+  ok(sug('GLYCERN') === 'GLYCERIN' && sug('Phenoxyetanol') === 'PHENOXYETHANOL' && sug('SODIUM LAURETH SULFAT') === 'SODIUM LAURETH SULFATE', 'one or two letters off: GLYCERIN, PHENOXYETHANOL, SODIUM LAURETH SULFATE');
+  ok(sug('CEIL ALCOHOL') === 'CETYL ALCOHOL' && sug('CAPRYLHYDROMMLACID') === 'CAPRYLHYDROXAMIC ACID', 'Balea photo: CEIL ALCOHOL, CAPRYLHYDROMMLACID');
+  ok(sug('150- mopyL MYRISTATE') === 'ISOPROPYL MYRISTATE', 'digits read for letters: 150- mopyL = ISOPROPYL');
+  ok(LCDB.suggestCosmetic('Tocopheryl Acetat (Vitamin E)').from === 'Tocopheryl Acetat', 'only the name before the bracket is replaced');
+  ok(['Glycerin', 'BANANA', 'Wasser', 'Kann Spuren enthalten', 'Hergestellt in Deutschland', 'CI 77481', 'захар', 'Aqua'].every(s => !sug(s)), 'no suggestion: known names, short or other words, unclear numbers, Cyrillic');
+
   console.log(fails ? `\n${fails} FAILED` : '\nALL PASSED');
   process.exit(fails ? 1 : 0);
 })();

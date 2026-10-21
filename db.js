@@ -324,6 +324,63 @@
     return FOOD.allergens.map(a => ({ id: a.id, name: allergenName(a, lang) }));
   }
 
+  // ---------- fix suggestions: a cosmetic name the photo reader got a little wrong ("GLYCERN" -> GLYCERIN)
+  // Edit distance to all INCI names and aliases of about the same length. Only one clear best name, never a guess between two.
+  let fuzzyByLen = null;
+  function lev(a, b, max) {
+    if (Math.abs(a.length - b.length) > max) return max + 1;
+    let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+      const cur = [i];
+      let rowMin = i;
+      for (let j = 1; j <= b.length; j++) {
+        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+        if (cur[j] < rowMin) rowMin = cur[j];
+      }
+      if (rowMin > max) return max + 1;
+      prev = cur;
+    }
+    return prev[b.length];
+  }
+  const OCR_DIGIT = { 0: 'o', 1: 'i', 5: 's', 8: 'b' };   // the reader sees O as 0, I as 1 ("150PROPYL" = ISOPROPYL)
+  function suggestCosmetic(seg) {
+    if (!cosIndex) return null;
+    // The name before a bracket, without marks like * or °
+    const from = String(seg || '').replace(/\s*[\[(].*$/, '').replace(/[\s*°¹²³†‡.:]+$/, '').replace(/^[\s*°.:\-–]+/, '');
+    const k = key(from);
+    if (k.length < 6 || /[а-я]/.test(k) || cosIndex.has(k)) return null;
+    if (!fuzzyByLen) {
+      fuzzyByLen = new Map();
+      const seen = new Set();
+      const add = name => {
+        const nk = key(name);
+        if (nk.length < 4 || nk.length > 60 || seen.has(nk)) return;
+        seen.add(nk);
+        if (!fuzzyByLen.has(nk.length)) fuzzyByLen.set(nk.length, []);
+        fuzzyByLen.get(nk.length).push([nk, name]);
+      };
+      for (const it of COS.items) add(it[0]);
+      for (const a of Object.keys(Object.assign({}, COS.aliases, EXTRA_COS_ALIASES))) add(a);
+    }
+    const max = k.length <= 8 ? 1 : Math.max(2, Math.floor(k.length * 0.25));
+    const tries = [k];
+    const kd = k.replace(/[0158]/g, d => OCR_DIGIT[d]);
+    if (kd !== k) tries.push(kd);
+    let best = null, tie = false;
+    for (const q of tries) {
+      for (let len = q.length - max; len <= q.length + max; len++) {
+        for (const [nk, name] of fuzzyByLen.get(len) || []) {
+          const d = lev(q, nk, best ? Math.min(max, best.d) : max);
+          if (d > max) continue;
+          if (!best || d < best.d) { best = { d, name, it: cosIndex.get(nk) }; tie = false; }
+          else if (d === best.d && cosIndex.get(nk) !== best.it) tie = true;
+        }
+      }
+    }
+    if (!best || tie || !best.it) return null;
+    return { from, to: best.name, inci: best.it[0], d: best.d };
+  }
+
   // ---------- search one ingredient (name, alias or E-number)
   let cosKeys = null;
   function search(q, limit) {
@@ -358,6 +415,6 @@
     return [...hits.values()].sort((x, y) => (x.score - y.score) || (x.name.length - y.name.length)).slice(0, limit);
   }
 
-  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, checkFood, cosAllergens, foodAllergens, search, meta: () => META, SEV };
+  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, suggestCosmetic, checkFood, cosAllergens, foodAllergens, search, meta: () => META, SEV };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.LCDB = api;
 })(typeof window !== 'undefined' ? window : globalThis);

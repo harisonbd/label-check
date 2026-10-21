@@ -47,7 +47,8 @@
   const GROUPS = ['red', 'orange', 'info', 'green'];
   const LEVEL_GROUP = { b: 'red', c: 'orange', u: 'orange', r: 'info', n: 'green' };
   const SEV = { b: 5, c: 4, u: 3, r: 2, n: 1 };
-  const VERDICT_DOT = { avoid: 'g-red', check: 'g-orange', ok: 'g-green', unknown: 'g-grey' };
+  const VERDICT_DOT = { avoid: 'g-red', check: 'g-orange', ok: 'g-green', partial: 'g-grey', unknown: 'g-grey' };
+  const PARTIAL_MIN = 0.7;   // cosmetics: fewer known names than this share = "Incomplete result" instead of "No warnings"
   const LOCALE = { en: 'en-GB', de: 'de-AT', bg: 'bg-BG' };
   const KINDS = ['food', 'cosmetic', 'household'];
   const kindKey = k => 'kind.' + (KINDS.includes(k) ? k : 'food');
@@ -238,10 +239,14 @@
 
     const counts = { red: 0, orange: 0, info: 0, green: 0 };
     for (const r of rows) counts[r.group]++;
-    const verdict = counts.red ? 'avoid' : counts.orange ? 'check' : rows.length ? 'ok' : 'unknown';
+    // Cosmetics / household: how many names the app knows. With many unknown names "No warnings" would say too much.
+    const listed = rows.filter(r => r.kind === 'cosmetic' && r.pos);
+    const known = listed.filter(r => r.found).length, unknown = listed.length - known;
+    const partial = listed.length >= 3 && known / listed.length < PARTIAL_MIN;
+    const verdict = counts.red ? 'avoid' : counts.orange ? 'check' : rows.length ? (partial ? 'partial' : 'ok') : 'unknown';
     return {
-      verdict, rows, counts,
-      summary: summarize(verdict, rows, counts),
+      verdict, rows, counts, known, unknown,
+      summary: summarize(verdict, rows, counts, { n: known, of: listed.length }),
       total: rows.filter(r => r.pos).length,
       fragrance: rows.filter(r => r.fragrance || r.allergen).length
     };
@@ -474,8 +479,9 @@
     return row.label;
   }
 
-  function summarize(verdict, rows, counts) {
+  function summarize(verdict, rows, counts, kn) {
     if (verdict === 'unknown') return t('sum.unknown');
+    if (verdict === 'partial') return t('sum.partial', kn);
     if (verdict === 'avoid') {
       if (counts.red > 1) return t('sum.redN', { n: counts.red });
       const r = rows.find(x => x.group === 'red');
@@ -792,6 +798,7 @@
     avoid: 'M7 7l10 10M17 7L7 17', check: 'M12 6.5v7M12 17.5h.01', ok: 'M6 12.5l4 4L18 8',
     unknown: 'M9.5 9.2a2.6 2.6 0 1 1 3.6 2.4c-.7.3-1.1.9-1.1 1.6v.4M12 17.5h.01'
   };
+  QA_ICON.partial = QA_ICON.unknown;
   function answerCard(p, a) {
     const v = a.verdict, word = t('v.' + v);
     const card = el('section', { class: 'qa v-' + v, id: 'answer', 'aria-label': word },
@@ -799,7 +806,8 @@
       el('div', { class: 'qw' },
         el('span', { class: 'qi' }, icon(QA_ICON[v])),
         el('b', { class: word.length > 12 ? 'long' : null, text: word })),
-      ...answerLines(a)
+      ...answerLines(a),
+      knownLine(p, a)
     );
     const alt = v === 'avoid' || v === 'check' ? alternatives(p) : [];
     if (alt.length) {
@@ -840,7 +848,38 @@
       return [el('p', { class: 'qy', text: names(or) }), el('p', { class: 'qr', text: t(or.every(r => r.banCos) ? 'qa.orReasonCos' : 'qa.orReason') })];
     }
     if (a.verdict === 'ok') return [el('p', { class: 'qy', text: t('qa.okLine') })];
+    if (a.verdict === 'partial') return [el('p', { class: 'qy', text: t('qa.partialLine') })];
     return [el('p', { class: 'qy', text: a.summary })];
+  }
+
+  // Cosmetics / household: "11 of 14 ingredients recognised", with "See 3 unknown" and "Fix the text".
+  function knownLine(p, a) {
+    if (!a.unknown) return null;
+    // Two causes: the photo reader got a name wrong (the app has a close name), or the name is not in the data.
+    const unk = a.rows.filter(r => r.kind === 'cosmetic' && r.pos && !r.found), mis = unk.filter(misreadOf).length, nod = unk.length - mis;
+    return el('div', { class: 'qk' },
+      el('p', { text: t('qa.known', { n: a.known, of: a.known + a.unknown }) }),
+      el('p', { class: 'qks', text: [mis ? tn('qa.misread', mis) : null, nod ? tn('qa.noData', nod) : null].filter(Boolean).join(' · ') }),
+      el('p', { class: 'qkl' },
+        el('button', { class: 'linkbtn inline', type: 'button', id: 'unkBtn', text: tn('qa.seeUnknown', a.unknown), onclick: showUnknown }),
+        el('button', { class: 'linkbtn inline', type: 'button', id: 'fixTextBtn', text: t('qa.fixText'), onclick: () => fixText(p) })));
+  }
+  function misreadOf(r) {
+    if (r.fixS === undefined) r.fixS = r.kind === 'cosmetic' && r.pos && !r.found ? LCDB.suggestCosmetic(r.text) : null;
+    return r.fixS;
+  }
+  function showUnknown() {
+    const r = state.current && state.current.a.rows.find(x => x.kind === 'cosmetic' && x.pos && !x.found);
+    if (!r) return;
+    toggleDetails(true);
+    jumpTo(r.i);
+  }
+  // Open the label form with the saved text, so a wrong name can be corrected (with fix suggestions).
+  function fixText(p) {
+    openLabel(p);
+    $('labelText').value = p.ingredientsText || '';
+    renderFixes();
+    $('labelText').scrollIntoView({ behavior: smooth(), block: 'center' });
   }
 
   function nameRow(p) {
@@ -1397,6 +1436,7 @@
       const reasons = r.src.reasons || [];
       body.push(el('div', { class: 'd-card' },
         el('h3', { text: t('d.why') }),
+        !r.found && misreadOf(r) ? el('p', { class: 'd-maybe', text: t('d.maybe', { name: niceName(misreadOf(r).inci) }) }) : null,
         reasons.length ? reasons.map(reasonBlock) : el('p', { text: r.found ? t('d.noReasons') : t('d.notFound') }),
         r.allergen && !r.tickedAllergen ? el('p', { class: 'minor', text: t('d.allergenNot') }) : null,
         reasons.some(x => x.details && (x.details.entry || x.details.conditions)) ? el('p', { class: 'minor', text: t('d.det.engOnly') }) : null
@@ -1464,7 +1504,10 @@
     if (segs.length < 3) return null;
     const det = segs.filter(s => detergentTerm(s)).length;
     if (det >= 2 || (det >= 1 && DET_RANGE.test(text))) return { kind: 'household', n: det, of: segs.length };
-    const cos = LCDB.checkCosmetic(text, LANG).filter(r => r.found || r.fragrance).length;
+    const rows = LCDB.checkCosmetic(text, LANG);
+    let cos = rows.filter(r => r.found || r.fragrance).length;
+    // A badly read cosmetic list: names that are one or two letters off count too
+    if (cos / segs.length < 0.6 && cos / segs.length >= 0.25) cos += rows.filter(r => !r.found && !r.fragrance && LCDB.suggestCosmetic(r.text)).length;
     return cos / segs.length >= 0.6 ? { kind: 'cosmetic', n: cos, of: segs.length } : { kind: 'food', n: cos, of: segs.length };
   }
   function updateKindGuess() {
@@ -1475,6 +1518,60 @@
     document.querySelectorAll('input[name="kind"]').forEach(i => { i.checked = i.value === g.kind; });
     note.textContent = t('kind.guess.' + g.kind, { n: g.n, of: g.of });
     note.hidden = false;
+  }
+
+  // ---------- Fix suggestions: names the photo reader got a little wrong (cosmetics / household) ----------
+  let fixTimer = null;
+  const labelKind = () => (document.querySelector('input[name="kind"]:checked') || {}).value || 'food';
+  function fixList(text) {
+    const kind = labelKind();
+    if (kind === 'food' || !text.trim()) return [];
+    const out = [], seen = new Set();
+    for (const r of LCDB.checkCosmetic(text, LANG)) {
+      if (r.found || (kind === 'household' && detergentTerm(r.text))) continue;
+      const s = LCDB.suggestCosmetic(r.text);
+      if (!s || seen.has(s.from)) continue;
+      seen.add(s.from);
+      // Same style of letters as on the label: "Glycern" -> "Glycerin", "GLYCERN" -> "GLYCERIN"
+      const lower = (s.from.match(/\p{Ll}/gu) || []).length, upper = (s.from.match(/\p{Lu}/gu) || []).length;
+      s.to = lower > upper ? s.to.toLowerCase().replace(/(^|[\s\-\/(])(\p{L})/gu, (m, a, b) => a + b.toUpperCase()) : s.to;
+      out.push(s);
+      if (out.length === 12) break;
+    }
+    return out;
+  }
+  function renderFixes() {
+    const box = $('fixBox');
+    if (!box) return;
+    const list = DBINFO ? fixList($('labelText').value) : [];
+    box.hidden = !list.length;
+    if (!list.length) { box.replaceChildren(); return; }
+    box.replaceChildren(
+      el('p', { class: 'fixhead', text: tn('fix.head', list.length) }),
+      el('ul', {}, list.map(f => el('li', {},
+        el('span', { class: 'fixpair' }, el('s', { text: f.from }), el('b', { text: f.to })),
+        el('button', { class: 'fixok', type: 'button', 'aria-label': t('fix.one', { from: f.from, to: f.to }), title: t('fix.one', { from: f.from, to: f.to }), onclick: () => applyFixes([f]) },
+          icon(ICON.ok))))),
+      list.length > 1 ? el('button', { class: 'btn btn-ghost fixall', type: 'button', id: 'fixAll', text: t('fix.all', { n: list.length }), onclick: () => applyFixes(list) }) : null
+    );
+  }
+  // Replace the name only where it stands alone (not inside a longer word).
+  function replaceWhole(text, from, to) {
+    let i = -1;
+    while ((i = text.indexOf(from, i + 1)) >= 0) {
+      const b = text[i - 1] || ' ', a = text[i + from.length] || ' ';
+      if (!/[\p{L}\p{N}]/u.test(b) && !/[\p{L}\p{N}]/u.test(a)) return text.slice(0, i) + to + text.slice(i + from.length);
+    }
+    return text;
+  }
+  function applyFixes(list) {
+    const ta = $('labelText');
+    let v = ta.value;
+    for (const f of list) v = replaceWhole(v, f.from, f.to);
+    ta.value = v;
+    toast(tn('fix.done', list.length));
+    renderFixes();
+    updateKindGuess();
   }
 
   function openLabel(p, keepStatus) {
@@ -1488,6 +1585,7 @@
     if (!history.state || history.state.view !== 'label') pushState({ tab: 'scan', view: 'label' });
     const panel = $('labelPanel');
     $('labelText').value = '';
+    renderFixes();
     ocrFile = null;
     $('ocrArea').hidden = true;
     $('claudeBox').open = false;
@@ -1927,6 +2025,7 @@
           : switched ? ' ' + t('ocr.switched', { lang: OCR_NAMES[used] }) : ''));
       }
       updateKindGuess();
+      renderFixes();
       $('labelText').scrollIntoView({ behavior: 'smooth', block: 'center' });
     } catch (err) {
       ocrStatus(t('ocr.fail'), 'warn');
@@ -1954,7 +2053,7 @@
   async function onPaste() {
     try {
       const txt = await navigator.clipboard.readText();
-      if (txt) { $('labelText').value = txt.trim(); updateKindGuess(); }
+      if (txt) { $('labelText').value = txt.trim(); updateKindGuess(); renderFixes(); }
       else toast(t('toast.clipEmpty'));
     } catch (e) {
       toast(t('toast.pasteBlocked'));
@@ -2424,8 +2523,11 @@
     $('photoPick').addEventListener('change', onPhoto);
     $('ocrRead').addEventListener('click', onOcrRead);
     $('ocrLang').addEventListener('change', e => store.set('ocrPick', e.target.value));
-    document.querySelectorAll('input[name="kind"]').forEach(i => i.addEventListener('change', () => { kindTouched = true; $('kindNote').hidden = true; }));
-    $('labelText').addEventListener('input', () => { clearTimeout(kindTimer); kindTimer = setTimeout(updateKindGuess, 400); });
+    document.querySelectorAll('input[name="kind"]').forEach(i => i.addEventListener('change', () => { kindTouched = true; $('kindNote').hidden = true; renderFixes(); }));
+    $('labelText').addEventListener('input', () => {
+      clearTimeout(kindTimer); kindTimer = setTimeout(updateKindGuess, 400);
+      clearTimeout(fixTimer); fixTimer = setTimeout(renderFixes, 700);
+    });
     $('bkSave').addEventListener('click', exportBackup);
     $('bkLater').addEventListener('click', () => { store.set('backupLater', Date.now()); renderStart(); });
     $('updReload').addEventListener('click', () => location.reload());

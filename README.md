@@ -37,6 +37,7 @@ Later it becomes a part of Jarvis.
 - Database: updates itself every month (see `tools/FETCH.md`). By hand: `python tools/fetch_sources.py _sources`, then `python tools/build_db.py _sources data` and `node tools/test_db.js`.
 - Screen text: edit `i18n.js` (same key in `en`, `de` and `bg`).
 - App test (needs Python Playwright): `python tools/test_app.py`.
+- Real label photos for testing the reader: folder `_testphotos/` (stays on the PC, not on GitHub).
 - After any change, raise `VERSION` in `sw.js` (for example `label-check-v8`), so the phone loads the new files.
 
 ## Parked ideas

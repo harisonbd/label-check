@@ -456,7 +456,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.10' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.10" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.11' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.11" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -636,6 +636,58 @@ with sync_playwright() as p:
     ok(pg.inner_text('#nameBtn') == '+ Добави име', 'pasted text without photo: "+ Добави име" button instead of grey "Продукт без име"')
     ctx.close()
 
+    print('v2.11: how many names are known, "Incomplete result", fix suggestions for misread names')
+    ctx, pg = new_page(b, base, 'en-GB', width=320)
+    pg.click('#cardLabel'); pg.fill('#labelText', 'Aqua, Glycern, Phenoxyetanol, Cetyl Alcohol, Parfum')
+    pg.wait_for_selector('#fixBox:not([hidden])', timeout=5000)
+    ok(pg.eval_on_selector('input[name=kind]:checked', 'i => i.value') == 'cosmetic', 'typing: names one letter off count for the type guess (cosmetic)')
+    ok(pg.inner_text('#fixBox .fixhead') == '2 names look misread:' and pg.locator('#fixBox li').count() == 2 and pg.inner_text('#fixBox li b') == 'Glycerin',
+       'fix box: "2 names look misread", Glycern -> Glycerin (same letter style)')
+    pg.locator('#fixBox .fixok').first.click()
+    ok('Glycerin,' in pg.input_value('#labelText') and pg.locator('#fixBox li').count() == 1 and pg.locator('#fixAll').count() == 0 and '1 name fixed' in pg.inner_text('#toast'),
+       'tap the tick: the name changes in the text, 1 suggestion left, toast "1 name fixed"')
+    pg.locator('#fixBox .fixok').first.click()
+    ok(pg.input_value('#labelText') == 'Aqua, Glycerin, Phenoxyethanol, Cetyl Alcohol, Parfum' and pg.is_hidden('#fixBox'), 'all fixed: box goes away, nothing else in the text changed')
+    pg.check('input[name=kind][value=food]')
+    pg.fill('#labelText', 'Zucker, Glycern'); pg.wait_for_timeout(900)
+    ok(pg.is_hidden('#fixBox'), 'food: no fix suggestions')
+    ctx.close()
+    ctx, pg = new_page(b, base, 'en-GB', width=320)
+    MISREAD = 'AQUA, GLYCERN, Phenoxyetanol, Bienenwachs, Wsxq lorem, CETYL ALCOHOL, PARFUM'
+    read_label(pg, MISREAD, 'cosmetic')
+    ok(word(pg) == 'Incomplete result' and pg.evaluate('LC.state.current.a.verdict') == 'partial' and card_fits(pg) and no_side_scroll(pg),
+       'only 3 of 7 names known: grey "Incomplete result" instead of green, fits at 320 px')
+    ok(pg.inner_text('.qk p') == '3 of 7 ingredients recognised' and pg.inner_text('.qk .qks') == '2 probably misread · 2 not in our data',
+       'known line: "3 of 7 ingredients recognised", "2 probably misread · 2 not in our data" (%s)' % pg.inner_text('.qk'))
+    pg.screenshot(path=os.path.join(SHOTS, 'v211-partial-en.png'))
+    pg.click('#unkBtn'); pg.wait_for_timeout(400)
+    ok(pg.get_attribute('#detBtn', 'aria-expanded') == 'true' and pg.is_visible('#groups .grp.g-green .chiplist') and pg.locator('#groups li.flash .gchip.nf').count() == 1,
+       '"See 4 unknown": Details open at the first unknown name')
+    pg.locator('#groups li.flash .gchip').click(); pg.wait_for_selector('#detail:not([hidden])')
+    ok('Probably misread. Maybe: Glycerin.' in pg.inner_text('#detail'), 'detail of GLYCERN: "Probably misread. Maybe: Glycerin."')
+    pg.click('#detailBack')
+    pg.wait_for_selector('#detail', state='hidden')
+    code = pg.evaluate('LC.state.current.p.code')
+    pg.evaluate('window.scrollTo(0, 0)'); pg.click('#fixTextBtn'); pg.wait_for_selector('#fixBox:not([hidden])')
+    ok(pg.is_visible('#labelPanel') and pg.input_value('#labelText') == MISREAD and pg.eval_on_selector('input[name=kind]:checked', 'i => i.value') == 'cosmetic',
+       '"Fix the text": the form opens with the saved text and type')
+    pg.click('#fixAll')
+    ok(pg.input_value('#labelText') == 'AQUA, GLYCERIN, Phenoxyethanol, Bienenwachs, Wsxq lorem, CETYL ALCOHOL, PARFUM', '"Fix all (2)": both names fixed (%s)' % pg.input_value('#labelText'))
+    pg.click('#checkLabel'); pg.wait_for_selector('#result:not([hidden]) #answer')
+    ok(word(pg) == 'No warnings' and pg.inner_text('.qk p') == '5 of 7 ingredients recognised' and pg.inner_text('.qk .qks') == '2 not in our data' and pg.evaluate('LC.state.current.p.code') == code,
+       'after the fix: 5 of 7 known = "No warnings" with "2 not in our data"; the same product is updated')
+    pg.click('.tabbar button[data-go=history]'); pg.wait_for_timeout(300)
+    ok(pg.locator('#historyList li').count() == 1 and pg.locator('#historyList li .dot.g-green').count() == 1, 'History: one entry (same product), green dot')
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')   # 2nd tap on Scan goes back to the start
+    read_label(pg, 'Zucker, Wsxq lorem, Bnmz ipsum, Plkr dolor', 'food')
+    ok(word(pg) == 'No warnings' and pg.locator('.qk').count() == 0, 'food: never "Incomplete result", no known line')
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    read_label(pg, 'Aqua, Sodium Laureth Sulfate, Glycern, 5-15% anionic surfactants, Parfum', 'household')
+    ok(pg.inner_text('.qk .qks') == '1 probably misread', 'household: the detergent words are known, Glycern = probably misread (%s)' % pg.inner_text('.qk'))
+    ctx.close()
+
     print('v2.8: Auto reads a German label with DE (BG app)')
     DE_LINES = ['Zutaten: Zucker, Weizenmehl, Palmöl, Glukosesirup,', 'Emulgator: Sojalecithin, Farbstoff: Tartrazin,', 'Salz, Aroma. Kann Spuren von Milch und', 'Haselnüssen enthalten.']
     img = Image.new('RGB', (1200, 1600), (250, 248, 240)); dr = ImageDraw.Draw(img)
@@ -655,7 +707,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v13')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v14')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -698,7 +750,7 @@ with sync_playwright() as p:
     pg = ctx.new_page(); pg.on('pageerror', lambda e: errors.append(str(e)))
     pg.goto(base2); pg.evaluate('navigator.serviceWorker.ready'); pg.reload(); pg.evaluate('LC.dbReady')
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v13'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v14'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)

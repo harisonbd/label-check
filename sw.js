@@ -1,7 +1,7 @@
 /* Label Check — service worker.
    Keeps the app files and the ingredient database on the phone so the app opens without internet.
    When you change any app file or the database, raise the version number below. */
-const VERSION = 'label-check-v13';
+const VERSION = 'label-check-v14';
 const SHARE = 'lc-share';   // a photo shared to the app waits here until the page picks it up
 const FILES = [
   './',
