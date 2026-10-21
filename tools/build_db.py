@@ -243,7 +243,13 @@ EU14 = ['gluten', 'crustaceans', 'eggs', 'fish', 'peanuts', 'soybeans', 'milk', 
         'sesame-seeds', 'sulphur-dioxide-and-sulphites', 'lupin', 'molluscs']
 TRANS_FAT_TERMS = {'en': ['partially hydrogenated*', 'partly hydrogenated*'],
                    'de': ['teilweise gehärtet*', 'teilweise hydriert*', 'teilgehärtet*'],
-                   'bg': ['частично хидрогенирани', 'частично хидрогенирана', 'частично хидрогениран*']}
+                   'bg': ['частично хидрогенирани', 'частично хидрогенирана', 'частично хидрогениран*'],
+                   'hu': ['részben hidrogénezett*', 'részlegesen hidrogénezett*'],
+                   'cs': ['částečně hydrogenovan*', 'částečně ztužen*'],
+                   'sk': ['čiastočne hydrogenovan*', 'čiastočne stužen*'],
+                   'sl': ['delno hidrogeniran*', 'delno hidrogenirane*']}
+# Label languages for additive and allergen names (the app screens stay EN / DE / BG).
+NAME_LANGS = ('en', 'de', 'bg', 'hu', 'cs', 'sk', 'sl')
 
 # ---------------------------------------------------------------- helpers
 def off_blocks(path):
@@ -480,7 +486,7 @@ for b in add_blocks:
         base = k
         if base in food_seen:
             tgt = food_seen[base]
-            for lang in ('en', 'de', 'bg'):
+            for lang in NAME_LANGS:
                 tgt['n'].setdefault(lang, [])
                 tgt['n'][lang] += [n for n in b['names'].get(lang, [])[1:] if n not in tgt['n'][lang]]
             continue
@@ -488,7 +494,7 @@ for b in add_blocks:
     if k in food_seen:
         continue
     names = {lang: [n for n in b['names'].get(lang, []) if not re.match(r'^E\s?\d', n, re.I) and len(n) >= 2 and '\\' not in n]
-             for lang in ('en', 'de', 'bg')}
+             for lang in NAME_LANGS}
     if not names.get('en'):
         other = [n for b2 in add_blocks if e_key(b2['names']['en'][0]) == k + 'a' for n in b2['names']['en'][1:2]]
         names['en'] = ['bromates (' + ', '.join(other) + ')'] if k == 'e924' and other else [code]
@@ -544,7 +550,7 @@ for b in al_blocks:
     if not en: continue
     aid = re.sub(r'[^a-z0-9]+', '-', en[0].lower()).strip('-')
     if aid in EU14:
-        allergens.append({'id': aid, 'n': {l: b['names'].get(l, [])[:40] for l in ('en', 'de', 'bg') if b['names'].get(l)}})
+        allergens.append({'id': aid, 'n': {l: b['names'].get(l, [])[:40] for l in NAME_LANGS if b['names'].get(l)}})
 assert len(allergens) == 14, 'expected 14 EU allergens, got %d' % len(allergens)
 
 # ---------------------------------------------------------------- meta

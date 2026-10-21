@@ -12,7 +12,7 @@
     'image_front_small_url', 'image_small_url',
     'ingredients_text', 'ingredients_text_de', 'ingredients_text_en', 'ingredients_text_bg',
     'ingredients_tags', 'additives_tags', 'allergens_tags', 'ingredients_analysis_tags',
-    'nutriscore_grade', 'nova_group', 'last_modified_t'
+    'nutriscore_grade', 'nova_group', 'last_modified_t', 'nutriments'
   ].join(',');
   const CACHE_DAYS = 7;
   const MAX_PRODUCTS = 300;
@@ -49,6 +49,8 @@
   const SEV = { b: 5, c: 4, u: 3, r: 2, n: 1 };
   const VERDICT_DOT = { avoid: 'g-red', check: 'g-orange', ok: 'g-green', unknown: 'g-grey' };
   const LOCALE = { en: 'en-GB', de: 'de-AT', bg: 'bg-BG' };
+  const KINDS = ['food', 'cosmetic', 'household'];
+  const kindKey = k => 'kind.' + (KINDS.includes(k) ? k : 'food');
 
   // ---------- Storage (stays on this phone) ----------
   const store = {
@@ -69,6 +71,7 @@
     history: store.get('history', []),       // [{code, name, brand, kind, verdict, time}]
     products: store.get('products', {}),     // {code: product}
     favs: store.get('favs', []),             // [code]
+    names: store.get('names', {}),           // {code: name you gave the product}
     allergens: Object.assign({ food: [], cos: [] }, store.get('allergens', {})), // ticked ids / annex refs
     avoidFragrance: store.get('avoidFragrance', false),
     vegan: store.get('vegan', false),
@@ -76,6 +79,7 @@
     theme: store.get('theme', 'auto'),
     bigText: store.get('bigText', false),
     current: null,   // { p, a } shown on the scan tab
+    detailsOpen: false, // "Details" under the answer card
     filter: null,    // group shown alone, or null
     open: null       // which groups are open
   };
@@ -117,7 +121,9 @@
     document.documentElement.lang = LANG;
     document.querySelectorAll('[data-t]').forEach(n => { n.textContent = t(n.dataset.t); });
     document.querySelectorAll('[data-t-ph]').forEach(n => { n.placeholder = t(n.dataset.tPh); });
-    document.querySelector('.tabbar').setAttribute('aria-label', [t('tab.scan'), t('tab.favs'), t('tab.list'), t('tab.history')].join(', '));
+    document.querySelectorAll('[data-t-aria]').forEach(n => { n.setAttribute('aria-label', t(n.dataset.tAria)); n.title = t(n.dataset.tAria); });
+    document.querySelector('.tabbar').setAttribute('aria-label', [t('tab.scan'), t('tab.list'), t('tab.history')].join(', '));
+    if ($('offState')) renderOffline();
     $('langSwitch').setAttribute('aria-label', t('set.lang'));
     $('langSwitch').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === LANG)));
     if ($('labelTitle')) setLabelTitle();
@@ -186,7 +192,7 @@
   const ownCode = o => (isBarcode(o.code) ? o.code : 'own-' + o.id);
   function ownProduct(o) {
     return {
-      code: ownCode(o), kind: o.kind === 'cosmetic' ? 'cosmetic' : 'food', source: 'own',
+      code: ownCode(o), kind: KINDS.includes(o.kind) ? o.kind : 'food', source: 'own',
       name: o.name || '', brand: o.brand || '', image: '', use: o.use || undefined,
       ingredientsText: o.ingredients, texts: [o.ingredients], tags: [], allergens: [], analysis: [],
       nutriscore: null, nova: null, updated: null, added: Date.parse(o.added) || null, fetchedAt: Date.now(), url: ''
@@ -203,14 +209,19 @@
   // A saved product; for products from our list, the newest copy of the list.
   function productBy(code) {
     const p = state.products[code];
-    return p && p.source !== 'own' ? p : (ownBy(code) || p || null);
+    return applyName(p && p.source !== 'own' ? p : (ownBy(code) || p || null));
+  }
+  // A name you gave a product wins over the name from the databases (kept on the phone and in the backup).
+  function applyName(p) {
+    if (p && p.code && state.names[p.code]) p.name = state.names[p.code];
+    return p;
   }
 
   // ---------- Analysis ----------
   // Every ingredient becomes a row with a level (b c u r n) and a group (red orange info green).
   function analyze(p) {
     const text = p.ingredientsText || '';
-    let rows = p.kind === 'cosmetic' ? analyzeCosmetic(text, p.use) : analyzeFood(p, text);
+    let rows = p.kind === 'cosmetic' || p.kind === 'household' ? analyzeCosmetic(text, p.use, p.kind === 'household') : analyzeFood(p, text);
 
     // Your list: also look in the other texts (e.g. the "EN:" line from Claude).
     const extraTexts = (p.texts || []).filter(x => x && x !== text);
@@ -259,17 +270,46 @@
     return /rinse[- ]?off/i.test(txt) && !/leave[- ]?on|other products|\(b\)|\bb\)/i.test(txt);
   }
 
-  function analyzeCosmetic(text, use) {
+  // Household products (dish soap, detergents): EU labels name groups with a % range ("5–15 % anionic surfactants").
+  const DET_TERMS = [
+    ['anionic', /anionisch\S* tensid|anionic surfactant|анионн\S* (пав|повърхностно)/],
+    ['nonionic', /nicht ?ionisch\S* tensid|non ?ionic surfactant|нейонн\S* (пав|повърхностно)/],
+    ['cationic', /kationisch\S* tensid|cationic surfactant|катионн\S* (пав|повърхностно)/],
+    ['amphoteric', /amphoter\S* tensid|amphoteric surfactant|амфотерн\S* (пав|повърхностно)/],
+    ['soap', /^(seife|soap|сапун)$/],
+    ['phosphonates', /phosphonat|фосфонат/],
+    ['polycarboxylates', /polycarboxylat|поликарбоксилат/],
+    ['zeolites', /zeolit|зеолит/],
+    ['enzymes', /^(enzyme|enzymes|ензими)$/],
+    ['brighteners', /optische\S* aufheller|optical brightener|оптичн\S* избелител/],
+    ['oxygenBleach', /bleichmittel auf sauerstoffbasis|oxygen ?based bleach|белин\S* на кислородна основа|кислородн\S* белин/],
+    ['chlorineBleach', /bleichmittel auf chlorbasis|chlorine ?based bleach|белин\S* на хлорна основа|хлорн\S* белин/],
+    ['disinfectants', /desinfektionsmittel|disinfectant|дезинфектант/]
+  ];
+  const DET_RANGE = /(?:<|>|≤|≥|unter|weniger als|less than|under|под|по-малко от)?\s*\d+(?:[.,]\d+)?\s*(?:[-–]\s*\d+(?:[.,]\d+)?)?\s*%/i;
+  function detergentTerm(seg) {
+    const m = String(seg || '').match(DET_RANGE);
+    const name = nrm(String(seg || '').replace(DET_RANGE, ' ')).replace(/^(und|and|и|unter|weniger als|less than|under)\s+/, '');
+    const hit = DET_TERMS.find(([, re]) => re.test(name));
+    return hit ? { key: hit[0], range: m ? m[0].replace(/\s+/g, ' ').replace(/\s*([-–])\s*/, '–').trim() : '' } : null;
+  }
+
+  function analyzeCosmetic(text, use, household) {
     return LCDB.checkCosmetic(text, LANG).map(r => {
-      const mine = matchAvoid([r.text, r.found ? r.name : '']);
+      const det = household && !r.found ? detergentTerm(r.text) : null;
+      if (det) r = Object.assign({}, r, { found: true, name: null, functions: [t('det.fn') + (det.range ? ' · ' + det.range : '')], reasons: [] });
+      // Household: an EU cosmetics ban is shown as orange "not in cosmetics" (detergents have other EU rules).
+      const banCos = household && r.level === 'b';
+      const level = banCos ? 'c' : r.level;
+      const mine = matchAvoid([r.text, r.found && r.name ? r.name : '']);
       const tickedAllergen = !!(r.allergen && state.allergens.cos.includes(r.allergenRef));
       const fragAvoid = !!(state.avoidFragrance && (r.fragrance || r.allergen));
-      const useHit = use === 'leave' && (r.reasons || []).some(rinseOnly);
-      const why = r.level === 'b' ? 'b' : useHit ? 'use' : mine ? 'mine' : tickedAllergen ? 'allergen' : fragAvoid ? 'fragrance' : null;
+      const useHit = !household && use === 'leave' && (r.reasons || []).some(rinseOnly);
+      const why = level === 'b' ? 'b' : useHit ? 'use' : mine ? 'mine' : tickedAllergen ? 'allergen' : fragAvoid ? 'fragrance' : null;
       const row = {
-        pos: r.pos, kind: 'cosmetic', text: r.text,
-        label: r.found ? niceName(r.name) : cleanSeg(r.text),
-        level: r.level, group: why ? 'red' : LEVEL_GROUP[r.level] || 'green', why, mine, tickedAllergen, fragAvoid, useHit,
+        pos: r.pos, kind: 'cosmetic', text: r.text, household, banCos, det,
+        label: det ? t('det.' + det.key) : r.found ? niceName(r.name) : cleanSeg(r.text),
+        level, group: why ? 'red' : LEVEL_GROUP[level] || 'green', why, mine, tickedAllergen, fragAvoid, useHit,
         fragrance: r.fragrance, allergen: r.allergen, nano: r.nano, mayContain: r.mayContain, found: r.found, src: r
       };
       row.sub = cosmeticSub(row);
@@ -295,6 +335,7 @@
     if (row.why === 'mine') return { lvl: { text: t('tag.mine'), g: 'red' }, parts: tags };
     if (row.why === 'allergen') return { lvl: { text: t('tag.allergenYours'), g: 'red' }, parts: tags };
     if (row.why === 'fragrance') return { lvl: { text: t('tag.fragranceAvoid'), g: 'red' }, parts: tags };
+    if (row.banCos) return { lvl: { text: t('chip.banCos'), g: 'orange' }, parts: [t('why.banCos')] };
     if (row.group === 'orange') return { lvl: { text: levelName(row.level), g: 'orange' }, parts: [firstReason] };
     if (row.group === 'info') return { lvl: { text: levelName(row.level), g: 'info' }, parts: tags.length ? tags : [firstReason] };
     return { lvl: null, parts: [...new Set(tags.concat((r.functions || []).slice(0, 1)))] };
@@ -477,10 +518,19 @@
       analysis: p.ingredients_analysis_tags || [],
       nutriscore: /^[a-e]$/.test(p.nutriscore_grade || '') ? p.nutriscore_grade : null,
       nova: p.nova_group || null,
+      nut: kind === 'food' ? nutOf(p.nutriments) : null,
       updated: p.last_modified_t ? p.last_modified_t * 1000 : null,
       fetchedAt: Date.now(),
       url: base + '/product/' + code
     };
+  }
+
+  // Fat, saturated fat and protein per 100 g (only when Open Food Facts has them).
+  function nutOf(n) {
+    if (!n || typeof n !== 'object') return null;
+    const num = k => { const v = Number(n[k]); return n[k] !== '' && n[k] !== null && isFinite(v) ? Math.round(v * 10) / 10 : null; };
+    const o = { fat: num('fat_100g'), sat: num('saturated-fat_100g'), prot: num('proteins_100g') };
+    return o.fat === null && o.prot === null ? null : o;
   }
 
   // Asks both databases at the same time. Returns a product, null (not found) or throws (no connection).
@@ -589,7 +639,9 @@
     heart: 'M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z',
     share: 'M12 15V4M8 8l4-4 4 4M5 13v5.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V13',
     close: 'M6 6l12 12M18 6L6 18',
-    tag: 'M3.5 12.5v-8a1 1 0 0 1 1-1h8l8 8-9 9zM8 8h.01'
+    tag: 'M3.5 12.5v-8a1 1 0 0 1 1-1h8l8 8-9 9zM8 8h.01',
+    pen: 'M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3zM14.5 7.5l2 2',
+    ok: 'M5 12.5l4.5 4.5L19 7.5'
   };
   const link = (href, text) => el('a', { href, target: '_blank', rel: 'noopener', text });
 
@@ -674,37 +726,48 @@
       showStatus(t('status.dbFail'));
       return;
     }
+    applyName(p);
     pushState({ tab: 'scan', view: 'result', code: p.code });
     state.filter = null;
     state.open = null;
+    state.detailsOpen = false;
     const a = renderResult(p, note);
     addHistory(p, a.verdict);
     $('result').scrollIntoView({ behavior: smooth(), block: 'start' });
   }
 
   function renderResult(p, note) {
+    applyName(p);
     const a = analyze(p);
     state.current = { p, a };
-    if (!state.open) state.open = { red: true, orange: true, info: true, green: false };
+    if (!state.open) state.open = { red: true, orange: false, info: false, green: false };
     hideAll();
     $('scanner').hidden = true;
     if (note) showStatus(note);
 
     const r = $('result');
+    const known = a.verdict !== 'unknown';
     r.replaceChildren(...[
-      topCard(a, p),
-      p.kind === 'cosmetic' && a.verdict !== 'unknown' ? useBar(p) : null,
-      productChips(p, a),
-      el('div', { id: 'groups' }),
-      p.ingredientsText
-        ? el('details', { class: 'ingr' },
-            el('summary', { text: t('ingredientsTitle') }),
-            el('p', { class: 'ingredients', text: p.ingredientsText.replace(/^\s*[\p{L} ]{2,20}[:：]\s*/u, '') }))
-        : null,
-      dbWarn(),
+      answerCard(p, a),
+      p.kind === 'cosmetic' && known && needsUse(p, a) ? useBar(p) : null,
+      known ? el('button', {
+        class: 'qdet', id: 'detBtn', type: 'button', 'aria-expanded': String(state.detailsOpen), 'aria-controls': 'details',
+        onclick: () => toggleDetails()
+      }, el('span', { text: t('qa.details') + ' · ' + tn('ph.ingredients', a.total) }), icon(ICON.chev, 'chev')) : null,
+      el('div', { id: 'details', class: 'details', hidden: known ? !state.detailsOpen : null }, ...[
+        known ? detailsHead(p, a) : null,
+        productChips(p, a),
+        el('div', { id: 'groups' }),
+        p.ingredientsText
+          ? el('details', { class: 'ingr' },
+              el('summary', { text: t('ingredientsTitle') }),
+              el('p', { class: 'ingredients', text: p.ingredientsText.replace(/^\s*[\p{L} ]{2,20}[:：]\s*/u, '') }))
+          : null,
+        dbWarn()
+      ].filter(Boolean)),
       el('div', { class: 'actions' },
         el('button', { class: 'btn btn-primary', type: 'button', text: t('btn.scanNext'), onclick: scanNext }),
-        el('button', { class: 'btn btn-ghost', type: 'button', text: a.verdict === 'unknown' ? t('btn.readLabel') : t('btn.readAgain'), onclick: () => openLabel(p) }),
+        el('button', { class: 'btn btn-ghost', type: 'button', text: known ? t('btn.readAgain') : t('btn.readLabel'), onclick: () => openLabel(p) }),
         p.source === 'label' && isBarcode(p.code)
           ? el('button', { class: 'btn btn-ghost', type: 'button', text: t('btn.lookupOnline'), onclick: () => lookup(p.code, true) })
           : null
@@ -715,33 +778,135 @@
     return a;
   }
 
-  function topCard(a, p) {
-    const card = el('section', { class: 'topcard v-' + a.verdict, 'aria-label': t('v.' + a.verdict) },
-      productHead(p, a),
-      el('span', { class: 'verdict-word', text: t('v.' + a.verdict) }),
-      el('p', { class: 'verdict-sub', text: a.summary })
+  function toggleDetails(open) {
+    state.detailsOpen = open === undefined ? !state.detailsOpen : !!open;
+    const d = $('details'), b = $('detBtn');
+    if (d && b) d.hidden = !state.detailsOpen;
+    if (b) b.setAttribute('aria-expanded', String(state.detailsOpen));
+  }
+
+  // The answer: one word, why, "instead" and the colour strip. Everything else is under "Details".
+  const QA_ICON = {
+    avoid: 'M7 7l10 10M17 7L7 17', check: 'M12 6.5v7M12 17.5h.01', ok: 'M6 12.5l4 4L18 8',
+    unknown: 'M9.5 9.2a2.6 2.6 0 1 1 3.6 2.4c-.7.3-1.1.9-1.1 1.6v.4M12 17.5h.01'
+  };
+  function answerCard(p, a) {
+    const v = a.verdict, word = t('v.' + v);
+    const card = el('section', { class: 'qa v-' + v, id: 'answer', 'aria-label': word },
+      nameRow(p),
+      el('div', { class: 'qw' },
+        el('span', { class: 'qi' }, icon(QA_ICON[v])),
+        el('b', { class: word.length > 12 ? 'long' : null, text: word })),
+      ...answerLines(a)
     );
-    if (a.verdict === 'unknown') return card;
-
-    card.append(el('div', { class: 'tiles', id: 'tiles' }, GROUPS.map(g => {
-      const n = a.counts[g];
-      return el('button', {
-        type: 'button', class: 'tile g-' + g + (n ? ' has' : ' zero'), 'data-g': g,
-        'aria-pressed': String(state.filter === g), 'aria-disabled': n ? null : 'true',
-        onclick: () => { if (n) setFilter(g); }
-      }, el('b', { text: String(n) }), el('span', { text: t('tile.' + g) }));
-    })));
-
-    const strip = el('div', { class: 'strip' + (a.rows.length > 30 ? ' dense' : ''), role: 'group', 'aria-label': t('strip.aria') },
-      a.rows.map(r => el('button', {
-        type: 'button', class: 'g-' + r.group + (r.kind === 'cosmetic' && !r.found ? ' nf' : ''),
-        title: (r.pos ? '#' + r.pos + ' ' : '') + r.label,
-        'aria-label': (r.pos ? '#' + r.pos + ' ' : '') + r.label + ', ' + t('g.' + r.group),
-        onclick: e => jumpTo(r.i, e.currentTarget)
-      })));
-    card.append(strip, el('div', { class: 'strip-ends', 'aria-hidden': 'true' },
-      el('span', { text: t('strip.first') }), el('span', { text: t('strip.last') })));
+    const alt = v === 'avoid' || v === 'check' ? alternatives(p) : [];
+    if (alt.length) {
+      card.append(el('p', { class: 'qalt' }, el('b', { text: t('qa.instead') + ':' }),
+        alt.map(q => el('button', { class: 'altbtn', type: 'button', text: q.name || t('ph.unnamed'), onclick: () => openSaved(q.code) }))));
+    }
+    if (v !== 'unknown' && a.rows.length) {
+      card.append(el('div', { class: 'strip' + (a.rows.length > 30 ? ' dense' : ''), role: 'group', 'aria-label': t('strip.aria') },
+        a.rows.map(r => el('button', {
+          type: 'button', class: 'g-' + r.group + (r.kind === 'cosmetic' && !r.found ? ' nf' : ''),
+          title: (r.pos ? '#' + r.pos + ' ' : '') + r.label,
+          'aria-label': (r.pos ? '#' + r.pos + ' ' : '') + r.label + ', ' + t('g.' + r.group),
+          onclick: e => { toggleDetails(true); jumpTo(r.i, e.currentTarget); }
+        }))),
+        el('div', { class: 'strip-ends', 'aria-hidden': 'true' }, el('span', { text: t('strip.first') }), el('span', { text: t('strip.last') })));
+    }
     return card;
+  }
+
+  // Red: what and why. Orange: what. Green: what was checked. Never "safe".
+  function answerLines(a) {
+    const names = list => {
+      const n = [...new Set(list.map(shortName))];
+      return n.slice(0, 3).join(', ') + (n.length > 3 ? ' ' + t('qa.more', { n: n.length - 3 }) : '');
+    };
+    if (a.verdict === 'avoid') {
+      const red = a.rows.filter(r => r.group === 'red');
+      const whys = [...new Set(red.map(r => t('qa.why.' + r.why)))];
+      return [el('p', { class: 'qy', text: t('qa.contains', { names: names(red) }) }), el('p', { class: 'qr', text: t('qa.reason', { why: whys.join(', ') }) })];
+    }
+    if (a.verdict === 'check') {
+      const or = a.rows.filter(r => r.group === 'orange');
+      return [el('p', { class: 'qy', text: names(or) }), el('p', { class: 'qr', text: t(or.every(r => r.banCos) ? 'qa.orReasonCos' : 'qa.orReason') })];
+    }
+    if (a.verdict === 'ok') return [el('p', { class: 'qy', text: t('qa.okLine') })];
+    return [el('p', { class: 'qy', text: a.summary })];
+  }
+
+  function nameRow(p) {
+    const isFav = state.favs.includes(p.code), nm = p.name || t('ph.unnamed');
+    return el('div', { class: 'qn' },
+      el('button', { class: 'nameedit' + (p.name ? '' : ' none'), type: 'button', id: 'nameBtn', 'aria-label': t('name.edit') + ': ' + nm, onclick: () => editName(p) },
+        el('span', { text: nm }), icon(ICON.pen)),
+      el('div', { class: 'acts' },
+        el('button', {
+          class: 'iconbtn' + (isFav ? ' on' : ''), type: 'button', id: 'favBtn',
+          'aria-pressed': String(isFav), 'aria-label': t(isFav ? 'btn.unfav' : 'btn.fav'), title: t(isFav ? 'btn.unfav' : 'btn.fav'),
+          onclick: () => toggleFav(p)
+        }, icon(ICON.heart)),
+        el('button', { class: 'iconbtn', type: 'button', 'aria-label': t('btn.share'), title: t('btn.share'), onclick: shareResult }, icon(ICON.share))
+      )
+    );
+  }
+
+  // Name a product after the check: tap the name, type, ✓ (or Enter).
+  function editName(p) {
+    const row = document.querySelector('#answer .qn');
+    if (!row) return;
+    const input = el('input', { id: 'nameInput', value: p.name || '', placeholder: t('label.namePh'), 'aria-label': t('label.name'), maxlength: '80', enterkeyhint: 'done', autocomplete: 'off' });
+    const save = () => setName(p, input.value);
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); save(); }
+      else if (e.key === 'Escape') renderResult(p);
+    });
+    row.replaceChildren(el('div', { class: 'nameform' }, input,
+      el('button', { class: 'ok', type: 'button', id: 'nameSave', 'aria-label': t('name.save'), title: t('name.save'), onclick: save }, icon(ICON.ok))));
+    input.focus();
+    input.select();
+  }
+
+  function setName(p, value) {
+    const name = String(value || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    if (name) state.names[p.code] = name; else delete state.names[p.code];
+    store.set('names', state.names);
+    p.name = name;
+    if (state.products[p.code]) saveProduct(p);
+    state.history.forEach(h => { if (h.code === p.code) h.name = name; });
+    store.set('history', state.history);
+    renderResult(p);
+    renderHistory();
+    renderFavs();
+  }
+
+  // "Instead": your saved products of the same type with "No warnings" (newest first, at most 2).
+  function alternatives(p) {
+    const out = [], seen = new Set([p.code]);
+    for (const code of state.history.map(h => h.code).concat(state.favs)) {
+      if (seen.has(code)) continue;
+      seen.add(code);
+      const q = productBy(code);
+      if (!q || (q.kind || 'food') !== (p.kind || 'food')) continue;
+      if (verdictOf(code).verdict !== 'ok') continue;
+      out.push(q);
+      if (out.length === 2) break;
+    }
+    return out;
+  }
+
+  // The "stays on skin / washed off" question only when an ingredient's EU limit depends on it (or you answered it).
+  function needsUse(p, a) {
+    return !!p.use || a.rows.some(r => r.kind === 'cosmetic' && r.src && (r.src.reasons || []).some(rinseOnly));
+  }
+
+  function detailsHead(p, a) {
+    const meta = [p.brand, t(kindKey(p.kind)), a.total ? tn('ph.ingredients', a.total) : null,
+      p.kind !== 'food' && a.rows.length ? t(a.fragrance ? 'chip.fragrance' : 'chip.noFragrance') : null].filter(Boolean).join(' · ');
+    return el('div', { class: 'product-head det-head' },
+      el('div', { class: 'thumb' }, icon(ICON.tag), p.image ? el('img', { src: p.image, alt: '', loading: 'lazy', onerror: e => e.target.remove() }) : null),
+      el('p', { class: 'grow', text: meta }));
   }
 
   // Stays on skin / washed off: some EU limits depend on it.
@@ -766,27 +931,6 @@
     renderFavs();
   }
 
-  function productHead(p, a) {
-    const isFav = state.favs.includes(p.code);
-    const meta = [p.brand, t(p.kind === 'cosmetic' ? 'kind.cosmetic' : 'kind.food'), a.total ? tn('ph.ingredients', a.total) : null,
-      p.kind === 'cosmetic' && a.rows.length ? t(a.fragrance ? 'chip.fragrance' : 'chip.noFragrance') : null].filter(Boolean).join(' · ');
-    return el('div', { class: 'product-head tc-head' },
-      el('div', { class: 'thumb' }, icon(ICON.tag), p.image ? el('img', { src: p.image, alt: '', loading: 'lazy', onerror: e => e.target.remove() }) : null),
-      el('div', { class: 'grow' },
-        el('h2', { text: p.name || t('ph.unnamed') }),
-        el('p', { text: meta })
-      ),
-      el('div', { class: 'acts' },
-        el('button', {
-          class: 'iconbtn' + (isFav ? ' on' : ''), type: 'button', id: 'favBtn',
-          'aria-pressed': String(isFav), 'aria-label': t(isFav ? 'btn.unfav' : 'btn.fav'), title: t(isFav ? 'btn.unfav' : 'btn.fav'),
-          onclick: () => toggleFav(p)
-        }, icon(ICON.heart)),
-        el('button', { class: 'iconbtn', type: 'button', 'aria-label': t('btn.share'), title: t('btn.share'), onclick: shareResult }, icon(ICON.share))
-      )
-    );
-  }
-
   function productChips(p, a) {
     const chips = [];
     if (p.nutriscore) chips.push(t('chip.nutri', { g: p.nutriscore.toUpperCase() }));
@@ -794,7 +938,7 @@
     for (const tag of p.analysis || []) if (TEXT.en['an.' + tag]) chips.push(t('an.' + tag));
 
     let allergenLine = null;
-    if (p.kind !== 'cosmetic') {
+    if (p.kind === 'food' || !p.kind) {
       const names = Object.fromEntries(LCDB.foodAllergens(LANG).map(x => [x.id, x.name]));
       const ids = new Set();
       a.rows.forEach(r => (r.allergens || []).forEach(x => ids.add(x.id)));
@@ -808,8 +952,18 @@
           parts.flatMap((x, i) => (i ? [', ', x] : [x])));
       }
     }
-    if (!chips.length && !allergenLine) return null;
-    return el('div', {}, chips.length ? el('ul', { class: 'chips' }, chips.map(c => el('li', { text: c }))) : null, allergenLine);
+    const nut = (p.kind === 'food' || !p.kind) && p.nut ? nutLine(p.nut) : null;
+    if (!chips.length && !allergenLine && !nut) return null;
+    return el('div', {}, chips.length ? el('ul', { class: 'chips' }, chips.map(c => el('li', { text: c }))) : null, allergenLine, nut);
+  }
+
+  // "Per 100 g: fat 24 g (saturated 9 g) · protein 13 g"
+  function nutLine(n) {
+    const f = x => String(x).replace('.', LANG === 'en' ? '.' : ',');
+    const parts = [];
+    if (n.fat !== null && n.fat !== undefined) parts.push(t('nut.fat', { g: f(n.fat) }) + (n.sat !== null && n.sat !== undefined ? ' ' + t('nut.sat', { g: f(n.sat) }) : ''));
+    if (n.prot !== null && n.prot !== undefined) parts.push(t('nut.prot', { g: f(n.prot) }));
+    return parts.length ? el('p', { class: 'nutline' }, el('strong', { text: t('nut.per') + ' ' }), parts.join(' · ')) : null;
   }
 
   // Only when the EU data is more than 6 months old: one orange line (it changes how far a result can be trusted).
@@ -840,13 +994,7 @@
       if (state.filter && state.filter !== g) continue;
       const list = a.rows.filter(r => r.group === g);
       const id = 'grp-' + g;
-      if (!list.length) {
-        parts.push(el('section', { class: 'grp empty g-' + g },
-          el('div', { class: 'grp-head' },
-            el('span', { class: 'dot g-' + g }), el('span', { class: 'ttl', text: t('tile.' + g) }), el('span', { class: 'desc', text: t('gd.' + g) }),
-            el('span', { class: 'num', text: t('g.none') }))));
-        continue;
-      }
+      if (!list.length) continue;   // empty groups are not shown
       const open = !!state.open[g];
       parts.push(el('section', { class: 'grp g-' + g },
         el('button', {
@@ -868,21 +1016,25 @@
   // Short coloured tag on the right of a row.
   function chipOf(r) {
     const k = r.why === 'b' ? 'chip.b' : r.why === 'use' ? 'chip.use' : r.why === 'mine' ? 'chip.mine' : r.why === 'allergen' ? 'chip.yourAlg'
-      : r.why === 'fragrance' ? 'chip.frag' : r.why === 'vegan' ? 'chip.vegan'
+      : r.why === 'fragrance' ? 'chip.frag' : r.why === 'vegan' ? 'chip.vegan' : r.banCos ? 'chip.banCos'
       : r.group === 'orange' ? (r.level === 'u' ? 'chip.u' : 'chip.c')
       : r.group === 'info' ? (r.level === 'r' ? 'chip.r' : r.allergen || (r.allergens && r.allergens.length) ? 'chip.alg' : 'chip.maybeVegan') : null;
     return k ? t(k) : null;
   }
+  // EU rules that are only for cosmetics (CosIng annexes, MI and formaldehyde-releaser rules).
+  const isCosRule = rs => /^EU CosIng|2016\/1198|2022\/1181/.test(((rs || {}).source || {}).label || '');
   // One short line: why this row has its colour.
   function whyOf(r) {
     if (r.kind === 'cosmetic') {
       const s = r.src, tags = cosmeticTags(r), fn = (s.functions || [])[0];
+      const cosRule = rs => (r.household && isCosRule(rs) ? t('hh.cosRule') + ' ' : '');
       if (r.why === 'use') return t('use.why');
-      if (r.group === 'orange' && !r.why) return (s.reasons[0] || {}).text || '';
+      if (r.banCos) return t('why.banCos');
+      if (r.group === 'orange' && !r.why) return cosRule(s.reasons[0]) + ((s.reasons[0] || {}).text || '');
       if (r.group === 'info') {
         if (r.allergen) return t('tag.allergen');
         const an = (((s.reasons[0] || {}).source || {}).label || '').match(/Annex (IV|V|VI)\b/);
-        return an ? t('why.annex' + an[1]) : [fn, t('why.limit')].filter(Boolean).join(' · ');
+        return an ? cosRule(s.reasons[0]) + t('why.annex' + an[1]) : [fn, t('why.limit')].filter(Boolean).join(' · ');
       }
       return (tags.length ? tags : [fn]).filter(Boolean).join(' · ');
     }
@@ -1124,6 +1276,12 @@
     const items = state.history.slice(0, 3);
     $('recent').hidden = !items.length;
     $('recentList').replaceChildren(...items.map(h => productListItem(h, { summary: true })));
+    // Backup note: everything personal lives only on this phone.
+    const last = store.get('lastBackup', 0), later = store.get('backupLater', 0), now = Date.now();
+    const due = (state.history.length || state.avoid.length || state.favs.length) && now - last > 30 * 864e5 && now - later > 7 * 864e5;
+    $('bkNote').hidden = !due;
+    if (due) $('bkTitle').textContent = last ? t('bk.old', { days: Math.floor((now - last) / 864e5) }) : t('bk.never');
+    $('bkLast').textContent = last ? t('bk.last', { date: fmtDate(last) }) : '';
   }
 
   function openSaved(code) {
@@ -1213,6 +1371,7 @@
     if (r.vegan && state.vegan && r.vegan.no.length) mineP.push(el('p', { text: t('d.veganNo', { names: r.vegan.no.join(', ') }) }));
     if (r.vegan && state.vegan && r.vegan.maybe.length) mineP.push(el('p', { text: t('d.veganMaybe', { names: r.vegan.maybe.join(', ') }) }));
     if (mineP.length) body.push(el('div', { class: 'd-card' }, mineP));
+    if (r.household && !r.det && r.src && (r.src.reasons || []).some(isCosRule)) body.push(el('p', { class: 'minor', text: t('hh.note') }));
 
     if (r.kind === 'cosmetic') {
       const tags = cosmeticTags(r);
@@ -1263,7 +1422,7 @@
     const studyName = r.kind === 'cosmetic' ? (r.found ? niceName(r.src.name) : cleanSeg(r.text)) : (r.kind === 'food' && !r.additives.length ? cleanSeg(r.text).replace(/\s*\(.*\)\s*/g, ' ').trim() : null);
     if (studyName) acts.push(studiesLink(studyName));
     if (r.kind !== 'extra') {
-      const listName = r.kind === 'cosmetic' && r.found ? [niceName(r.src.name), cleanSeg(r.text)] : [cleanSeg(r.text).replace(/\s*\(.*\)\s*/g, ' ').trim()];
+      const listName = r.kind === 'cosmetic' && r.found && r.src.name ? [niceName(r.src.name), cleanSeg(r.text)] : [cleanSeg(r.text).replace(/\s*\(.*\)\s*/g, ' ').trim()];
       const already = !!r.mine;
       acts.push(el('button', {
         class: 'btn ' + (already ? 'btn-ghost' : 'btn-primary'), type: 'button', disabled: already,
@@ -1284,6 +1443,26 @@
 
   // ---------- Read a label (free share flow) ----------
   let labelFor = null; // product or {code} the label belongs to
+  let kindTouched = false, kindTimer = null;
+
+  // Food, cosmetic or household? Guessed from the names in the text; you can always change it.
+  function guessKind(text) {
+    const segs = LCDB.splitIngredients(text).filter(s => /\p{L}{2}/u.test(s));
+    if (segs.length < 3) return null;
+    const det = segs.filter(s => detergentTerm(s)).length;
+    if (det >= 2 || (det >= 1 && DET_RANGE.test(text))) return { kind: 'household', n: det, of: segs.length };
+    const cos = LCDB.checkCosmetic(text, LANG).filter(r => r.found || r.fragrance).length;
+    return cos / segs.length >= 0.6 ? { kind: 'cosmetic', n: cos, of: segs.length } : { kind: 'food', n: cos, of: segs.length };
+  }
+  function updateKindGuess() {
+    const note = $('kindNote');
+    if (kindTouched) { note.hidden = true; return; }
+    const g = guessKind($('labelText').value);
+    if (!g) { note.hidden = true; return; }
+    document.querySelectorAll('input[name="kind"]').forEach(i => { i.checked = i.value === g.kind; });
+    note.textContent = t('kind.guess.' + g.kind, { n: g.n, of: g.of });
+    note.hidden = false;
+  }
 
   function openLabel(p, keepStatus) {
     labelFor = p && p.code ? p : null;
@@ -1300,9 +1479,10 @@
     $('ocrArea').hidden = true;
     $('claudeBox').open = false;
     ocrStatus('');
-    $('labelName').value = (p && p.name) || '';
     const kind = (p && p.kind) || 'food';
     document.querySelectorAll('input[name="kind"]').forEach(i => { i.checked = i.value === kind; });
+    kindTouched = !!(p && p.kind && p.ingredientsText);   // "Read again" on a known product: keep its type
+    $('kindNote').hidden = true;
     $('labelLead').textContent = labelFor && isBarcode(labelFor.code)
       ? t('label.leadFor', { code: labelFor.code }) : t('label.lead');
     panel.scrollIntoView({ behavior: 'auto', block: 'start' });
@@ -1361,7 +1541,7 @@
         el('span', { class: 'dot ' + VERDICT_DOT[v], 'aria-hidden': 'true' }),
         el('span', { class: 'main' },
           el('strong', { text: [p.brand, p.name].filter(Boolean).join(' ') }),
-          el('span', { class: 'why', text: [t('src.ownShort'), t(p.kind === 'cosmetic' ? 'kind.cosmetic' : 'kind.food'), t('v.' + v)].join(' · ') })),
+          el('span', { class: 'why', text: [t('src.ownShort'), t(kindKey(p.kind)), t('v.' + v)].join(' · ') })),
         icon(ICON.chev, 'chev')));
   }
 
@@ -1373,21 +1553,29 @@
   // ---------- Read a label: offline reader (Tesseract, in ocr/) ----------
   // The reader files load only when you tap "Read text", so barcode scans stay fast.
   const OCR_LANGS = { en: 'eng', de: 'deu', bg: 'bul' };
-  const OCR_NAMES = { eng: 'EN', deu: 'DE', bul: 'BG' };
+  const OCR_NAMES = { eng: 'EN', deu: 'DE', bul: 'BG', hun: 'HU', ces: 'CZ', slk: 'SK', slv: 'SL' };
+  const OCR_ALL = Object.keys(OCR_NAMES);
+  // Heading word on the label -> reader language (used by "Auto").
+  const OCR_HEADS = [['eng', /^ingredients?$/], ['deu', /^(zutaten|inhaltsstoffe|bestandteile)$/], ['bul', /^(съставки|състав)$/],
+    ['hun', /^osszetevok$/], ['ces', /^slozeni$/], ['slk', /^zlozenie$/], ['slv', /^sestavine$/]];
   const OCR_LOW = 60;   // reader confidence below this: read again with the other alphabet
   const OCR_BAD = 50;   // below this: orange line instead of "Done" (wrong alphabet gave 31–48, good reads 75–95)
   let ocrFile = null, ocrWorker = null, ocrSeq = 0, ocrBusy = false, claudeNext = false;
   const ocrWait = {};
   const crop = { x: 0.06, y: 0.3, w: 0.88, h: 0.4 };   // part of the photo, 0..1
 
-  function ocrLang() {
-    const v = store.get('ocrLang', null);
-    return Object.values(OCR_LANGS).includes(v) ? v : (OCR_LANGS[LANG] || 'eng');
+  // "auto" (default) or one reader language you picked in the menu.
+  function ocrChoice() {
+    const v = store.get('ocrPick', 'auto');
+    return v === 'auto' || OCR_ALL.includes(v) ? v : 'auto';
   }
-  function renderOcrLang() {
-    const cur = ocrLang();
-    $('ocrLang').setAttribute('aria-label', t('ocr.lang'));
-    $('ocrLang').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.ocr === cur)));
+  function renderOcrLang() { $('ocrLang').value = ocrChoice(); }
+  function headingLang(text) {
+    for (const m of String(text || '').matchAll(/(\p{L}+)\s*[:：;]/gu)) {
+      const w = LCDB.norm(m[1]), hit = OCR_HEADS.find(([, re]) => re.test(w));
+      if (hit) return hit[0];
+    }
+    return null;
   }
   function drawCrop() {
     const b = $('cropBox').style;
@@ -1402,7 +1590,9 @@
   function onPhoto(e) {
     const file = e.target.files && e.target.files[0];
     e.target.value = '';
-    if (!file) return;
+    if (file) loadPhoto(file);
+  }
+  function loadPhoto(file) {
     ocrFile = file;
     if (claudeNext) { claudeNext = false; shareToClaude(file); }
     const img = $('cropImg');
@@ -1506,12 +1696,26 @@
     });
   }
 
-  // Reader text -> one line; start at "Ingredients:" when the label has it.
+  // Ingredient headings in the languages seen on EU labels, by language. Two headings with the same language
+  // ("Zutaten Teig / Zutaten Füllung") stay together; a heading in another language starts a new block.
+  const HEADS = { en: 'ingredients', fr: 'ingrédients', it: 'ingredienti', es: 'ingredientes', nl: 'ingrediënten', ro: 'ingrediente',
+    sv: 'ingredienser', de: 'zutaten|inhaltsstoffe|bestandteile', bg: 'съставки|състав', hr: 'sastojci', sl: 'sestavine', cs: 'složení',
+    sk: 'zloženie', hu: 'összetevők', pl: 'składniki', fi: 'ainesosat', ru: 'состав' };
+  const HEAD_RE = new RegExp('(?<!\\p{L})(' + Object.values(HEADS).join('|') + ')\\s*[:：]', 'giu');
+  const headLang = w => Object.keys(HEADS).find(k => new RegExp('^(' + HEADS[k] + ')$', 'iu').test(w));
+
+  // Reader text -> one line; start at the first heading ("Zutaten:") and stop at a heading in another language.
   function cleanOcr(text) {
     let s = String(text || '').replace(/[­]/g, '').replace(/(\p{L})-\s*\n\s*(\p{Ll})/gu, '$1$2');
     s = s.replace(/\s*\n\s*/g, ' ').replace(/[|_]{1,}/g, ' ').replace(/\s{2,}/g, ' ').trim();
-    const m = s.match(/(ingredients|ingrédients|ingredienti|ingredientes|zutaten|съставки)\s*[:：]/i);
-    if (m && m.index > 0) s = s.slice(m.index);
+    let heads = [...s.matchAll(HEAD_RE)];
+    if (!heads.length) return s;
+    if (heads[0].index > 0) { s = s.slice(heads[0].index); heads = [...s.matchAll(HEAD_RE)]; }
+    const first = headLang(heads[0][1]), start = heads[0][0].length;
+    for (const h of heads.slice(1)) {
+      const between = s.slice(start, h.index).replace(/[^\p{L}]/gu, '');
+      if (between.length >= 15 && headLang(h[1]) !== first) return s.slice(0, h.index).trim();
+    }
     return s;
   }
 
@@ -1523,17 +1727,31 @@
     const t0 = performance.now();
     ocrStatus(t('ocr.reading'), 'busy');
     try {
-      const image = await ocrImage(), lang = ocrLang();
-      let r = await ocrRun(image.slice(), lang), switched = '';
+      const image = await ocrImage(), pick = ocrChoice(), auto = pick === 'auto';
+      const lastLatin = store.get('ocrLastLatin', LANG === 'en' ? 'eng' : 'deu');
+      let lang = auto ? store.get('ocrLast', OCR_LANGS[LANG] || 'eng') : pick;
+      if (!OCR_ALL.includes(lang)) lang = 'eng';
+      let r = await ocrRun(image.slice(), lang), used = lang, switched = false;
       // Low confidence: probably the wrong alphabet (a Latin label read as BG, or the reverse).
       // Read once more with the other alphabet and keep the better text.
       if (r.conf < OCR_LOW) {
-        const other = lang === 'bul' ? 'eng' : 'bul';
+        const other = lang === 'bul' ? (OCR_ALL.includes(lastLatin) ? lastLatin : 'deu') : 'bul';
         try {
           const r2 = await ocrRun(image.slice(), other);
-          if (r2.conf > r.conf) { r = r2; switched = other; store.set('ocrLang', other); renderOcrLang(); }
+          if (r2.conf > r.conf) { r = r2; used = other; switched = true; }
         } catch (e) { /* other language not on the phone yet and no internet: keep the first text */ }
       }
+      // Auto, Latin letters: the heading word ("Zutaten:", "Összetevők:") tells the language. Read once more with it.
+      if (auto && used !== 'bul') {
+        const h = headingLang(r.text);
+        if (h && h !== used && h !== 'bul') {
+          try {
+            const r3 = await ocrRun(image.slice(), h);
+            if (r3.conf >= r.conf - 5) { r = r3; used = h; }
+          } catch (e) { /* that reader is not on the phone yet and no internet */ }
+        }
+      }
+      if (auto) { store.set('ocrLast', used); if (used !== 'bul') store.set('ocrLastLatin', used); }
       const text = cleanOcr(r.text);
       const secs = ((performance.now() - t0) / 1000).toFixed(1).replace('.', LANG === 'en' ? '.' : ',');
       if (text.replace(/[^\p{L}]/gu, '').length < 12 || r.conf < OCR_BAD) {
@@ -1541,8 +1759,10 @@
         if (text) $('labelText').value = text;
       } else {
         $('labelText').value = text;
-        ocrStatus(t('ocr.done', { s: secs }) + (switched ? ' ' + t('ocr.switched', { lang: OCR_NAMES[switched] }) : ''));
+        ocrStatus(t('ocr.done', { s: secs }) + (auto ? ' ' + t('ocr.readAs', { lang: OCR_NAMES[used] })
+          : switched ? ' ' + t('ocr.switched', { lang: OCR_NAMES[used] }) : ''));
       }
+      updateKindGuess();
       $('labelText').scrollIntoView({ behavior: 'smooth', block: 'center' });
     } catch (err) {
       ocrStatus(t('ocr.fail'), 'warn');
@@ -1570,7 +1790,7 @@
   async function onPaste() {
     try {
       const txt = await navigator.clipboard.readText();
-      if (txt) $('labelText').value = txt.trim();
+      if (txt) { $('labelText').value = txt.trim(); updateKindGuess(); }
       else toast(t('toast.clipEmpty'));
     } catch (e) {
       toast(t('toast.pasteBlocked'));
@@ -1599,7 +1819,7 @@
       code,
       kind,
       source: 'label',
-      name: $('labelName').value.trim() || (base && base.name) || '',
+      name: (base && base.name) || '',
       brand: (base && base.brand) || '',
       image: (base && base.image) || '',
       ingredientsText: main,
@@ -1623,7 +1843,7 @@
   async function startCamera() {
     if (!('BarcodeDetector' in window)) {
       toast(t('toast.noBarcodeApi'));
-      $('codeInput').focus();
+      showCodeForm(true);
       return;
     }
     try {
@@ -1647,7 +1867,23 @@
     $('scanner').classList.add('scanning');
     $('stopCam').hidden = false;
     try { await v.play(); } catch (e) { /* autoplay is allowed for muted video */ }
+    // Torch button only when the phone camera has a light that the browser can switch.
+    try {
+      const track = stream.getVideoTracks()[0], caps = track && track.getCapabilities ? track.getCapabilities() : {};
+      $('torchBtn').hidden = !caps.torch;
+    } catch (e) { $('torchBtn').hidden = true; }
     scanLoop();
+  }
+
+  async function toggleTorch() {
+    const track = stream && stream.getVideoTracks()[0], b = $('torchBtn');
+    if (!track) return;
+    const on = b.getAttribute('aria-pressed') !== 'true';
+    try {
+      await track.applyConstraints({ advanced: [{ torch: on }] });
+      b.setAttribute('aria-pressed', String(on));
+      b.classList.toggle('on', on);
+    } catch (e) { toast(t('toast.torchFail')); }
   }
 
   async function scanLoop() {
@@ -1676,6 +1912,9 @@
     v.srcObject = null;
     v.hidden = true;
     $('stopCam').hidden = true;
+    $('torchBtn').hidden = true;
+    $('torchBtn').setAttribute('aria-pressed', 'false');
+    $('torchBtn').classList.remove('on');
     $('vfIdle').hidden = false;
     $('scanner').classList.remove('scanning');
   }
@@ -1857,7 +2096,7 @@
   function exportBackup() {
     const data = {
       app: 'label-check', version: 2, exportedAt: new Date().toISOString(),
-      avoid: state.avoid, favs: state.favs, allergens: state.allergens, avoidFragrance: state.avoidFragrance, vegan: state.vegan,
+      avoid: state.avoid, favs: state.favs, names: state.names, allergens: state.allergens, avoidFragrance: state.avoidFragrance, vegan: state.vegan,
       lang: state.lang, theme: state.theme, bigText: state.bigText,
       history: state.history, products: state.products
     };
@@ -1866,6 +2105,8 @@
     document.body.append(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    store.set('lastBackup', Date.now());
+    renderStart();
     toast(t('toast.backupSaved'));
   }
 
@@ -1882,6 +2123,9 @@
     state.history = Array.isArray(data.history) ? data.history.slice(0, MAX_HISTORY) : [];
     if (data.products && typeof data.products === 'object') Object.assign(state.products, data.products);
     state.favs = Array.isArray(data.favs) ? data.favs.filter(c => typeof c === 'string') : [];
+    if (data.names && typeof data.names === 'object') {
+      for (const [c, n] of Object.entries(data.names)) if (typeof n === 'string' && n.trim()) state.names[c] = n.trim().slice(0, 80);
+    }
     if (data.allergens && typeof data.allergens === 'object') {
       state.allergens = {
         food: Array.isArray(data.allergens.food) ? data.allergens.food.filter(x => typeof x === 'string') : [],
@@ -1893,7 +2137,7 @@
     if (['auto', 'en', 'de', 'bg'].includes(data.lang)) state.lang = data.lang;
     if (['auto', 'light', 'dark'].includes(data.theme)) state.theme = data.theme;
     if (typeof data.bigText === 'boolean') state.bigText = data.bigText;
-    for (const k of ['avoid', 'history', 'products', 'favs', 'allergens', 'avoidFragrance', 'vegan', 'lang', 'theme', 'bigText']) store.set(k, state[k]);
+    for (const k of ['avoid', 'history', 'products', 'favs', 'names', 'allergens', 'avoidFragrance', 'vegan', 'lang', 'theme', 'bigText']) store.set(k, state[k]);
     verdictCache.clear();
     syncSettingsControls();
     applyTheme();
@@ -1913,10 +2157,26 @@
 
   // ---------- Tabs and toast ----------
   // Each tab change is added to the browser history, so the phone's Back button returns to the previous tab.
-  const TABS = ['scan', 'favs', 'list', 'history'];
+  const TABS = ['scan', 'list', 'history'];
   let currentTab = 'scan';
 
+  // Favourites are a filter inside History (v2.8). Old links to "favs" open History with the filter on.
+  function setHistFilter(f) {
+    document.querySelectorAll('#histFilter button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.f === f)));
+    $('histAll').hidden = f === 'favs';
+    $('histFavs').hidden = f !== 'favs';
+  }
+
+  // The barcode number box opens from a link (it is not needed often).
+  function showCodeForm(focus) {
+    $('manualForm').hidden = false;
+    $('codeLink').setAttribute('aria-expanded', 'true');
+    $('codeLink').parentElement.hidden = true;
+    if (focus) $('codeInput').focus();
+  }
+
   function setTab(tab) {
+    if (tab === 'favs') { tab = 'history'; setHistFilter('favs'); }
     if (!TABS.includes(tab)) tab = 'scan';
     currentTab = tab;
     document.querySelectorAll('.tab').forEach(s => { s.hidden = s.dataset.tab !== tab; });
@@ -1982,7 +2242,11 @@
     $('cardScan').addEventListener('click', startCamera);
     $('stopCam').addEventListener('click', stopCamera);
     $('cardLabel').addEventListener('click', () => openLabel(null));
-    $('cardSearch').addEventListener('click', openSearch);
+    $('topSearch').addEventListener('click', () => { stopCamera(); openSearch(); });
+    $('codeLink').addEventListener('click', () => showCodeForm(true));
+    $('torchBtn').addEventListener('click', toggleTorch);
+    document.querySelectorAll('#histFilter button').forEach(b => b.addEventListener('click', () => setHistFilter(b.dataset.f)));
+    $('offGet').addEventListener('click', getOfflineReaders);
     $('recentAll').addEventListener('click', () => go('history'));
     document.querySelectorAll('[data-back]').forEach(b => b.addEventListener('click', closePanel));
     $('searchInput').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(renderSearch, 120); });
@@ -1994,10 +2258,12 @@
     $('photoInput').addEventListener('change', onPhoto);
     $('photoPick').addEventListener('change', onPhoto);
     $('ocrRead').addEventListener('click', onOcrRead);
-    $('ocrLang').addEventListener('click', e => {
-      const b = e.target.closest('button[data-ocr]');
-      if (b) { store.set('ocrLang', b.dataset.ocr); renderOcrLang(); }
-    });
+    $('ocrLang').addEventListener('change', e => store.set('ocrPick', e.target.value));
+    document.querySelectorAll('input[name="kind"]').forEach(i => i.addEventListener('change', () => { kindTouched = true; $('kindNote').hidden = true; }));
+    $('labelText').addEventListener('input', () => { clearTimeout(kindTimer); kindTimer = setTimeout(updateKindGuess, 400); });
+    $('bkSave').addEventListener('click', exportBackup);
+    $('bkLater').addEventListener('click', () => { store.set('backupLater', Date.now()); renderStart(); });
+    $('updReload').addEventListener('click', () => location.reload());
     $('shareClaude').addEventListener('click', () => { if (ocrFile) shareToClaude(ocrFile); else { claudeNext = true; $('photoInput').click(); } });
     initCrop();
     $('copyPrompt').addEventListener('click', async () => {
@@ -2050,12 +2316,85 @@
     Promise.all([dbReady, ownReady]).then(() => { renderRules(); renderAllergens(); renderFavs(); renderHistory(); });
 
     if ('serviceWorker' in navigator) {
+      // A new version took over (after a push): offer a reload. Not on the very first install.
+      const hadController = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) $('updBar').hidden = false; });
       navigator.serviceWorker.register('sw.js').catch(() => { /* app still works online */ });
     }
+    // Ask the browser to keep the saved data (it may otherwise clear it when the phone is short of space).
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(ok => ok || navigator.storage.persist()).catch(() => {}); } catch (e) { /* old browser */ }
+    openFromUrl();
+  }
+
+  // ---------- Label reader without internet (all 7 languages on the phone) ----------
+  const OCR_MB = { eng: 2.0, deu: 0.9, bul: 0.8, hun: 2.4, ces: 1.7, slk: 1.9, slv: 1.2 };
+  const hasSimd = () => { try { return WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11])); } catch (e) { return false; } };
+  const ocrCore = () => { const c = hasSimd() ? 'tesseract-core-simd-lstm' : 'tesseract-core-lstm'; return ['ocr/ocr-worker.js', 'ocr/' + c + '.js', 'ocr/' + c + '.wasm']; };
+  async function offlineMissing() {
+    if (!('caches' in window)) return null;
+    const files = ocrCore().concat(OCR_ALL.map(l => 'ocr/lang/' + l + '.traineddata.gz')), missing = [];
+    for (const f of files) if (!(await caches.match(f))) missing.push(f);
+    return missing;
+  }
+  let offBusy = false;
+  async function renderOffline() {
+    if (offBusy) return;
+    let missing = null;
+    try { missing = await offlineMissing(); } catch (e) { /* caches blocked */ }
+    const st = $('offState'), btn = $('offGet');
+    if (!missing) { st.textContent = t('off.noCache'); btn.hidden = true; return; }
+    const have = OCR_ALL.filter(l => !missing.includes('ocr/lang/' + l + '.traineddata.gz'));
+    st.textContent = have.length === OCR_ALL.length && missing.length === 0 ? t('off.all')
+      : t('off.have', { list: have.length ? have.map(l => OCR_NAMES[l]).join(', ') : t('off.none'), n: have.length, of: OCR_ALL.length });
+    const mb = missing.reduce((s, f) => s + (OCR_MB[(f.match(/lang\/(\w+)\./) || [])[1]] || (f.endsWith('.wasm') ? 2.9 : 0.1)), 0);
+    btn.hidden = missing.length === 0;
+    btn.disabled = false;
+    btn.textContent = t('off.get', { mb: Math.max(1, Math.round(mb)) });
+  }
+  async function getOfflineReaders() {
+    const missing = await offlineMissing();
+    if (!missing || !missing.length) { renderOffline(); return; }
+    offBusy = true;
+    const btn = $('offGet');
+    btn.disabled = true;
+    try {
+      for (let i = 0; i < missing.length; i++) {
+        btn.textContent = t('off.busy', { i: i + 1, n: missing.length });
+        const r = await fetch(missing[i]);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        await r.arrayBuffer();          // the service worker keeps the file on the phone
+      }
+    } catch (e) { toast(t('off.fail')); }
+    offBusy = false;
+    await renderOffline();
+    const left = await offlineMissing();
+    if (left && !left.length) toast(t('off.done'));
+    else if (left && left.length && !navigator.serviceWorker?.controller) toast(t('off.fail'));
+  }
+
+  // Long-press menu of the app icon (?go=…) and photos shared to the app (?shared=1).
+  function openFromUrl() {
+    const q = new URLSearchParams(location.search);
+    const goTo = q.get('go'), shared = q.get('shared');
+    if (!goTo && !shared) return;
+    try { history.replaceState({ tab: 'scan' }, '', location.pathname); } catch (e) { /* ignore */ }
+    if (shared && 'caches' in window) {
+      caches.open('lc-share').then(async c => {
+        const res = await c.match('shared-photo');
+        await caches.delete('lc-share');
+        if (!res) return;
+        const blob = await res.blob();
+        openLabel(null);
+        loadPhoto(new File([blob], 'shared.' + ((blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg')), { type: blob.type || 'image/jpeg' }));
+      }).catch(() => {});
+    } else if (goTo === 'label') openLabel(null);
+    else if (goTo === 'search') openSearch();
+    else if (goTo === 'scan') startCamera();
   }
 
   // Small test hook (used only by automated checks).
-  window.LC = { analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch };
+  window.LC = { analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
+    cleanOcr, headingLang, guessKind, detergentTerm, alternatives, setName, renderStart };
 
   init();
 })();

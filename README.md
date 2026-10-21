@@ -18,7 +18,7 @@ Later it becomes a part of Jarvis.
 
 | File | What it does |
 |---|---|
-| index.html | The screens: Scan, Favourites, My list (incl. allergens, settings, what the app checks), History |
+| index.html | The screens: Scan (quick answer + Details), My list (incl. allergens, settings, offline readers, what the app checks), History (with a ♥ Favourites filter) |
 | style.css | Colours and layout: "Clear blue" (light) and "Night" (dark) |
 | i18n.js | All screen texts in English, German and Bulgarian |
 | db.js | Offline ingredient database lookup (LCDB) |
@@ -27,10 +27,11 @@ Later it becomes a part of Jarvis.
 | app.js | Scanning, lookup, ingredient check, result screen, detail, favourites, label reading, backup |
 | manifest.json | Makes the app installable |
 | sw.js | Lets the app and the database open without internet |
-| ocr/ | Offline label reader: tesseract.js-core 7.0.0 + language files EN/DE/BG (Apache-2.0, see ocr/README.txt). Loaded only on "Read text" |
+| ocr/ | Offline label reader: tesseract.js-core 7.0.0 + language files EN/DE/BG/HU/CS/SK/SL (Apache-2.0, see ocr/README.txt). Loaded only on "Read text" or "Download all languages" |
 | icon-192.png, icon-512.png | App icon |
 | tools/ | Database download (fetch_sources.py), build (build_db.py), tests (test_db.js, test_app.py), IARC list |
 | .github/workflows/update-db.yml | Monthly automatic database update on GitHub |
+| .github/workflows/audit.yml | Accuracy check by hand: compares our finds with Open Food Facts tags on real products (tools/audit.js) |
 
 ## Change the data or a text
 

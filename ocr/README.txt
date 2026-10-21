@@ -7,6 +7,7 @@ Program: tesseract.js-core 7.0.0 (Tesseract OCR compiled to WebAssembly)
 
 Language files: tessdata_fast (eng, deu, bul), gzip-packed, unchanged otherwise
   https://github.com/tesseract-ocr/tessdata_fast  (commit 8741641)
+  Added in v2.8: hun, ces, slk, slv (same repository, commit 8741641; eng there is byte-identical)
   Licence: Apache License 2.0
 
 ocr-worker.js: written for Label Check. It loads the program and one language file,

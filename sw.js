@@ -1,7 +1,8 @@
 /* Label Check — service worker.
    Keeps the app files and the ingredient database on the phone so the app opens without internet.
    When you change any app file or the database, raise the version number below. */
-const VERSION = 'label-check-v10';
+const VERSION = 'label-check-v11';
+const SHARE = 'lc-share';   // a photo shared to the app waits here until the page picks it up
 const FILES = [
   './',
   'index.html',
@@ -26,7 +27,7 @@ self.addEventListener('install', event => {
 // They never change under the same name, so a new VERSION takes them over from the old cache.
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
-    const keys = (await caches.keys()).filter(k => k !== VERSION);
+    const keys = (await caches.keys()).filter(k => k !== VERSION && k !== SHARE);
     const now = await caches.open(VERSION);
     for (const k of keys) {
       const old = await caches.open(k);
@@ -46,6 +47,20 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const req = event.request;
   const url = new URL(req.url);
+  // Gallery -> Share -> Label Check: keep the photo, then open "Read a label" with it.
+  if (req.method === 'POST' && url.origin === self.location.origin && url.pathname.endsWith('/share-target')) {
+    event.respondWith((async () => {
+      try {
+        const file = (await req.formData()).get('photo');
+        if (file && file.size) {
+          const c = await caches.open(SHARE);
+          await c.put('shared-photo', new Response(file, { headers: { 'Content-Type': file.type || 'image/jpeg' } }));
+        }
+      } catch (e) { /* no photo: open the app normally */ }
+      return Response.redirect(new URL('./?shared=1', self.registration.scope).href, 303);
+    })());
+    return;
+  }
   if (req.method !== 'GET' || url.origin !== self.location.origin) return;
   const isData = url.pathname.includes('/data/') || url.pathname.includes('/ocr/');
   event.respondWith(

@@ -119,6 +119,25 @@ const ok = (cond, msg) => { if (!cond) { fails++; console.log('  FAIL: ' + msg);
   ok(f.e('E464') && f.e('E551') && f.e('E572'), 'хипромелоза = E464, силиконов диоксид = E551, магнезиев стеарат = E572');
   ok(LCDB.search('хипромелоза', 5)[0].id === 'e464', 'search хипромелоза -> E464');
 
+  console.log('\n11 Label languages HU / CS / SK / SL (v2.8)');
+  f = food('Összetevők: búzaliszt, cukor, pálmaolaj, tejpor, emulgeálószer: szójalecitin, citromsav, tartósítószer: nátrium-nitrit, mogyoró', 'en');
+  ok(f.e('E250') && f.e('E330') && f.e('E322') && f.al('milk') && f.al('gluten') && f.al('soybeans') && f.al('nuts'), 'HU: E250 E330 E322, milk gluten soy nuts');
+  f = food('Složení: pšeničná mouka, cukr, sušené mléko, emulgátor: sójový lecitin, kyselina citronová, konzervant: dusitan sodný, lískové ořechy', 'en');
+  ok(f.e('E250') && f.e('E330') && f.e('E322') && f.al('milk') && f.al('gluten') && f.al('soybeans') && f.al('nuts'), 'CS: E250 E330 E322, milk gluten soy nuts');
+  f = food('Zloženie: pšeničná múka, sušené mlieko, kyselina citrónová, dusitan sodný, lieskové orechy, čiastočne stužený tuk', 'en');
+  ok(f.e('E250') && f.e('E330') && f.al('milk') && f.al('nuts') && f.res.rules.some(r => r.id === 'trans-fat'), 'SK: E250 E330, milk nuts, trans fat');
+  f = food('Sestavine: pšenična moka, mleko v prahu, citronska kislina, natrijev nitrit, lešniki', 'en');
+  ok(f.e('E250') && f.e('E330') && f.al('milk') && f.al('gluten'), 'SL: E250 E330, milk gluten');
+  f = food('Zutaten: Schweinefleisch, Nitritpökelsalz (Speisesalz, Natriumnitrit), Dextrose, Senfsaat, Sellerie', 'de');
+  ok(f.e('E250') && f.al('mustard') && f.al('celery') && !f.al('milk') && !f.al('gluten'), 'DE label: no new false finds from the new languages');
+
+  console.log('\n12 Fragrance that the EU list does not mark (v2.8)');
+  const frag = (n, lang) => { const r = LCDB.checkCosmetic('Aqua, ' + n + ', Glycerin', lang)[1]; return !!(r.fragrance || r.allergen); };
+  ok(['Rosmarinus Officinalis Leaf Oil', 'Melaleuca Alternifolia Leaf Oil', 'Citrus Bergamia Peel Oil', 'Natural fragrance', 'Essential oil'].every(n => frag(n, 'en')), 'essential oils + EN fragrance words');
+  ok(['Duftstoffe', 'Ätherisches Öl', 'Lavendelöl'].every(n => frag(n, 'de')), 'DE: Duftstoffe, Ätherisches Öl, Lavendelöl');
+  ok(['парфюм', 'аромат', 'етерично масло', 'лавандулово масло'].every(n => frag(n, 'bg')), 'BG: парфюм, аромат, етерично масло');
+  ok(!['Helianthus Annuus Seed Oil', 'Olea Europaea Fruit Oil', 'Cocos Nucifera Oil', 'Parfümfrei', 'Olivenöl', 'лимонена киселина'].some(n => frag(n, 'en')), 'fatty oils, "parfümfrei", citric acid: not fragrance');
+
   console.log(fails ? `\n${fails} FAILED` : '\nALL PASSED');
   process.exit(fails ? 1 : 0);
 })();

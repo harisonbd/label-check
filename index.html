@@ -15,7 +15,8 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>Label Check <span class="ver">v2.7</span></h1>
+    <h1>Label Check <span class="ver">v2.8</span></h1>
+    <button class="iconbtn topsearch" id="topSearch" type="button" data-t-aria="card.search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg></button>
     <div class="langsw" id="langSwitch" role="group" aria-label="Language">
       <button type="button" data-lang="en" lang="en" aria-pressed="false">EN</button>
       <button type="button" data-lang="bg" lang="bg" aria-pressed="false">BG</button>
@@ -23,23 +24,25 @@
   </header>
 
   <main>
+    <div class="updbar" id="updBar" role="status" hidden><span data-t="upd.ready">A new version is ready.</span><button type="button" id="updReload" data-t="upd.reload">Reload</button></div>
+
     <!-- SCAN TAB -->
     <section class="tab" id="tab-scan" data-tab="scan">
       <div id="status" class="status" role="status" aria-live="polite" hidden></div>
 
       <div id="scanner">
+        <div class="bknote" id="bkNote" hidden>
+          <p><strong id="bkTitle"></strong> <span data-t="bk.why">Your list, history and saved products are only on this phone.</span></p>
+          <div class="row2"><button class="btn btn-primary" id="bkSave" type="button" data-t="bk.save">Save backup</button><button class="linkbtn" id="bkLater" type="button" data-t="bk.later">Later</button></div>
+        </div>
         <div class="startcards">
           <button class="scard primary" id="cardScan" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M7 12h10"/></svg>
-            <span><strong data-t="card.scan">Scan a barcode</strong><small data-t="card.scanSub"></small></span>
+            <strong data-t="card.scan">Scan a barcode</strong>
           </button>
           <button class="scard" id="cardLabel" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.5-2h6l1.5 2h2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="13" r="3.5"/></svg>
-            <span><strong data-t="card.label">Read a label</strong><small data-t="card.labelSub"></small></span>
-          </button>
-          <button class="scard" id="cardSearch" type="button">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>
-            <span><strong data-t="card.search">Find one ingredient</strong><small data-t="card.searchSub"></small></span>
+            <strong data-t="card.label">Read a label</strong>
           </button>
         </div>
 
@@ -50,10 +53,12 @@
           <div class="vf-idle" id="vfIdle">
             <p class="vf-hint" data-t="cam.hint">Point it at the barcode. The scan starts by itself.</p>
           </div>
+          <button class="torch" id="torchBtn" type="button" hidden aria-pressed="false" data-t-aria="cam.torch"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8l-1 6H9zM9 9l1 12h4l1-12M12 13v2"/></svg></button>
           <button class="btn btn-ghost vf-stop" id="stopCam" type="button" hidden data-t="cam.stop">Stop camera</button>
         </div>
 
-        <form class="manual" id="manualForm" autocomplete="off">
+        <p class="codelink"><button class="linkbtn" id="codeLink" type="button" aria-expanded="false" aria-controls="manualForm" data-t="manual.link">Type the barcode numbers</button></p>
+        <form class="manual" id="manualForm" autocomplete="off" hidden>
           <label for="codeInput" data-t="manual.label">Or type the numbers under the barcode</label>
           <div class="row">
             <input id="codeInput" inputmode="numeric" pattern="[0-9 ]*" data-t-ph="manual.ph" placeholder="e.g. 9001234567890" aria-describedby="codeHelp">
@@ -92,10 +97,10 @@
             </div>
           </div>
           <div class="ocrlang">
-            <span data-t="ocr.lang">Label language</span>
-            <div class="langsw" id="ocrLang" role="group">
-              <button type="button" data-ocr="eng">EN</button><button type="button" data-ocr="deu">DE</button><button type="button" data-ocr="bul">BG</button>
-            </div>
+            <label for="ocrLang" data-t="ocr.lang">Label language</label>
+            <select id="ocrLang" class="ocrsel">
+              <option value="auto" data-t="ocr.auto">Auto</option><option value="eng">EN</option><option value="deu">DE</option><option value="bul">BG</option><option value="hun">HU</option><option value="ces">CZ</option><option value="slk">SK</option><option value="slv">SL</option>
+            </select>
           </div>
           <button class="btn btn-primary wide" id="ocrRead" type="button" data-t="ocr.read">Read text</button>
           <p class="ocrstatus" id="ocrStatus" aria-live="polite" hidden></p>
@@ -124,10 +129,9 @@
           <legend data-t="label.kind">Product type</legend>
           <label><input type="radio" name="kind" value="food" checked> <span data-t="kind.food">Food</span></label>
           <label><input type="radio" name="kind" value="cosmetic"> <span data-t="kind.cosmetic">Cosmetic</span></label>
+          <label><input type="radio" name="kind" value="household"> <span data-t="kind.household">Household</span></label>
+          <p class="kindnote" id="kindNote" aria-live="polite" hidden></p>
         </fieldset>
-
-        <label for="labelName" data-t="label.name">Product name (optional)</label>
-        <input id="labelName" data-t-ph="label.namePh">
 
         <button class="btn btn-primary wide" id="checkLabel" type="button" data-t="label.check">Check ingredients</button>
       </section>
@@ -145,12 +149,6 @@
 
     </section>
 
-    <!-- FAVOURITES TAB -->
-    <section class="tab" id="tab-favs" data-tab="favs" hidden>
-      <h2 data-t="favs.title">Favourites</h2>
-      <ul class="plainlist prodlist" id="favList"></ul>
-      <p class="empty" id="favEmpty" data-t="favs.empty"></p>
-    </section>
 
     <!-- MY LIST TAB (avoid list, allergens, settings, rules, backup) -->
     <section class="tab" id="tab-list" data-tab="list" hidden>
@@ -201,6 +199,11 @@
         <label for="bigSwitch" class="grow" data-t="set.big">Big text</label>
         <span class="switch"><input type="checkbox" role="switch" id="bigSwitch"></span>
       </div>
+      <div class="offl" id="offline">
+        <strong data-t="off.title">Label reader without internet</strong>
+        <span class="minor" id="offState"></span>
+        <button class="btn btn-ghost" id="offGet" type="button"></button>
+      </div>
 
       <details class="fold" id="rulesFold">
         <summary data-t="rules.title">What the app checks</summary>
@@ -224,15 +227,26 @@
             <input type="file" id="importInput" accept="application/json,.json" hidden>
           </label>
         </div>
+        <p class="minor" id="bkLast"></p>
       </details>
     </section>
 
     <!-- HISTORY TAB -->
     <section class="tab" id="tab-history" data-tab="history" hidden>
       <h2 data-t="hist.title">History</h2>
-      <ul class="plainlist prodlist" id="historyList"></ul>
-      <p class="empty" id="historyEmpty" data-t="hist.empty"></p>
-      <button class="btn btn-ghost" id="clearHistory" type="button" hidden data-t="hist.clear">Clear history</button>
+      <div class="filt" id="histFilter" role="group">
+        <button type="button" data-f="all" aria-pressed="true" data-t="hist.all">All</button>
+        <button type="button" data-f="favs" aria-pressed="false"><span aria-hidden="true">♥ </span><span data-t="favs.title">Favourites</span></button>
+      </div>
+      <div id="histAll">
+        <ul class="plainlist prodlist" id="historyList"></ul>
+        <p class="empty" id="historyEmpty" data-t="hist.empty"></p>
+        <button class="btn btn-ghost" id="clearHistory" type="button" hidden data-t="hist.clear">Clear history</button>
+      </div>
+      <div id="histFavs" hidden>
+        <ul class="plainlist prodlist" id="favList"></ul>
+        <p class="empty" id="favEmpty" data-t="favs.empty"></p>
+      </div>
     </section>
   </main>
 
@@ -251,10 +265,6 @@
     <button type="button" data-go="scan" aria-current="page">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M7 12h10"/></svg>
       <span data-t="tab.scan">Scan</span>
-    </button>
-    <button type="button" data-go="favs">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/></svg>
-      <span data-t="tab.favs">Favourites</span>
     </button>
     <button type="button" data-go="list">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg>

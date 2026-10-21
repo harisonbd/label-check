@@ -23,30 +23,56 @@
   // Display names where the first synonym in the data is not the usual word (data from Open Food Facts).
   const ALLERGEN_LABEL = { bg: { milk: 'мляко' } };
   // Names missing in the Open Food Facts data (move into build_db.py later).
-  const EXTRA_ALLERGEN_NAMES = { milk: ['краве масло', 'масло от краве мляко'] };
+  const EXTRA_ALLERGEN_NAMES = {
+    milk: ['краве масло', 'масло от краве мляко'],
+    // HU / CS / SK / SL word forms seen on labels that the data lists only in another form
+    gluten: ['búzaliszt', 'pšeničná mouka', 'pšeničná múka', 'pšenična moka', 'pšeničný', 'pšeničná', 'pšenična', 'pšenični'],
+    soybeans: ['szója', 'szójalecitin', 'sójový', 'sójová', 'sójový lecitin', 'sójový lecitín', 'sojin', 'sojin lecitin']
+  };
   // Additive names seen on real labels but missing in the data (move into build_db.py later).
-  const EXTRA_ADDITIVE_NAMES = { e464: { bg: ['хипромелоза'] }, e551: { bg: ['силиконов диоксид', 'силициев двуокис'] } };
+  const EXTRA_ADDITIVE_NAMES = { e464: { bg: ['хипромелоза'] }, e551: { bg: ['силиконов диоксид', 'силициев двуокис'] }, e322: { hu: ['szójalecitin', 'napraforgó-lecitin'] } };
   const additiveNames = (a, lang) => (a.n[lang] || []).concat((EXTRA_ADDITIVE_NAMES[a.e] || {})[lang] || []);
   // Plant fats called "butter" are not milk: "cocoa butter" -> "cocoa" before the allergen check.
   const PLANT_BUTTER = / (cocoa|cacao|shea|mango|kokum|illipe|sal|peanut|almond|cashew|hazelnut|nut|seed) butter(?= )/g;
+  // Fragrance that the EU list does not mark (move into build_db.py later):
+  // essential oils (leaf, flower, peel, bark, root, wood … oil with a fragrance function) and fragrance words on labels.
+  const ESSENTIAL_OIL = /\b(LEAF|LEAVES|FLOWER|PEEL|HERB|BARK|ROOT|WOOD|NEEDLE|TWIG|BUD|RESIN|GUM|RHIZOME|STEM|PLANT|TIP|CONE|BRANCH)\b[^,]*\bOIL$/;
+  const FATTY_OIL = /\b(SEED|KERNEL|NUT|FRUIT|GERM|BUTTER|BRAN|SPROUT|PULP)\b/;
+  const FRAG_FREE = /(^| )(frei|free|ohne|without|без|no)( |$)|frei$|free$/;
+  const FRAG_WORDS = new RegExp('(^| )(' + [
+    'fragrance', 'fragrances', 'perfume', 'parfum', 'natural fragrance', 'masking fragrance', 'essential oil', 'essential oils',
+    'duftstoff', 'duftstoffe', 'parfum', 'atherisches ol', 'atherische ol', 'atherische ole', 'atherischen ole', 'parfumol', 'parfumole',
+    'парфюм', 'парфюмна композиция', 'парфюмни композиции', 'аромат', 'ароматизант', 'ароматизатор', 'ароматизатори',
+    'етерично масло', 'етерични масла'
+  ].join('|') + ')( |$)');
+  const PLANT_OIL_WORDS = /(^| )(lavendel|lavendin|zitronen|zitrus|orangen|bergamott|bergamotte|rosmarin|teebaum|pfefferminz|minz|eukalyptus|rosen|ylang ylang|lemongras|patschuli|sandelholz|zedernholz|kamillen|neroli|geranien)ol(e)?( |$)|(^| )(lavender|lemon|orange|bergamot|rosemary|tea tree|peppermint|mint|eucalyptus|rose|ylang ylang|lemongrass|patchouli|sandalwood|cedarwood|chamomile|neroli|geranium) oil( |$)|(^| )(лавандулово|лимоново|портокалово|бергамотово|розмариново|ментово|евкалиптово|розово|иланг иланг|пачули|сандалово|кедрово|лайково) масло( |$)|(^| )масло от (лавандула|лимон|портокал|бергамот|розмарин|чаено дърво|мента|евкалипт|роза|иланг иланг|пачули|сандалово дърво|лайка)( |$)/;
+  // Older INCI names seen on labels (move into build_db.py later)
+  const EXTRA_COS_ALIASES = { 'CITRUS BERGAMIA PEEL OIL': 'CITRUS AURANTIUM BERGAMIA PEEL OIL', 'CITRUS BERGAMIA FRUIT OIL': 'CITRUS AURANTIUM BERGAMIA FRUIT OIL' };
+  const isFragranceWord = seg => { const n = norm(seg); return !FRAG_FREE.test(n) && (FRAG_WORDS.test(n) || PLANT_OIL_WORDS.test(n)); };
   const allergenName = (al, lang) => (ALLERGEN_LABEL[lang] && ALLERGEN_LABEL[lang][al.id]) || (al.n[lang] || al.n.en)[0];
 
   async function load(base, fetchFn) {
     const get = fetchFn || (async u => (await fetch(u)).json());
     [META, COS, FOOD] = await Promise.all(['db-meta.json', 'db-cosmetics.json', 'db-food.json'].map(f => get(base + f)));
     cosIndex = new Map();
+    const fragFn = new Set(META.functions.map((f, i) => (/^(Fragrance|Perfuming)$/.test(f.en) ? i : -1)).filter(i => i >= 0));
     for (const it of COS.items) {
+      const fl = it[3] || '';
+      if (!fl.includes('f') && / OIL$/.test(it[0]) && ESSENTIAL_OIL.test(it[0]) && !FATTY_OIL.test(it[0]) && (it[1] || []).some(i => fragFn.has(i))) {
+        while (it.length < 4) it.push(it.length === 2 ? 'n' : '');
+        it[3] = fl + 'f';
+      }
       const k = key(it[0]);
       if (!cosIndex.has(k) || (it[3] || '').includes('o') === false) cosIndex.set(k, it);
     }
-    for (const [alias, inci] of Object.entries(COS.aliases)) {
+    for (const [alias, inci] of Object.entries(Object.assign({}, COS.aliases, EXTRA_COS_ALIASES))) {
       const k = key(alias), target = cosIndex.get(key(inci));
       if (target && !cosIndex.has(k)) cosIndex.set(k, target);
     }
     eIndex = new Map(FOOD.additives.map(a => [a.e, a]));
     foodNames = [];
     for (const a of FOOD.additives) {
-      for (const lang of ['en', 'de', 'bg']) {
+      for (const lang of Object.keys(a.n)) {      // all label languages in the data (EN DE BG HU CS SK SL)
         for (const n of additiveNames(a, lang)) {
           const t = norm(n);
           if (t.length >= 4) foodNames.push([t, a]);
@@ -57,7 +83,7 @@
     allergenNames = [];
     for (const al of FOOD.allergens) {
       const extra = EXTRA_ALLERGEN_NAMES[al.id] || [];
-      for (const n of [...['en', 'de', 'bg'].flatMap(lang => al.n[lang] || []), ...extra]) {
+      for (const n of [...Object.values(al.n).flat(), ...extra]) {
         const t = norm(n);
         if (t.length >= 3) allergenNames.push([t, al]);
       }
@@ -68,7 +94,7 @@
 
   // ---------- label splitting
   function stripLabelWord(text) {
-    return String(text || '').replace(/^\s*(ingredients?|ingr[eé]dients?|inci|zutaten|inhaltsstoffe|bestandteile|съставки|състав|composition)\s*[:：]\s*/i, '');
+    return String(text || '').replace(/^\s*(ingredients?|ingr[eé]dients?|inci|zutaten|inhaltsstoffe|bestandteile|съставки|състав|composition|összetevők|složení|zloženie|sestavine)\s*[:：]\s*/i, '');
   }
   // Split at , ; • · and new lines that are not inside brackets. A comma between digits (1,3-diol) does not split.
   function splitIngredients(text) {
@@ -155,7 +181,7 @@
         if (!key(seg)) continue;
         pos++;
         const { it, nano } = resolveCosmetic(seg);
-        if (!it) { rows.push({ pos, text: seg, found: false, level: 'n', mayContain, nano }); continue; }
+        if (!it) { rows.push({ pos, text: seg, found: false, level: 'n', mayContain, nano, fragrance: isFragranceWord(seg) }); continue; }
         const [name, fns, baseLevel = 'n', flags = '', refs = []] = it;
         const level = nano && refs.some(r => r.startsWith('N:')) ? 'b' : baseLevel;
         rows.push({
@@ -256,7 +282,7 @@
     const em = kq.match(/^e(\d{3,4}[a-z]?)$/);
     if (em) { const a = eIndex.get('e' + em[1]); if (a) add(0, a.e, 'food', a.e.toUpperCase(), a.lv); }
     for (const a of FOOD.additives) {
-      for (const lang of ['en', 'de', 'bg']) for (const n of additiveNames(a, lang)) {
+      for (const lang of Object.keys(a.n)) for (const n of additiveNames(a, lang)) {
         const t = norm(n), i = t.indexOf(nq);
         if (i >= 0) add(t === nq ? 1 : i === 0 ? 2 : 4, a.e, 'food', a.e.toUpperCase(), a.lv);
       }
