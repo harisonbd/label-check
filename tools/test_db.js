@@ -165,6 +165,12 @@ const ok = (cond, msg) => { if (!cond) { fails++; console.log('  FAIL: ' + msg);
   ok(LCDB.suggestCosmetic('Tocopheryl Acetat (Vitamin E)').from === 'Tocopheryl Acetat', 'only the name before the bracket is replaced');
   ok(['Glycerin', 'BANANA', 'Wasser', 'Kann Spuren enthalten', 'Hergestellt in Deutschland', 'CI 77481', 'захар', 'Aqua'].every(s => !sug(s)), 'no suggestion: known names, short or other words, unclear numbers, Cyrillic');
 
+  console.log('\n15 Teach the app: a food additive name leads to the cosmetic name (v2.12)');
+  const f2c = e => LCDB.foodToCosmetic(e).join('|');
+  ok(f2c('e901') === 'BEESWAX' && f2c('E330') === 'CITRIC ACID' && f2c('e422') === 'GLYCERIN', 'E901 -> BEESWAX, E330 -> CITRIC ACID, E422 -> GLYCERIN');
+  ok(LCDB.search('Bienenwachs', 5).some(h => h.id === 'e901') && LCDB.search('пчелен восък', 5).some(h => h.id === 'e901'), '"Bienenwachs" and "пчелен восък" find E901 (then BEESWAX)');
+  ok(f2c('e999') === '' && f2c('') === '', 'unknown E-number: nothing');
+
   console.log(fails ? `\n${fails} FAILED` : '\nALL PASSED');
   process.exit(fails ? 1 : 0);
 })();

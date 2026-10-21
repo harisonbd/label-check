@@ -415,6 +415,19 @@
     return [...hits.values()].sort((x, y) => (x.score - y.score) || (x.name.length - y.name.length)).slice(0, limit);
   }
 
-  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, suggestCosmetic, checkFood, cosAllergens, foodAllergens, search, meta: () => META, SEV };
+  // ---------- a food additive -> the cosmetic name with the same English name (E901 "beeswax" -> BEESWAX)
+  // Used when you teach the app a name: "Bienenwachs" or "пчелен восък" are additive names, and lead to the cosmetic entry.
+  function foodToCosmetic(e) {
+    const a = eIndex && eIndex.get(String(e || '').toLowerCase());
+    if (!a || !cosIndex) return [];
+    const out = [];
+    for (const n of (a.n && a.n.en) || []) {
+      const it = cosIndex.get(key(n));
+      if (it && !out.includes(it[0])) out.push(it[0]);
+    }
+    return out;
+  }
+
+  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, suggestCosmetic, checkFood, cosAllergens, foodAllergens, search, foodToCosmetic, meta: () => META, SEV };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.LCDB = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -289,7 +289,7 @@ label.btn { margin: 0; font-weight: 650; }
 .strip .g-orange { background: var(--orange); }
 .strip .g-info { background: var(--info); }
 .strip .g-green { background: var(--green); }
-.strip .nf { opacity: 0.45; }
+.strip .g-nodata { background: var(--muted); }   /* v2.12: a name the app does not know */
 .strip button.mark { outline: 3px solid var(--ink); outline-offset: 1px; z-index: 1; }
 .strip-ends { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--muted); }
 
@@ -747,3 +747,25 @@ details.claudebox .steps { margin-top: 2px; }
 .qk .qks { margin-top: 2px; color: var(--muted); font-weight: 500; }
 .qk .qks:empty { display: none; }
 .d-maybe { font-weight: 700; }
+
+/* ---------- v2.12: "No data" (grey) apart from "nothing found" (green) ---------- */
+.grp.g-nodata { border-left-color: var(--muted); }
+.dot.g-nodata { background: var(--muted); }
+.badge.g-nodata { background: color-mix(in srgb, var(--muted) var(--tint), var(--card)); color: var(--ink); }
+.grpnote { margin: 0 14px 10px; color: var(--muted); font-size: 0.88rem; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0 0; font-size: 0.78rem; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.legend i.g-green { background: var(--green); }
+.legend i.g-nodata { background: var(--muted); }
+
+/* ---------- v2.12: teach the app ---------- */
+.d-card.teach { border: 1px solid var(--line); }
+.teach h3 { margin: 0 0 6px; }
+.teach .btn { width: 100%; margin-top: 8px; }
+.teach .minor { margin: 8px 0 0; }
+.taughtrow { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+.taughtrow:first-child { border-top: 0; }
+.taughtrow .tr-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.taughtrow s { color: var(--muted); }
+.taughtrow b { display: block; }
+.taughtrow .x { flex: 0 0 auto; width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: var(--ink); font-size: 1.1rem; cursor: pointer; }

@@ -44,7 +44,7 @@
   ];
 
   // One order and one colour everywhere: tiles, strip and groups.
-  const GROUPS = ['red', 'orange', 'info', 'green'];
+  const GROUPS = ['red', 'orange', 'info', 'nodata', 'green'];   // nodata (grey): a cosmetic name the app does not know
   const LEVEL_GROUP = { b: 'red', c: 'orange', u: 'orange', r: 'info', n: 'green' };
   const SEV = { b: 5, c: 4, u: 3, r: 2, n: 1 };
   const VERDICT_DOT = { avoid: 'g-red', check: 'g-orange', ok: 'g-green', partial: 'g-grey', unknown: 'g-grey' };
@@ -73,6 +73,7 @@
     products: store.get('products', {}),     // {code: product}
     favs: store.get('favs', []),             // [code]
     names: store.get('names', {}),           // {code: name you gave the product}
+    taught: store.get('taught', {}),         // {key of a label name: {from, to}} – names you taught the app (v2.12)
     allergens: Object.assign({ food: [], cos: [] }, store.get('allergens', {})), // ticked ids / annex refs
     avoidFragrance: store.get('avoidFragrance', false),
     vegan: store.get('vegan', false),
@@ -237,11 +238,11 @@
     rows.sort((x, y) => (x.pos || 999) - (y.pos || 999));
     rows.forEach((r, i) => { r.i = i; });
 
-    const counts = { red: 0, orange: 0, info: 0, green: 0 };
+    const counts = { red: 0, orange: 0, info: 0, nodata: 0, green: 0 };
     for (const r of rows) counts[r.group]++;
     // Cosmetics / household: how many names the app knows. With many unknown names "No warnings" would say too much.
     const listed = rows.filter(r => r.kind === 'cosmetic' && r.pos);
-    const known = listed.filter(r => r.found).length, unknown = listed.length - known;
+    const unknown = listed.filter(isUnknown).length, known = listed.length - unknown;
     const partial = listed.length >= 3 && known / listed.length < PARTIAL_MIN;
     const verdict = counts.red ? 'avoid' : counts.orange ? 'check' : rows.length ? (partial ? 'partial' : 'ok') : 'unknown';
     return {
@@ -303,6 +304,12 @@
     return LCDB.checkCosmetic(text, LANG).map(r => {
       const det = household && !r.found ? detergentTerm(r.text) : null;
       if (det) r = Object.assign({}, r, { found: true, name: null, functions: [t('det.fn') + (det.range ? ' · ' + det.range : '')], reasons: [] });
+      // A name you taught the app ("GLYCERN" = Glycerin): checked as that ingredient, the label text stays as it is
+      const taught = !r.found && !det ? taughtFor(r.text) : null;
+      if (taught) {
+        const k = LCDB.checkCosmetic(taught.to + (r.nano ? ' (nano)' : ''), LANG).find(x => x.found);
+        if (k) r = Object.assign({}, k, { pos: r.pos, text: r.text, mayContain: r.mayContain });
+      }
       // Household: an EU cosmetics ban is shown as orange "not in cosmetics" (detergents have other EU rules).
       const banCos = household && r.level === 'b';
       const level = banCos ? 'c' : r.level;
@@ -312,18 +319,35 @@
       const useHit = !household && use === 'leave' && (r.reasons || []).some(rinseOnly);
       const why = level === 'b' ? 'b' : useHit ? 'use' : mine ? 'mine' : tickedAllergen ? 'allergen' : fragAvoid ? 'fragrance' : null;
       const row = {
-        pos: r.pos, kind: 'cosmetic', text: r.text, household, banCos, det,
+        pos: r.pos, kind: 'cosmetic', text: r.text, household, banCos, det, taught: taught && r.found ? taught : null,
         label: det ? t('det.' + det.key) : r.found ? niceName(r.name) : cleanSeg(r.text),
-        level, group: why ? 'red' : LEVEL_GROUP[level] || 'green', why, mine, tickedAllergen, fragAvoid, useHit,
+        level, why, mine, tickedAllergen, fragAvoid, useHit,
         fragrance: r.fragrance, allergen: r.allergen, nano: r.nano, mayContain: r.mayContain, found: r.found, src: r
       };
+      // Grey "No data": the app knows nothing about the name. Green: a known name with nothing on the EU lists.
+      row.group = why ? 'red' : isUnknown(row) ? 'nodata' : LEVEL_GROUP[level] || 'green';
       row.sub = cosmeticSub(row);
       return row;
     });
   }
 
+  // A cosmetic name on the label that is not in our data (fragrance words count as known: the app knows they are fragrance)
+  function isUnknown(r) { return r.kind === 'cosmetic' && !!r.pos && !r.found && !r.fragrance; }
+
+  // ---------- Names you taught the app (v2.12, only on this phone) ----------
+  // Key = the name before a bracket, without marks like * or ° (the same cut as the fix suggestions in db.js)
+  function teachName(seg) {
+    return String(seg || '').replace(/\s*[\[(].*$/, '').replace(/[\s*°¹²³†‡.:]+$/, '').replace(/^[\s*°.:\-–]+/, '').trim();
+  }
+  function teachKey(seg) { return nrm(teachName(seg)); }
+  function taughtFor(seg) {
+    const k = teachKey(seg);
+    return k && Object.prototype.hasOwnProperty.call(state.taught, k) ? state.taught[k] : null;
+  }
+
   function cosmeticTags(row) {
     const tags = [];
+    if (row.taught) tags.push(t('tag.taught'));
     if (row.allergen) tags.push(t('tag.allergen'));
     else if (row.fragrance) tags.push(t('tag.fragrance'));
     if (row.nano) tags.push(t('tag.nano'));
@@ -748,7 +772,7 @@
     applyName(p);
     const a = analyze(p);
     state.current = { p, a };
-    if (!state.open) state.open = { red: true, orange: false, info: false, green: false };
+    if (!state.open) state.open = { red: true, orange: false, info: false, nodata: false, green: false };
     hideAll();
     $('scanner').hidden = true;
     if (note) showStatus(note);
@@ -817,12 +841,15 @@
     if (v !== 'unknown' && a.rows.length) {
       card.append(el('div', { class: 'strip' + (a.rows.length > 30 ? ' dense' : ''), role: 'group', 'aria-label': t('strip.aria') },
         a.rows.map(r => el('button', {
-          type: 'button', class: 'g-' + r.group + (r.kind === 'cosmetic' && !r.found ? ' nf' : ''),
+          type: 'button', class: 'g-' + r.group,
           title: (r.pos ? '#' + r.pos + ' ' : '') + r.label,
           'aria-label': (r.pos ? '#' + r.pos + ' ' : '') + r.label + ', ' + t('g.' + r.group),
           onclick: e => { toggleDetails(true); jumpTo(r.i, e.currentTarget); }
         }))),
-        el('div', { class: 'strip-ends', 'aria-hidden': 'true' }, el('span', { text: t('strip.first') }), el('span', { text: t('strip.last') })));
+        el('div', { class: 'strip-ends', 'aria-hidden': 'true' }, el('span', { text: t('strip.first') }), el('span', { text: t('strip.last') })),
+        a.rows.some(r => r.group === 'nodata') ? el('p', { class: 'legend', id: 'legend' },
+          el('span', {}, el('i', { class: 'g-green', 'aria-hidden': 'true' }), t('legend.green')),
+          el('span', {}, el('i', { class: 'g-nodata', 'aria-hidden': 'true' }), t('legend.nodata'))) : null);
     }
     return card;
   }
@@ -854,22 +881,23 @@
 
   // Cosmetics / household: "11 of 14 ingredients recognised", with "See 3 unknown" and "Fix the text".
   function knownLine(p, a) {
-    if (!a.unknown) return null;
+    const taughtN = a.rows.filter(r => r.taught).length;
+    if (!a.unknown && !taughtN) return null;
     // Two causes: the photo reader got a name wrong (the app has a close name), or the name is not in the data.
-    const unk = a.rows.filter(r => r.kind === 'cosmetic' && r.pos && !r.found), mis = unk.filter(misreadOf).length, nod = unk.length - mis;
+    const unk = a.rows.filter(isUnknown), mis = unk.filter(misreadOf).length, nod = unk.length - mis;
     return el('div', { class: 'qk' },
       el('p', { text: t('qa.known', { n: a.known, of: a.known + a.unknown }) }),
-      el('p', { class: 'qks', text: [mis ? tn('qa.misread', mis) : null, nod ? tn('qa.noData', nod) : null].filter(Boolean).join(' · ') }),
-      el('p', { class: 'qkl' },
+      el('p', { class: 'qks', text: [mis ? tn('qa.misread', mis) : null, nod ? tn('qa.noData', nod) : null, taughtN ? tn('qa.taught', taughtN) : null].filter(Boolean).join(' · ') }),
+      !a.unknown ? null : el('p', { class: 'qkl' },
         el('button', { class: 'linkbtn inline', type: 'button', id: 'unkBtn', text: tn('qa.seeUnknown', a.unknown), onclick: showUnknown }),
         el('button', { class: 'linkbtn inline', type: 'button', id: 'fixTextBtn', text: t('qa.fixText'), onclick: () => fixText(p) })));
   }
   function misreadOf(r) {
-    if (r.fixS === undefined) r.fixS = r.kind === 'cosmetic' && r.pos && !r.found ? LCDB.suggestCosmetic(r.text) : null;
+    if (r.fixS === undefined) r.fixS = isUnknown(r) ? LCDB.suggestCosmetic(r.text) : null;
     return r.fixS;
   }
   function showUnknown() {
-    const r = state.current && state.current.a.rows.find(x => x.kind === 'cosmetic' && x.pos && !x.found);
+    const r = state.current && state.current.a.rows.find(isUnknown);
     if (!r) return;
     toggleDetails(true);
     jumpTo(r.i);
@@ -1034,8 +1062,9 @@
   function renderGroups() {
     const box = $('groups');
     if (!box || !state.current) return;
-    const { a } = state.current;
+    const { a, p } = state.current;
     if (a.verdict === 'unknown') { box.replaceChildren(); return; }
+    const cosmeticKind = p.kind === 'cosmetic' || p.kind === 'household';
     const parts = [];
     if (state.filter) {
       parts.push(el('p', { class: 'filterbar' },
@@ -1054,9 +1083,12 @@
         },
           el('span', { class: 'dot g-' + g }), el('span', { class: 'ttl', text: t('tile.' + g) }), el('span', { class: 'desc', text: t('gd.' + g) }),
           el('span', { class: 'num', text: String(list.length) }), icon(ICON.chev, 'chev')),
-        g === 'green'
+        // One line that says what the colour means: grey = no data; green = known (cosmetics only: food has no "known" list)
+        g === 'nodata' || (g === 'green' && cosmeticKind)
+          ? el('p', { class: 'grpnote', hidden: !open, text: t('gn.' + g) }) : null,
+        g === 'green' || g === 'nodata'
           ? el('ul', { class: 'chiplist', id, hidden: !open }, list.map(r => el('li', { 'data-i': r.i },
-              el('button', { class: 'gchip' + (r.kind === 'cosmetic' && !r.found ? ' nf' : ''), type: 'button', onclick: e => openDetail(r.i, e.currentTarget) },
+              el('button', { class: 'gchip' + (isUnknown(r) ? ' nf' : ''), type: 'button', onclick: e => openDetail(r.i, e.currentTarget) },
                 el('small', { text: r.pos ? '#' + r.pos : '–' }), r.label))))
           : el('ul', { class: 'rows', id, hidden: !open }, list.map(rowItem))
       ));
@@ -1410,7 +1442,8 @@
     body.push(el('p', { class: 'd-meta', text: r.fromSearch ? t(r.kind === 'cosmetic' ? 'search.kindCos' : 'search.kindFood') : r.pos ? t('d.pos', { n: r.pos }) : t('d.posNone') }));
 
     const top = r.why === 'mine' ? t('tag.mine') : r.why === 'allergen' ? t('tag.allergenYours')
-      : r.why === 'fragrance' ? t('tag.fragranceAvoid') : r.why === 'vegan' ? t('chip.vegan') : r.why === 'use' ? t('chip.use') : levelName(r.level);
+      : r.why === 'fragrance' ? t('tag.fragranceAvoid') : r.why === 'vegan' ? t('chip.vegan') : r.why === 'use' ? t('chip.use')
+      : r.group === 'nodata' ? t('tile.nodata') : levelName(r.level);
     body.push(badge(r.group, top));
 
     // Personal reasons (your list, allergens, fragrance)
@@ -1427,16 +1460,20 @@
     if (r.kind === 'cosmetic') {
       const tags = cosmeticTags(r);
       if (tags.length) body.push(el('ul', { class: 'd-tags' }, tags.map(x => el('li', { text: x }))));
-      if (r.found && niceName(r.src.name) !== cleanSeg(r.text)) {
+      if (r.taught) body.push(taughtCard(r));
+      else if (isUnknown(r) && !r.fromSearch) body.push(teachCard(r));
+      if (r.found && !r.taught && niceName(r.src.name) !== cleanSeg(r.text)) {
         body.push(el('p', { class: 'd-meta' }, t('d.asOnLabel') + ': ', el('em', { text: r.text })));
       }
       if (r.src.functions && r.src.functions.length) {
         body.push(el('div', { class: 'd-card' }, el('h3', { text: t('d.functions') }), el('p', { text: r.src.functions.join(', ') })));
       }
       const reasons = r.src.reasons || [];
+      const unk = isUnknown(r);
       body.push(el('div', { class: 'd-card' },
-        el('h3', { text: t('d.why') }),
-        !r.found && misreadOf(r) ? el('p', { class: 'd-maybe', text: t('d.maybe', { name: niceName(misreadOf(r).inci) }) }) : null,
+        el('h3', { text: t(unk ? 'd.knows' : 'd.why') }),
+        unk ? el('p', { class: 'd-nothing', id: 'nothingLine' }, el('b', { text: t('d.nothing') }), ' ' + t('d.nodata')) : null,
+        unk && misreadOf(r) ? el('p', { class: 'd-maybe', text: t('d.maybeShort', { name: niceName(misreadOf(r).inci) }) }) : null,
         reasons.length ? reasons.map(reasonBlock) : el('p', { text: r.found ? t('d.noReasons') : t('d.notFound') }),
         r.allergen && !r.tickedAllergen ? el('p', { class: 'minor', text: t('d.allergenNot') }) : null,
         reasons.some(x => x.details && (x.details.entry || x.details.conditions)) ? el('p', { class: 'minor', text: t('d.det.engOnly') }) : null
@@ -1494,6 +1531,82 @@
     $('detailBody').replaceChildren(...body.filter(Boolean));
   }
 
+  // ---------- Teach the app (v2.12): "GLYCERN is Glycerin", saved on this phone for all products ----------
+  function teachCard(r) {
+    const s = misreadOf(r);
+    return el('div', { class: 'd-card teach', id: 'teachCard' },
+      el('h3', { text: t('teach.title') }),
+      s ? el('button', { class: 'btn btn-primary', type: 'button', id: 'teachYes', text: t('teach.yes', { name: niceName(s.inci) }), onclick: () => { teach(r.text, s.inci); closeDetail(); } })
+        : el('p', { text: t('teach.none') }),
+      el('button', { class: 'btn ' + (s ? 'btn-ghost' : 'btn-primary'), type: 'button', id: 'teachOther', text: t(s ? 'teach.other' : 'teach.pick'), onclick: () => openPicker(r) }),
+      el('p', { class: 'minor', text: t('teach.note') }));
+  }
+  function taughtCard(r) {
+    return el('div', { class: 'd-card teach', id: 'taughtCard' },
+      el('p', {}, ...tNodes('d.taught', { from: el('em', { text: r.taught.from }), to: el('b', { text: niceName(r.src.name) }) })),
+      el('button', { class: 'btn btn-ghost', type: 'button', id: 'undoTeach', text: t('d.undo'), onclick: () => { untaught(r.text); closeDetail(); } }));
+  }
+  function teach(text, inci) {
+    const k = teachKey(text);
+    if (!k || !inci) return;
+    const from = teachName(text);
+    state.taught[k] = { from, to: inci };
+    store.set('taught', state.taught);
+    renderTaught();
+    settingsChanged();   // result, History and Favourites are checked again with the new name
+    toast(t('toast.taught', { from, to: niceName(inci) }));
+  }
+  function untaught(text) {
+    const k = teachKey(text), item = state.taught[k];
+    if (!item) return;
+    delete state.taught[k];
+    store.set('taught', state.taught);
+    renderTaught();
+    settingsChanged();
+    toast(t('toast.untaught', { from: item.from }));
+  }
+  // My list: "Taught names" fold
+  function renderTaught() {
+    const box = $('taughtList');
+    if (!box) return;
+    const items = Object.entries(state.taught).sort((x, y) => x[1].from.localeCompare(y[1].from));
+    $('taughtCount').textContent = '(' + items.length + ')';
+    box.replaceChildren(...(items.length ? items.map(([k, v]) => el('div', { class: 'taughtrow' },
+      el('div', { class: 'tr-main' }, el('s', { text: v.from }), el('b', { text: niceName(v.to) })),
+      el('button', { class: 'x', type: 'button', 'aria-label': t('taught.del', { from: v.from }), title: t('taught.del', { from: v.from }), text: '✕', onclick: () => untaught(v.from) })))
+      : [el('p', { class: 'empty', text: t('taught.empty') })]));
+  }
+  // "Another ingredient…": the Find screen chooses the ingredient for this label name
+  let pickFor = null, pickTyped = false;   // pickTyped: the Find box still holds the label name
+  function openPicker(r) {
+    pickFor = { text: r.text, from: teachName(r.text) };
+    pickTyped = true;
+    hideDetail();
+    try { history.replaceState({ tab: 'scan', view: 'search', pick: 1, code: state.current && state.current.p.code }, ''); } catch (e) { /* ignore */ }
+    showPanel('searchPanel');
+    $('searchInput').value = pickFor.from;
+    renderSearch();
+    $('searchInput').focus();
+  }
+  // Only cosmetic names. A food additive name in another language leads to its cosmetic name
+  // ("Bienenwachs" = E901, whose English name "beeswax" is the cosmetic name BEESWAX).
+  function pickHits(hits) {
+    const out = [], seen = new Set();
+    const add = h => { if (!seen.has(h.name)) { seen.add(h.name); out.push(h); } };
+    for (const h of hits) {
+      if (h.kind === 'cosmetic') add(h);
+      else for (const name of LCDB.foodToCosmetic(h.id)) add({ kind: 'cosmetic', id: name, name, level: 'n' });
+    }
+    return out;
+  }
+  function pickChoose(name) {
+    const pf = pickFor;
+    if (!pf) return;
+    pickFor = null;
+    teach(pf.text, name);
+    if (history.state && history.state.pick) { try { history.back(); } catch (e) { /* ignore */ } }
+  }
+
   // ---------- Read a label (free share flow) ----------
   let labelFor = null; // product or {code} the label belongs to
   let kindTouched = false, kindTimer = null;
@@ -1505,7 +1618,7 @@
     const det = segs.filter(s => detergentTerm(s)).length;
     if (det >= 2 || (det >= 1 && DET_RANGE.test(text))) return { kind: 'household', n: det, of: segs.length };
     const rows = LCDB.checkCosmetic(text, LANG);
-    let cos = rows.filter(r => r.found || r.fragrance).length;
+    let cos = rows.filter(r => r.found || r.fragrance || taughtFor(r.text)).length;
     // A badly read cosmetic list: names that are one or two letters off count too
     if (cos / segs.length < 0.6 && cos / segs.length >= 0.25) cos += rows.filter(r => !r.found && !r.fragrance && LCDB.suggestCosmetic(r.text)).length;
     return cos / segs.length >= 0.6 ? { kind: 'cosmetic', n: cos, of: segs.length } : { kind: 'food', n: cos, of: segs.length };
@@ -1528,7 +1641,7 @@
     if (kind === 'food' || !text.trim()) return [];
     const out = [], seen = new Set();
     for (const r of LCDB.checkCosmetic(text, LANG)) {
-      if (r.found || (kind === 'household' && detergentTerm(r.text))) continue;
+      if (r.found || (kind === 'household' && detergentTerm(r.text)) || taughtFor(r.text)) continue;
       const s = LCDB.suggestCosmetic(r.text);
       if (!s || seen.has(s.from)) continue;
       seen.add(s.from);
@@ -1603,6 +1716,7 @@
   let searchTimer = null;
 
   function openSearch() {
+    if (pickFor || pickTyped) { pickFor = null; pickTyped = false; $('searchInput').value = ''; }
     showPanel('searchPanel');
     if (!history.state || history.state.view !== 'search') pushState({ tab: 'scan', view: 'search' });
     renderSearch();
@@ -1623,10 +1737,14 @@
   function renderSearch() {
     const q = $('searchInput').value.trim();
     const list = $('searchList'), info = $('searchInfo');
+    const panel = $('searchPanel');
+    panel.querySelector('h2').textContent = pickFor ? t('teachPick.title', { name: pickFor.from }) : t('search.title');
+    panel.querySelector('.lead').textContent = t(pickFor ? 'teachPick.lead' : 'search.lead');
     if (!DBINFO) { info.textContent = t(DBINFO === null ? 'status.dbLoading' : 'status.dbFail'); list.replaceChildren(); return; }
     if (q.length < 2) { info.textContent = t('search.hint'); list.replaceChildren(); return; }
-    const rows = LCDB.search(q, 30).map(searchRow).filter(Boolean);
-    const own = ownSearch(q);
+    const hits = LCDB.search(q, 30);
+    const rows = (pickFor ? pickHits(hits) : hits).map(h => { const r = searchRow(h); if (r) r.hitName = h.name; return r; }).filter(Boolean);
+    const own = pickFor ? [] : ownSearch(q);
     info.textContent = rows.length || own.length ? '' : t('search.none');
     list.replaceChildren(...own.map(ownRow), ...rows.map(r => {
       const chip = chipOf(r);
@@ -1634,7 +1752,7 @@
       const detail = r.kind === 'food' && r.additives && r.additives[0] ? (r.additives[0].classes || []).join(', ') : whyOf(r);
       const why = [kind, detail].filter(Boolean).join(' · ');
       return el('li', {},
-        el('button', { class: 'row-btn', type: 'button', onclick: e => openDetailRow(r, e.currentTarget) },
+        el('button', { class: 'row-btn', type: 'button', onclick: e => (pickFor ? pickChoose(r.hitName) : openDetailRow(r, e.currentTarget)) },
           el('span', { class: 'dot g-' + r.group, 'aria-hidden': 'true' }),
           el('span', { class: 'main' },
             chip ? el('span', { class: 'chip g-' + r.group, text: chip }) : null,
@@ -2347,6 +2465,7 @@
   function renderAll() {
     renderAvoid();
     renderAllergens();
+    renderTaught();
     renderRules();
     renderFavs();
     renderHistory();
@@ -2360,7 +2479,7 @@
   function exportBackup() {
     const data = {
       app: 'label-check', version: 2, exportedAt: new Date().toISOString(),
-      avoid: state.avoid, favs: state.favs, names: state.names, allergens: state.allergens, avoidFragrance: state.avoidFragrance, vegan: state.vegan,
+      avoid: state.avoid, favs: state.favs, names: state.names, taught: state.taught, allergens: state.allergens, avoidFragrance: state.avoidFragrance, vegan: state.vegan,
       lang: state.lang, theme: state.theme, bigText: state.bigText,
       history: state.history, products: state.products
     };
@@ -2390,6 +2509,11 @@
     if (data.names && typeof data.names === 'object') {
       for (const [c, n] of Object.entries(data.names)) if (typeof n === 'string' && n.trim()) state.names[c] = n.trim().slice(0, 80);
     }
+    if (data.taught && typeof data.taught === 'object') {
+      for (const [k, v] of Object.entries(data.taught)) {
+        if (v && typeof v.from === 'string' && typeof v.to === 'string' && v.from.trim() && v.to.trim()) state.taught[k] = { from: v.from.slice(0, 120), to: v.to.slice(0, 200) };
+      }
+    }
     if (data.allergens && typeof data.allergens === 'object') {
       state.allergens = {
         food: Array.isArray(data.allergens.food) ? data.allergens.food.filter(x => typeof x === 'string') : [],
@@ -2401,7 +2525,7 @@
     if (['auto', 'en', 'de', 'bg'].includes(data.lang)) state.lang = data.lang;
     if (['auto', 'light', 'dark'].includes(data.theme)) state.theme = data.theme;
     if (typeof data.bigText === 'boolean') state.bigText = data.bigText;
-    for (const k of ['avoid', 'history', 'products', 'favs', 'names', 'allergens', 'avoidFragrance', 'vegan', 'lang', 'theme', 'bigText']) store.set(k, state[k]);
+    for (const k of ['avoid', 'history', 'products', 'favs', 'names', 'taught', 'allergens', 'avoidFragrance', 'vegan', 'lang', 'theme', 'bigText']) store.set(k, state[k]);
     verdictCache.clear();
     syncSettingsControls();
     applyTheme();
@@ -2476,6 +2600,7 @@
       if (!p || !DBINFO) showScanner();
       else if ($('result').hidden || !state.current || state.current.p !== p) renderResult(p);
     } else if (st.view === 'search') {
+      if (!st.pick) pickFor = null;
       showPanel('searchPanel');
       renderSearch();
     } else if (st.view === 'label') {
@@ -2506,7 +2631,8 @@
     $('cardScan').addEventListener('click', startCamera);
     $('stopCam').addEventListener('click', stopCamera);
     $('cardLabel').addEventListener('click', () => openLabel(null));
-    $('topSearch').addEventListener('click', () => { stopCamera(); openSearch(); });
+    // The Find screen lives on the Scan tab: switch there first (from My list / History it stayed hidden)
+    $('topSearch').addEventListener('click', () => { stopCamera(); if (currentTab !== 'scan') go('scan'); openSearch(); });
     $('codeLink').addEventListener('click', () => showCodeForm(true));
     $('torchBtn').addEventListener('click', toggleTorch);
     document.querySelectorAll('#histFilter button').forEach(b => b.addEventListener('click', () => setHistFilter(b.dataset.f)));
@@ -2580,7 +2706,7 @@
     renderFavs();
     renderHistory();
     renderRules();
-    Promise.all([dbReady, ownReady]).then(() => { renderRules(); renderAllergens(); renderFavs(); renderHistory(); });
+    Promise.all([dbReady, ownReady]).then(() => { renderRules(); renderAllergens(); renderTaught(); renderFavs(); renderHistory(); });
 
     if ('serviceWorker' in navigator) {
       // A new version took over (after a push): offer a reload. Not on the very first install.

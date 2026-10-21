@@ -15,7 +15,7 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>Label Check <span class="ver">v2.11</span></h1>
+    <h1>Label Check <span class="ver">v2.12</span></h1>
     <button class="iconbtn topsearch" id="topSearch" type="button" data-t-aria="card.search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg></button>
     <div class="langsw" id="langSwitch" role="group" aria-label="Language">
       <button type="button" data-lang="en" lang="en" aria-pressed="false">EN</button>
@@ -176,6 +176,13 @@
         <input id="cosAlgSearch" type="search" data-t-ph="alg.search" autocomplete="off">
         <div class="ticks" id="cosAlgList"></div>
         <button class="btn btn-ghost small" id="cosAlgClear" type="button" data-t="alg.clear">Untick all</button>
+      </details>
+
+      <h3 data-t="taught.title">Taught names</h3>
+      <details class="fold" id="taughtBox">
+        <summary><span data-t="taught.fold">Names you taught the app</span> <span class="count" id="taughtCount"></span></summary>
+        <div id="taughtList"></div>
+        <p class="minor" data-t="taught.note">Only on this phone. Included in the backup.</p>
       </details>
 
       <h3 data-t="set.title">Settings</h3>
