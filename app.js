@@ -2055,6 +2055,8 @@
   let collect = null, partsList = [], camStream = null, camMode = 'photo', sweep = null, camOpen = false, camFromPhoto = false;
   const camUiOn = () => !$('photoCam').hidden;
   const MAX_PARTS = 8;
+  const setProg = f => { const b = $('readBar'); b.hidden = f == null; if (f != null) b.value = Math.round(Math.max(0, Math.min(1, f)) * 100); };
+  let readingIdx = -1;   // v2.18.3: while several photos are read: which one is being read now
 
   function setCamUi(on, keepBar) {
     $('photoCam').hidden = !on;
@@ -2065,7 +2067,7 @@
   }
   function renderParts() {
     const th = $('thumbs'), prev = prevPart && prevPart.text ? LCDB.splitIngredients(prevPart.text).length : 0;
-    th.replaceChildren(...partsList.map((p, i) => el('div', { class: 'tn' },
+    th.replaceChildren(...partsList.map((p, i) => el('div', { class: 'tn' + (readingIdx >= 0 ? (i === readingIdx ? ' now' : i < readingIdx ? ' done' : '') : '') },
       el('img', { src: p.url, alt: t('parts.photo', { n: i + 1 }) }),
       el('s', { text: String(i + 1) }),
       el('button', { type: 'button', class: 'tx', 'aria-label': t('parts.remove', { n: i + 1 }), text: '✕', onclick: () => { URL.revokeObjectURL(p.url); partsList.splice(i, 1); renderParts(); } }))));
@@ -2291,14 +2293,21 @@
     setCamUi(false, true);
     $('photoStart').hidden = true;
     collect = [];
+    const pc = $('photoCam'), lp = $('labelPanel');
+    if (files.length > 1) {                                       // v2.18.3: stay on one screen: the small pictures show which one is read now
+      pc.hidden = false; pc.classList.add('nolive', 'reading'); lp.classList.add('reading');
+    }
     try {
       for (let i = 0; i < files.length; i++) {
+        readingIdx = files.length > 1 ? i : -1; if (files.length > 1) { renderParts(); setProg(i / files.length); }
         partTag = files.length > 1 ? ' · ' + t('parts.of', { i: i + 1, n: files.length }) : '';
         loadPhoto(files[i]);
         if (findTask) await findTask;
+        if (files.length > 1) setProg((i + 0.45) / files.length);
         await onOcrRead();
+        if (files.length > 1) setProg((i + 1) / files.length);
       }
-    } finally { partTag = ''; }
+    } finally { partTag = ''; readingIdx = -1; setProg(null); pc.hidden = true; pc.classList.remove('reading'); lp.classList.remove('reading'); }
     const got = collect; collect = null;
     // frames that are too blurry (a sweep) add only junk: keep reads with confidence 50+ and some text
     const keep = got.filter(x => x.conf >= 50 && x.text.replace(/[^\p{L}]/gu, '').length >= 15);
@@ -2335,7 +2344,7 @@
     renderOcrLang();
     ocrStatus('');
     $('ocrArea').hidden = false;
-    $('ocrArea').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (!collect) $('ocrArea').scrollIntoView({ behavior: 'smooth', block: 'start' });   // v2.19: not while several photos are read (the screen must not move)
     findTask = findList(file).catch(() => null);
   }
 

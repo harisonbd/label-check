@@ -433,7 +433,7 @@ with sync_playwright() as p:
     ctx, pg = new_page(b, base, 'bg-BG')
     pg.click('#cardLabel')
     pg.set_input_files('#photoPick', photo)
-    ok(pg.inner_text('#ocrRead') == 'Провери' and pg.is_hidden('#textFold') and pg.is_visible('#oneNote') and pg.input_value('#ocrLang') == 'auto' and pg.inner_text('#ocrLang option[value=auto]') == 'Авто', 'BG: button text + label language "Авто" by default (v2.8)')
+    ok(pg.inner_text('#ocrRead') == 'Провери' and pg.is_hidden('#textFold') and pg.is_hidden('#oneNote') and pg.input_value('#ocrLang') == 'auto' and pg.inner_text('#ocrLang option[value=auto]') == 'Авто', 'BG: button text + label language "Авто" by default (v2.8)')
     ok(pg.eval_on_selector_all('#ocrLang option', 'o => o.map(x => x.textContent)')[1:] == ['EN', 'DE', 'BG', 'HU', 'CZ', 'SK', 'SL'], 'v2.8: menu has EN DE BG HU CZ SK SL')
     pg.select_option('#ocrLang', 'deu')
     pg.reload(); pg.evaluate('LC.dbReady'); pg.click('#cardLabel'); pg.set_input_files('#photoPick', photo)
@@ -479,7 +479,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.18.1' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.18.1" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.19' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.19" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -945,7 +945,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v26')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v29')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1021,6 +1021,8 @@ with sync_playwright() as p:
        'v2.16: two photos are joined (overlap removed, split word mended) (%s)' % j)
     pg.click('#cardLabel'); pg.set_input_files('#photoPick', photo); pg.wait_for_selector('#ocrArea:not([hidden])')
     pl = pg.evaluate("() => { const r = id => document.getElementById(id).getBoundingClientRect(); return { vh: innerHeight, check: r('checkBar').bottom, again: r('againRow').bottom, img: r('cropImg').bottom, title: getComputedStyle(document.getElementById('labelTitle')).display, nav: document.querySelector('nav') ? document.querySelector('nav').getBoundingClientRect().top : 0 } }")
+    pl2 = pg.evaluate("() => { const s = document.getElementById('ocrStatus'); s.hidden = false; s.textContent = 'Looking for the ingredient list… · photo 5 of 8'; const r = id => document.getElementById(id).getBoundingClientRect(); const o = { status: r('ocrStatus').bottom, checkTop: r('checkBar').top, doc: document.documentElement.scrollHeight - innerHeight }; s.hidden = true; return o }")
+    ok(pl2['status'] <= pl2['checkTop'] + 1, 'v2.18.2: while reading ("photo 5 of 8") the status line is above the Check bar, no scrolling needed (%s)' % pl2)
     ok(pl['title'] == 'none' and pl['again'] <= pl['vh'] and pl['check'] <= pl['vh'] and pl['img'] < pl['check'], 'v2.18: the photo screen (picture, box, Another photo, Check) fits one screen (%s)' % pl)
     ok(pg.is_visible('#secondPhoto') and 'round bottle' in pg.inner_text('#secondPhoto'), 'v2.16: "Add 2nd photo (round bottle)" next to "Another photo"')
     pg.evaluate("LC.showProduct({code:'label-x', kind:'food', source:'label', name:'x', ingredientsText:'Zutaten: Aqua', read:{photo:true, list:true}, texts:['Zutaten: Aqua'], tags:[], allergens:[], analysis:[], fetchedAt:Date.now()})")
@@ -1060,6 +1062,11 @@ with sync_playwright() as p:
     ok(pg.is_hidden('#photoCam') and pg.is_visible('#photoStart'), 'v2.17: "Close camera" goes back to the two photo cards')
     pg.set_input_files('#photoPick', [photo, photo]); pg.wait_for_timeout(500)
     ok(pg.locator('#thumbs .tn').count() == 2 and pg.is_hidden('#camVideo') and pg.is_visible('#checkBar'), 'v2.17: two photos chosen from the phone go to "Your photos" (no live view)')
+    pg.click('#ocrRead'); pg.wait_for_function("document.getElementById('labelPanel').classList.contains('reading')", timeout=60000)
+    rd = pg.evaluate("() => { const r = id => document.getElementById(id).getBoundingClientRect(); return { thumbs: document.querySelectorAll('#thumbs .tn').length, now: document.querySelectorAll('#thumbs .tn.now').length, cam: !document.getElementById('photoCam').hidden, x: document.querySelectorAll('#thumbs .tx').length && getComputedStyle(document.querySelector('#thumbs .tx')).display, checkBottom: r('checkBar').bottom, vh: innerHeight, again: getComputedStyle(document.getElementById('againRow')).display, bar: !document.getElementById('readBar').hidden, crop: getComputedStyle(document.getElementById('cropWrap')).display } }""")
+    ok(rd['thumbs'] == 2 and rd['now'] == 1 and rd['cam'] and rd['x'] == 'none' and rd['again'] == 'none' and rd['checkBottom'] <= rd['vh'] and rd['bar'] and rd['crop'] == 'none', 'v2.19: progress bar shows, the big picture is hidden, no jumping; v2.18.3: while several photos are read, the small pictures stay on the same screen (the one being read is marked, no ✕) (%s)' % rd)
+    pg.wait_for_selector('#result:not([hidden]) #answer', timeout=120000)
+    ok(pg.is_hidden('#photoCam') and not pg.evaluate("document.getElementById('labelPanel').classList.contains('reading')"), 'v2.18.3: after reading the small pictures are gone and the result shows')
     cctx.close(); bcam.close()
 
     # A real update: serve a copy of the app, change its sw.js (as a push does), ask the browser to check.
@@ -1079,16 +1086,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v26'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v29'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v26' not in keys: break
+        if 'label-check-v29' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v26' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v29' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
     b.close()

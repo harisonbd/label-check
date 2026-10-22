@@ -15,7 +15,7 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>Label Check <span class="ver">v2.18.1</span></h1>
+    <h1>Label Check <span class="ver">v2.19</span></h1>
     <button class="iconbtn topsearch" id="topSearch" type="button" data-t-aria="card.search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg></button>
     <div class="langsw" id="langSwitch" role="group" aria-label="Language">
       <button type="button" data-lang="en" lang="en" aria-pressed="false">EN</button>
@@ -127,6 +127,7 @@
             </div>
           </div>
           <p class="minor" id="oneNote" data-t="ocr.oneNote" hidden>Reads and checks in one step. The text is under "Fix the text" on the result.</p>
+          <progress class="readbar" id="readBar" max="100" value="0" hidden></progress>
           <p class="ocrstatus" id="ocrStatus" aria-live="polite" hidden></p>
         </div>
         <div id="checkBar" hidden>
