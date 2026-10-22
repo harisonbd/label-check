@@ -848,6 +848,8 @@
         el('button', { class: 'btn ' + (grey ? 'btn-primary' : 'btn-ghost'), id: 'againBtn', type: 'button', onclick: () => openLabel(p) },
           icon(ICON.again), el('span', { text: t(p.source === 'label' ? 'btn.again' : 'btn.photoLabel') }))),
       el('button', { class: 'btn ' + (grey ? 'btn-ghost' : 'btn-primary') + ' nextwide', id: 'nextBtn', type: 'button', text: t('btn.nextProduct'), onclick: scanNext }),
+      grey && a.verdict !== 'unknown' && p.read && p.read.photo ? el('button', { class: 'btn btn-ghost nextwide', id: 'secondBtn', type: 'button', onclick: () => secondPhoto(p) },
+        icon(ICON.again), el('span', { text: t('btn.second') })) : null,
       p.source === 'label' && isBarcode(p.code)
         ? el('button', { class: 'btn btn-ghost nextwide', type: 'button', text: t('btn.lookupOnline'), onclick: () => lookup(p.code, true) })
         : null,
@@ -1871,7 +1873,7 @@
     if (!history.state || history.state.view !== 'label') pushState({ tab: 'scan', view: 'label' });
     const panel = $('labelPanel');
     $('labelText').value = '';
-    lastRead = null;
+    lastRead = null; prevPart = null; joinNext = false;
     setPhotoMode(false);
     renderFixes();
     ocrFile = null;
@@ -1966,6 +1968,34 @@
   const OCR_LOW = 60;   // reader confidence below this: read again with the other alphabet
   const OCR_BAD = 50;   // below this: orange line instead of "Done" (wrong alphabet gave 31–48, good reads 75–95)
   let ocrFile = null, ocrWorker = null, ocrSeq = 0, ocrBusy = false, claudeNext = false;
+  // v2.16: a round bottle needs two photos. prevPart = { text, list } of the first photo; the second read is joined to it.
+  let prevPart = null, joinNext = false;
+  function joinParts(a, b) {
+    const norm = w => w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+    const A = String(a || '').trim().split(/\s+/).filter(Boolean), B = String(b || '').trim().split(/\s+/).filter(Boolean);
+    if (!A.length || !B.length) return [...A, ...B].join(' ');
+    const na = A.map(norm), nb = B.map(norm);
+    for (let k = Math.min(14, A.length, B.length); k >= 2; k--) {      // the same words twice: the photos overlap
+      let same = true;
+      for (let i = 0; i < k; i++) if (na[A.length - k + i] !== nb[i] || !nb[i]) { same = false; break; }
+      if (same) return [...A.slice(0, A.length - k), ...B].join(' ');   // keep the later read of the shared words (it has the commas)
+    }
+    const last = A[A.length - 1];
+    if (/-$/.test(last) && /^\p{Ll}/u.test(B[0])) { A[A.length - 1] = last.slice(0, -1) + B[0]; return [...A, ...B.slice(1)].join(' '); }   // split word
+    if (!/[,;.:]$/.test(last)) A[A.length - 1] = last + ',';
+    return [...A, ...B].join(' ');
+  }
+  function secondPhoto(p) {                    // from the result card or the Check bar: take a second photo of the same list
+    if (p) {
+      openLabel(p);
+      $('labelText').value = p.ingredientsText || '';
+      prevPart = { text: p.ingredientsText || '', list: !!(p.read && p.read.list) };
+    } else {
+      prevPart = { text: $('labelText').value.trim(), list: !!(lastRead && lastRead.list) };
+    }
+    joinNext = true;
+    $('photoInput').click();
+  }
   let lastRead = null;   // v2.13: { photo: true, list: heading found } for the text now in the box (null after typing)
   const ocrWait = {};
   const crop = { x: 0.06, y: 0.3, w: 0.88, h: 0.4 };   // part of the photo, 0..1
@@ -2015,6 +2045,7 @@
   function loadPhoto(file) {
     ocrFile = file;
     lastRead = null;
+    if (joinNext && prevPart && prevPart.text) joinNext = false; else { joinNext = false; prevPart = null; }
     setPhotoMode(true);
     if (claudeNext) { claudeNext = false; shareToClaude(file); }
     const img = $('cropImg');
@@ -2058,7 +2089,10 @@
       words: p.words,
       lines: [...p.lines.values()],
       text: [...p.lines.values()].map(ws => ws.map(w => w.t).join(' ')).join('\n'),
-      head: p.words.some(w => isListHead(w.t)),
+      // v2.16: the word counts as a heading only at the start of a line, with a colon, or in capitals – not inside a
+      // sentence ("No active ingredients Chlorhexidine …")
+      head: [...p.lines.values()].some(ws => ws.some((w, i) => isListHead(w.t) &&
+        (i <= 1 || /[:：]/.test(w.t) || (ws[i + 1] && /^[:：]/.test(ws[i + 1].t)) || (w.t === w.t.toUpperCase() && /\p{L}{4}/u.test(w.t))))),
       box: [Math.min(...p.words.map(w => w.x)), Math.min(...p.words.map(w => w.y)), Math.max(...p.words.map(w => w.x + w.w)), Math.max(...p.words.map(w => w.y + w.h))]
     }));
   }
@@ -2074,7 +2108,7 @@
       if (!/\p{L}{3}/u.test(tx)) continue;                 // lines, icons, noise
       if (done) { if (LCDB.labelSegments(tx).traceFrom === 1) out.push(pieces[i]); break; }
       out.push(pieces[i]);
-      if (/[.!]["'”)]*\s*$/.test(tx)) done = true;
+      if (/[.!]["'”)]*\s*$/.test(tx) && tx.replace(/[^\p{L}]/gu, '').length > 25) done = true;   // v2.16: a heading alone ("Bestandteile.") does not end the list
     }
     return out;
   }
@@ -2145,6 +2179,16 @@
       if (file !== ocrFile) return null;
       list = listPieces(pieces);
       if (list) break;
+    }
+    // v2.16: no heading at 1200 px (small print): read the photo once more, bigger
+    if (!list) {
+      try {
+        const big = await photoPng(bmp, 2000, false);
+        if (file !== ocrFile) { if (bmp.close) bmp.close(); return null; }
+        const p2 = tsvPieces((await ocrRun(big.png.slice(), langs[0], { layout: true })).tsv), l2 = listPieces(p2);
+        if (l2) { pieces = p2; list = l2; W = big.W; H = big.H; }
+      } catch (e) { /* keep: not found */ }
+      if (file !== ocrFile) { if (bmp.close) bmp.close(); return null; }
     }
     if (bmp.close) bmp.close();
     nameHint = nameFromPieces(pieces, list || []);
@@ -2348,9 +2392,15 @@
       }
       if (auto) { store.set('ocrLast', used); if (used !== 'bul') store.set('ocrLastLatin', used); }
       const fromList = listFromPieces(tsvPieces(r.tsv));
-      const text = cleanOcr(fromList || r.text);
+      let text = cleanOcr(fromList || r.text);
       // The list was found when the read text has its heading (in the read box, or as "Zutaten:" in the text)
       lastRead = { photo: true, list: !!fromList || new RegExp(HEAD_RE.source, 'iu').test(r.text) };
+      if (prevPart) {                                                   // v2.16: second photo: join with the first
+        text = joinParts(prevPart.text, text);
+        lastRead.list = lastRead.list || prevPart.list;
+        lastRead.photos = 2;
+        prevPart = null;
+      }
       const secs = ((performance.now() - t0) / 1000).toFixed(1).replace('.', LANG === 'en' ? '.' : ',');
       let good = false;
       if (text.replace(/[^\p{L}]/gu, '').length < 12 || r.conf < OCR_BAD) {
@@ -2879,6 +2929,7 @@
     $('codeLink').addEventListener('click', () => showCodeForm(true));
     $('codeClose').addEventListener('click', closeCodeForm);
     $('againPhoto').addEventListener('click', () => $('photoInput').click());
+    $('secondPhoto').addEventListener('click', () => secondPhoto(null));
     $('torchBtn').addEventListener('click', toggleTorch);
     document.querySelectorAll('#histFilter button').forEach(b => b.addEventListener('click', () => setHistFilter(b.dataset.f)));
     $('offGet').addEventListener('click', getOfflineReaders);
@@ -2896,7 +2947,7 @@
     $('ocrLang').addEventListener('change', e => store.set('ocrPick', e.target.value));
     document.querySelectorAll('input[name="kind"]').forEach(i => i.addEventListener('change', () => { kindTouched = true; $('kindNote').hidden = true; renderFixes(); }));
     $('labelText').addEventListener('input', () => {
-      lastRead = null;   // you typed or pasted: it is your text now
+      lastRead = null; prevPart = null;   // you typed or pasted: it is your text now
       clearTimeout(kindTimer); kindTimer = setTimeout(updateKindGuess, 400);
       clearTimeout(fixTimer); fixTimer = setTimeout(renderFixes, 700);
     });
@@ -3034,7 +3085,7 @@
 
   // Small test hook (used only by automated checks).
   window.LC = { analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
-    cleanOcr, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
+    cleanOcr, joinParts, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
 
   init();
 })();
