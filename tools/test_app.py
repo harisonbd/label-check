@@ -479,7 +479,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.16' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.16" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.17' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.17" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -945,7 +945,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v21')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v23')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1006,8 +1006,10 @@ with sync_playwright() as p:
       few: LC.analyze({ kind: 'cosmetic', ingredientsText: 'Ingredients: Aqua', read: { photo: true, list: true } }).verdict,
       cut: LC.analyze({ kind: 'cosmetic', ingredientsText: 'Ingredients: Aqua, Glycerin, Alcohol, Menthol, Limonene,', read: { photo: true, list: true } }).verdict,
       full: LC.analyze({ kind: 'cosmetic', ingredientsText: 'Ingredients: Aqua, Glycerin, Alcohol, Menthol, Limonene', read: { photo: true, list: true } }).verdict,
+      blur: LC.analyze({ kind: 'food', ingredientsText: 'Bestandteile: Vlpoly, lumsalz, Dinatriumsalz, Natriumchlorid, Wasser', read: { photo: true, list: true, conf: 58 } }).verdict,
+      sure: LC.analyze({ kind: 'food', ingredientsText: 'Bestandteile: Vlpoly, lumsalz, Dinatriumsalz, Natriumchlorid, Wasser', read: { photo: true, list: true, conf: 73 } }).verdict,
       typed: LC.analyze({ kind: 'cosmetic', ingredientsText: 'Ingredients: Aqua' }).verdict })""")
-    ok(v['few'] == 'partial' and v['cut'] == 'partial' and v['full'] != 'partial' and v['typed'] != 'partial', 'v2.15: photo read with 1 name or a cut end is grey, a full list is not, typed text is not (%s)' % v)
+    ok(v['few'] == 'partial' and v['cut'] == 'partial' and v['full'] != 'partial' and v['typed'] != 'partial' and v['blur'] == 'partial' and v['sure'] == 'ok', 'v2.16.1: read confidence under 66 is grey, 73 is not; v2.15: photo read with 1 name or a cut end is grey, a full list is not, typed text is not (%s)' % v)
     ctx.close()
 
     # v2.16: two photos of a round bottle: the second read is joined to the first
@@ -1023,6 +1025,30 @@ with sync_playwright() as p:
     pg.wait_for_selector('#result:not([hidden]) #answer')
     ok(pg.is_visible('#secondBtn') and 'Incomplete' in word(pg), 'v2.16: a grey photo result offers "Add 2nd photo" (%s)' % word(pg))
     ctx.close()
+
+    # ---------- v2.17: in-app camera, sweep, "Your photos" ----------
+    bcam = p.chromium.launch(args=['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'])
+    cctx = bcam.new_context(viewport={'width': 390, 'height': 844}, locale='en-GB', permissions=['camera'])
+    pg = cctx.new_page(); pg.on('pageerror', lambda e: errors.append(str(e)))
+    pg.goto(base); pg.evaluate('LC.dbReady')
+    pg.click('#cardLabel'); pg.click('#takePhoto'); pg.wait_for_selector('#camVideo', state='visible'); pg.wait_for_timeout(1200)
+    ok(pg.is_visible('#photoCam') and pg.is_visible('#shutter') and pg.is_visible('#modePhoto') and pg.is_visible('#modeSweep') and pg.is_hidden('#checkBar'), 'v2.17: "Take photo" opens the in-app camera (Photo / Sweep, big button, "Your photos", no Check bar before a photo)')
+    pg.click('#shutter'); pg.wait_for_timeout(700); pg.click('#shutter'); pg.wait_for_timeout(700)
+    ok(pg.locator('#thumbs .tn').count() == 2 and '2' in pg.inner_text('#partsHead') and pg.is_visible('#checkBar'), 'v2.17: two photos are kept and shown (small pictures 1, 2) and the Check bar appears')
+    pg.click('#thumbs .tn >> nth=0 >> .tx')
+    ok(pg.locator('#thumbs .tn').count() == 1, 'v2.17: the ✕ on a small picture removes that photo')
+    pg.click('#modeSweep'); pg.click('#shutter'); pg.wait_for_timeout(4200)
+    ok('Move slowly' in pg.inner_text('#camHint'), 'v2.17: sweep: "Move slowly over the list · N pictures"')
+    pg.click('#shutter'); pg.wait_for_timeout(1200)
+    ok(pg.locator('#thumbs .tn').count() >= 3 and pg.evaluate("!document.getElementById('shutter').classList.contains('stop')"), 'v2.17: sweep adds sharp pictures and stops (%d photos)' % pg.locator('#thumbs .tn').count())
+    ok(no_side_scroll(pg), 'v2.17: camera screen: no sideways scroll')
+    pg.go_back(); pg.wait_for_timeout(400)
+    ok(pg.is_hidden('#photoCam') and pg.is_visible('#photoStart') and pg.is_visible('#labelPanel') and pg.evaluate("!document.getElementById('camVideo').srcObject"), 'v2.17: phone Back closes the camera and switches it off')
+    pg.click('#takePhoto'); pg.wait_for_selector('#camVideo', state='visible'); pg.click('#camClose'); pg.wait_for_timeout(400)
+    ok(pg.is_hidden('#photoCam') and pg.is_visible('#photoStart'), 'v2.17: "Close camera" goes back to the two photo cards')
+    pg.set_input_files('#photoPick', [photo, photo]); pg.wait_for_timeout(500)
+    ok(pg.locator('#thumbs .tn').count() == 2 and pg.is_hidden('#camVideo') and pg.is_visible('#checkBar'), 'v2.17: two photos chosen from the phone go to "Your photos" (no live view)')
+    cctx.close(); bcam.close()
 
     # A real update: serve a copy of the app, change its sw.js (as a push does), ask the browser to check.
     import shutil, tempfile
@@ -1041,16 +1067,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v21'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v23'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v21' not in keys: break
+        if 'label-check-v23' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v21' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v23' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
     b.close()

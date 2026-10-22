@@ -250,7 +250,7 @@
     const noList = !!(p.read && p.read.photo && !p.read.list);
     // v2.15: a photo read is "No warnings" only with proof of a full list: at least 3 names and an end that is not cut off.
     const total = rows.filter(r => r.pos).length;
-    const weak = p.read && p.read.photo && !noList ? weakRead(text, total) : '';
+    const weak = p.read && p.read.photo && !noList ? weakRead(text, total, p.read.conf) : '';
     const verdict = counts.red ? 'avoid' : counts.orange ? 'check' : rows.length ? (partial || noList || weak ? 'partial' : 'ok') : 'unknown';
     return {
       verdict, rows, counts, known, unknown, noList, weak,
@@ -260,8 +260,11 @@
     };
   }
 
-  function weakRead(text, total) {
+  // v2.16: the reader's own confidence for the text. Good reads gave 73-95, garbled ones (Ketozolin) 50-63.
+  const READ_SURE = 66;
+  function weakRead(text, total, conf) {
     if (total < 3) return 'Few';
+    if (typeof conf === 'number' && conf < READ_SURE) return 'Blur';
     const tx = String(text || '').trim();
     const open = (tx.match(/[(\[]/g) || []).length > (tx.match(/[)\]]/g) || []).length;
     return open || /[,;(\[:\-–]$/.test(tx) ? 'Cut' : '';
@@ -1873,7 +1876,8 @@
     if (!history.state || history.state.view !== 'label') pushState({ tab: 'scan', view: 'label' });
     const panel = $('labelPanel');
     $('labelText').value = '';
-    lastRead = null; prevPart = null; joinNext = false;
+    lastRead = null; prevPart = null; joinNext = false; collect = null; camOpen = false; stopPhotoCam(); clearParts();
+    $('photoCam').hidden = true;
     setPhotoMode(false);
     renderFixes();
     ocrFile = null;
@@ -1985,17 +1989,17 @@
     if (!/[,;.:]$/.test(last)) A[A.length - 1] = last + ',';
     return [...A, ...B].join(' ');
   }
-  function secondPhoto(p) {                    // from the result card or the Check bar: take a second photo of the same list
+  function secondPhoto(p) {                    // from the result card or the Check bar: take more photos of the same list
     if (p) {
       openLabel(p);
       $('labelText').value = p.ingredientsText || '';
-      prevPart = { text: p.ingredientsText || '', list: !!(p.read && p.read.list) };
+      prevPart = { text: p.ingredientsText || '', list: !!(p.read && p.read.list), conf: p.read && p.read.conf };
     } else {
-      prevPart = { text: $('labelText').value.trim(), list: !!(lastRead && lastRead.list) };
+      prevPart = { text: $('labelText').value.trim(), list: !!(lastRead && lastRead.list), conf: lastRead && lastRead.conf };
     }
-    joinNext = true;
-    $('photoInput').click();
+    openCam(true);
   }
+
   let lastRead = null;   // v2.13: { photo: true, list: heading found } for the text now in the box (null after typing)
   const ocrWait = {};
   const crop = { x: 0.06, y: 0.3, w: 0.88, h: 0.4 };   // part of the photo, 0..1
@@ -2018,8 +2022,10 @@
     b.left = crop.x * 100 + '%'; b.top = crop.y * 100 + '%';
     b.width = crop.w * 100 + '%'; b.height = crop.h * 100 + '%';
   }
+  let partTag = '';     // v2.17: " · photo 2 of 3" while several photos are read
   function ocrStatus(text, cls) {
     const n = $('ocrStatus');
+    if (text && cls === 'busy') text += partTag;
     n.hidden = !text; n.textContent = text || ''; n.className = 'ocrstatus' + (cls ? ' ' + cls : '');
   }
 
@@ -2038,14 +2044,236 @@
   }
 
   function onPhoto(e) {
-    const file = e.target.files && e.target.files[0];
+    const files = [...(e.target.files || [])];
     e.target.value = '';
-    if (file) loadPhoto(file);
+    if (files.length > 1) { openCam(false, files); return; }   // v2.17: several photos chosen: they go to "Your photos"
+    if (files[0]) loadPhoto(files[0]);
+  }
+
+  // ---------- v2.17: in-app camera: photos (or a slow "sweep") are kept in "Your photos", then read together ----------
+  let collect = null, partsList = [], camStream = null, camMode = 'photo', sweep = null, camOpen = false, camFromPhoto = false;
+  const camUiOn = () => !$('photoCam').hidden;
+  const MAX_PARTS = 8;
+
+  function setCamUi(on, keepBar) {
+    $('photoCam').hidden = !on;
+    $('photoStart').hidden = on || !$('againRow').hidden;
+    if (on) { $('againRow').hidden = true; $('ocrArea').hidden = true; $('textFold').hidden = true; $('labelLead').hidden = true; }
+    $('checkBar').hidden = !(on ? partsList.length > 0 : keepBar);
+  }
+  function renderParts() {
+    const th = $('thumbs'), prev = prevPart && prevPart.text ? LCDB.splitIngredients(prevPart.text).length : 0;
+    th.replaceChildren(...partsList.map((p, i) => el('div', { class: 'tn', style: 'background-image:url(' + p.url + ')' },
+      el('s', { text: String(i + 1) }),
+      el('button', { type: 'button', class: 'tx', 'aria-label': t('parts.remove', { n: i + 1 }), text: '✕', onclick: () => { URL.revokeObjectURL(p.url); partsList.splice(i, 1); renderParts(); } }))));
+    $('partsHead').textContent = partsList.length ? tn('parts.head', partsList.length) : t('parts.none');
+    $('partsSum').textContent = [prev ? t('parts.kept', { n: prev }) : '', partsList.length ? t('parts.next') : t('parts.flat')].filter(Boolean).join(' · ');
+    $('checkBar').hidden = !(camUiOn() && partsList.length);
+    $('camHint').textContent = sweep ? t('cam.hint.sweep', { n: partsList.length }) : t(camMode === 'sweep' ? 'cam.hint.sweepStart' : 'cam.hint.photo');
+  }
+  function addPart(file) {
+    if (partsList.length >= MAX_PARTS) { toast(t('parts.max', { n: MAX_PARTS })); return false; }
+    partsList.push({ file, url: URL.createObjectURL(file) });
+    renderParts();
+    if (navigator.vibrate) { try { navigator.vibrate(40); } catch (e) { /* ignore */ } }
+    return true;
+  }
+  function clearParts() { partsList.forEach(p => URL.revokeObjectURL(p.url)); partsList = []; }
+
+  async function openCam(keep, files) {
+    if (!keep) { clearParts(); }
+    camOpen = true;
+    $('labelPanel').scrollIntoView({ behavior: 'auto', block: 'start' });
+    camFromPhoto = !$('againRow').hidden;                           // came from the photo screen: "Close camera" goes back there
+    setCamUi(true);
+    if (!(history.state && history.state.view === 'cam')) pushState({ tab: 'scan', view: 'cam' });
+    setCamMode('photo');
+    if (files && files.length) {                                  // photos chosen from the phone: no live view
+      $('camVideo').hidden = true; $('shutter').hidden = true; $('camModes').hidden = true; $('camWide').hidden = true;
+      $('photoCam').classList.add('nolive');
+      files.slice(0, MAX_PARTS).forEach(f => addPart(f));
+      return;
+    }
+    $('photoCam').classList.remove('nolive');
+    $('camVideo').hidden = false; $('shutter').hidden = false; $('camModes').hidden = false;
+    renderParts();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { closeCam(); $('photoInput').click(); return; }
+    try {
+      camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 4096 }, height: { ideal: 2160 } }, audio: false });
+    } catch (e) {
+      closeCam(true);
+      toast(e && e.name === 'NotAllowedError' ? t('toast.camBlocked') : t('toast.camFail'));
+      return;
+    }
+    if (!camOpen) { stopPhotoCam(); return; }
+    const v = $('camVideo');
+    v.srcObject = camStream;
+    try { await v.play(); } catch (e) { /* muted video may play */ }
+    try {                                                           // sharp pictures: keep focusing; wide lens when the phone allows it
+      const tr = camStream.getVideoTracks()[0], caps = tr.getCapabilities ? tr.getCapabilities() : {};
+      if (caps.focusMode && caps.focusMode.includes('continuous')) await tr.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+      $('camWide').hidden = !(caps.zoom && caps.zoom.min < 1);
+      $('camWide').dataset.min = caps.zoom ? caps.zoom.min : 1;
+    } catch (e) { $('camWide').hidden = true; }
+  }
+  function setCamMode(m) {
+    camMode = m;
+    $('modePhoto').setAttribute('aria-pressed', String(m === 'photo'));
+    $('modeSweep').setAttribute('aria-pressed', String(m === 'sweep'));
+    $('shutter').classList.toggle('sweep', m === 'sweep');
+    renderParts();
+  }
+  function stopPhotoCam() {
+    if (sweep) { clearInterval(sweep.timer); if (sweep.best && sweep.best.bmp.close) sweep.best.bmp.close(); sweep = null; $('shutter').classList.remove('stop'); }
+    if (camStream) camStream.getTracks().forEach(x => x.stop());
+    camStream = null;
+    const v = $('camVideo'); v.srcObject = null;
+  }
+  function closeCam(noBack) {                                        // leave the camera screen (parts stay if you come back from Check)
+    camOpen = false;
+    stopPhotoCam();
+    if (!camUiOn()) return;
+    clearParts();
+    setCamUi(false);
+    if (camFromPhoto) { setPhotoMode(true); $('ocrArea').hidden = false; }
+    else { $('photoStart').hidden = false; $('textFold').hidden = false; $('labelLead').hidden = false; $('againRow').hidden = true; $('checkBar').hidden = true; }
+    if (!noBack && history.state && history.state.view === 'cam') { try { history.back(); } catch (e) { /* ignore */ } }
+  }
+
+  async function still() {
+    const v = $('camVideo'), tr = camStream && camStream.getVideoTracks()[0];
+    if (window.ImageCapture && tr) {
+      try { const blob = await new ImageCapture(tr).takePhoto(); if (blob && blob.size > 1000) return blob; } catch (e) { /* use the video frame */ }
+    }
+    const cv = document.createElement('canvas'); cv.width = v.videoWidth; cv.height = v.videoHeight;
+    cv.getContext('2d').drawImage(v, 0, 0);
+    return new Promise(res => cv.toBlob(res, 'image/jpeg', 0.92));
+  }
+  async function onShutter() {
+    if (!camStream) return;
+    if (camMode === 'photo') {
+      const blob = await still();
+      if (blob) addPart(new File([blob], 'part' + (partsList.length + 1) + '.jpg', { type: 'image/jpeg' }));
+      return;
+    }
+    if (sweep) { endSweep(); return; }
+    startSweep();
+  }
+
+  // Sweep: every 0.4 s a small copy of the video is scored for sharpness (variance of the Laplacian); in each 1.6 s window the
+  // sharpest frame is kept. They become "Your photos" (at most 8).
+  function sharpness(v) {
+    const W = 240, H = Math.max(2, Math.round(240 * v.videoHeight / v.videoWidth));
+    const cv = sharpness.cv || (sharpness.cv = document.createElement('canvas')); cv.width = W; cv.height = H;
+    const cx = cv.getContext('2d', { willReadFrequently: true }); cx.drawImage(v, 0, 0, W, H);
+    const d = cx.getImageData(0, 0, W, H).data, g = new Float32Array(W * H);
+    for (let i = 0, j = 0; i < g.length; i++, j += 4) g[i] = d[j] * 0.299 + d[j + 1] * 0.587 + d[j + 2] * 0.114;
+    let sum = 0, sum2 = 0, n = 0;
+    for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+      const k = y * W + x, l = 4 * g[k] - g[k - 1] - g[k + 1] - g[k - W] - g[k + W];
+      sum += l; sum2 += l * l; n++;
+    }
+    return sum2 / n - (sum / n) * (sum / n);
+  }
+  function startSweep() {
+    if (partsList.length >= MAX_PARTS) { toast(t('parts.max', { n: MAX_PARTS })); return; }
+    const v = $('camVideo');
+    sweep = { best: null, tick: 0 };
+    $('shutter').classList.add('stop');
+    renderParts();
+    sweep.timer = setInterval(async () => {
+      if (!sweep || v.readyState < 2) return;
+      sweep.tick++;
+      try {
+        const sc = sharpness(v);
+        if (!sweep.best || sc > sweep.best.sc) {
+          const bmp = await createImageBitmap(v);
+          if (sweep.best && sweep.best.bmp.close) sweep.best.bmp.close();
+          sweep.best = { bmp, sc };
+        }
+      } catch (e) { /* skip this frame */ }
+      if (sweep && sweep.tick % 4 === 0) await flushSweep();
+    }, 400);
+  }
+  async function flushSweep() {
+    const sw = sweep, b = sw && sw.best;
+    if (!b) return;
+    sw.best = null;
+    const cv = document.createElement('canvas'); cv.width = b.bmp.width; cv.height = b.bmp.height;
+    cv.getContext('2d').drawImage(b.bmp, 0, 0); if (b.bmp.close) b.bmp.close();
+    const blob = await new Promise(res => cv.toBlob(res, 'image/jpeg', 0.92));
+    if (blob) addPart(new File([blob], 'sweep' + (partsList.length + 1) + '.jpg', { type: 'image/jpeg' }));
+    if (partsList.length >= MAX_PARTS) endSweep(true);
+  }
+  async function endSweep(already) {
+    if (!sweep) return;
+    if (!already) await flushSweep();
+    if (sweep) clearInterval(sweep.timer);
+    sweep = null;
+    $('shutter').classList.remove('stop');
+    renderParts();
+  }
+  function initCam() {
+    $('takePhoto').addEventListener('click', () => openCam());
+    $('shutter').addEventListener('click', onShutter);
+    $('modePhoto').addEventListener('click', () => { if (!sweep) setCamMode('photo'); });
+    $('modeSweep').addEventListener('click', () => { if (!sweep) setCamMode('sweep'); });
+    $('camClose').addEventListener('click', () => (history.state && history.state.view === 'cam' ? history.back() : closeCam(true)));
+    $('camWide').addEventListener('click', async () => {
+      const tr = camStream && camStream.getVideoTracks()[0], b = $('camWide'), on = b.getAttribute('aria-pressed') !== 'true';
+      try { await tr.applyConstraints({ advanced: [{ zoom: on ? +b.dataset.min : 1 }] }); b.setAttribute('aria-pressed', String(on)); } catch (e) { /* not possible */ }
+    });
+  }
+
+  // Read every photo (the box finds the list on each), join the texts, check once.
+  function dedupeNames(text) {
+    const seen = new Set();
+    return String(text).split(/(?<=[,;])\s*/).filter(seg => {
+      const k = seg.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+      if (k.length < 4) return true;
+      if (seen.has(k)) return false;
+      seen.add(k); return true;
+    }).join(' ');
+  }
+  async function readParts() {
+    if (!partsList.length || ocrBusy) return;
+    const files = partsList.map(p => p.file), base = prevPart;
+    prevPart = null;
+    camOpen = false; stopPhotoCam();
+    setCamUi(false, true);
+    $('photoStart').hidden = true;
+    collect = [];
+    try {
+      for (let i = 0; i < files.length; i++) {
+        partTag = files.length > 1 ? ' · ' + t('parts.of', { i: i + 1, n: files.length }) : '';
+        loadPhoto(files[i]);
+        if (findTask) await findTask;
+        await onOcrRead();
+      }
+    } finally { partTag = ''; }
+    const got = collect; collect = null;
+    // frames that are too blurry (a sweep) add only junk: keep reads with confidence 50+ and some text
+    const keep = got.filter(x => x.conf >= 50 && x.text.replace(/[^\p{L}]/gu, '').length >= 15);
+    const use = keep.length ? keep : got;
+    let text = base && base.text ? base.text : '';
+    for (const x of use) text = text ? joinParts(text, x.text) : x.text;
+    if (use.length + (base && base.text ? 1 : 0) > 1) text = dedupeNames(text);
+    const confs = use.map(x => x.conf).concat(base && typeof base.conf === 'number' ? [base.conf] : []);
+    lastRead = { photo: true, list: use.some(x => x.list) || !!(base && base.list), conf: confs.length ? Math.round(Math.min(...confs)) : undefined, photos: files.length + (base && base.text ? 1 : 0) };
+    clearParts();
+    setPhotoMode(true);
+    $('labelText').value = text;
+    updateKindGuess();
+    renderFixes();
+    if (text.replace(/[^\p{L}]/gu, '').length < 12) { ocrStatus(t('ocr.little'), 'warn'); setPhotoMode(true, true); return; }
+    ocrStatus('');
+    buzzNext = true;
+    onCheckLabel();
   }
   function loadPhoto(file) {
     ocrFile = file;
     lastRead = null;
-    if (joinNext && prevPart && prevPart.text) joinNext = false; else { joinNext = false; prevPart = null; }
+    if (collect) { /* several photos: readParts joins them */ } else if (joinNext && prevPart && prevPart.text) joinNext = false; else { joinNext = false; prevPart = null; }
     setPhotoMode(true);
     if (claudeNext) { claudeNext = false; shareToClaude(file); }
     const img = $('cropImg');
@@ -2394,11 +2622,16 @@
       const fromList = listFromPieces(tsvPieces(r.tsv));
       let text = cleanOcr(fromList || r.text);
       // The list was found when the read text has its heading (in the read box, or as "Zutaten:" in the text)
-      lastRead = { photo: true, list: !!fromList || new RegExp(HEAD_RE.source, 'iu').test(r.text) };
+      lastRead = { photo: true, list: !!fromList || new RegExp(HEAD_RE.source, 'iu').test(r.text), conf: Math.round(r.conf) };
+      if (collect) {                                                    // v2.17: one of several photos: keep the text, check later
+        collect.push({ text, conf: r.conf, list: lastRead.list });
+        return;
+      }
       if (prevPart) {                                                   // v2.16: second photo: join with the first
         text = joinParts(prevPart.text, text);
         lastRead.list = lastRead.list || prevPart.list;
         lastRead.photos = 2;
+        if (typeof prevPart.conf === 'number') lastRead.conf = Math.min(lastRead.conf, prevPart.conf);
         prevPart = null;
       }
       const secs = ((performance.now() - t0) / 1000).toFixed(1).replace('.', LANG === 'en' ? '.' : ',');
@@ -2563,6 +2796,7 @@
   }
 
   function stopCamera() {
+    if (camOpen || camStream) closeCam(true);
     clearTimeout(scanTimer);
     if (stream) stream.getTracks().forEach(tr2 => tr2.stop());
     stream = null;
@@ -2896,8 +3130,9 @@
       if (!st.pick) pickFor = null;
       showPanel('searchPanel');
       renderSearch();
-    } else if (st.view === 'label') {
+    } else if (st.view === 'label' || st.view === 'cam') {
       showPanel('labelPanel');
+      if (st.view === 'label' && camUiOn()) closeCam(true);
     } else if ($('scanner').hidden) {
       showScanner();
     }
@@ -2928,8 +3163,9 @@
     $('topSearch').addEventListener('click', () => { stopCamera(); if (currentTab !== 'scan') go('scan'); openSearch(); });
     $('codeLink').addEventListener('click', () => showCodeForm(true));
     $('codeClose').addEventListener('click', closeCodeForm);
-    $('againPhoto').addEventListener('click', () => $('photoInput').click());
+    $('againPhoto').addEventListener('click', () => { prevPart = null; openCam(); });
     $('secondPhoto').addEventListener('click', () => secondPhoto(null));
+    initCam();
     $('torchBtn').addEventListener('click', toggleTorch);
     document.querySelectorAll('#histFilter button').forEach(b => b.addEventListener('click', () => setHistFilter(b.dataset.f)));
     $('offGet').addEventListener('click', getOfflineReaders);
@@ -2943,7 +3179,7 @@
     });
     $('photoInput').addEventListener('change', onPhoto);
     $('photoPick').addEventListener('change', onPhoto);
-    $('ocrRead').addEventListener('click', onOcrRead);
+    $('ocrRead').addEventListener('click', () => (partsList.length && camUiOn() ? readParts() : onOcrRead()));
     $('ocrLang').addEventListener('change', e => store.set('ocrPick', e.target.value));
     document.querySelectorAll('input[name="kind"]').forEach(i => i.addEventListener('change', () => { kindTouched = true; $('kindNote').hidden = true; renderFixes(); }));
     $('labelText').addEventListener('input', () => {
@@ -3085,7 +3321,7 @@
 
   // Small test hook (used only by automated checks).
   window.LC = { analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
-    cleanOcr, joinParts, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
+    cleanOcr, joinParts, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
 
   init();
 })();

@@ -15,7 +15,7 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>Label Check <span class="ver">v2.16</span></h1>
+    <h1>Label Check <span class="ver">v2.17</span></h1>
     <button class="iconbtn topsearch" id="topSearch" type="button" data-t-aria="card.search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg></button>
     <div class="langsw" id="langSwitch" role="group" aria-label="Language">
       <button type="button" data-lang="en" lang="en" aria-pressed="false">EN</button>
@@ -86,15 +86,34 @@
         <p class="lead" id="labelLead"></p>
         <div id="photoStart">
           <div class="photocards">
-            <label class="scard primary filebtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.5-2h6l1.5 2h2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="13" r="3.5"/></svg><strong data-t="lbl.take">Take photo</strong>
-              <input type="file" id="photoInput" accept="image/*" capture="environment" hidden></label>
+            <button class="scard primary" id="takePhoto" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.5-2h6l1.5 2h2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="13" r="3.5"/></svg><strong data-t="lbl.take">Take photo</strong></button>
             <label class="scard filebtn"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="M5 18l5-5 3 3 2-2 4 4"/></svg><strong data-t="lbl.choose">Choose photo</strong>
-              <input type="file" id="photoPick" accept="image/*" hidden></label>
+              <input type="file" id="photoPick" accept="image/*" multiple hidden></label>
+            <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
           </div>
           <p class="photonote" id="photoTip"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg><span data-t="label.tip">Tip: take the photo close, with only the ingredient list in it.</span></p>
         </div>
         <p class="againrow" id="againRow" hidden><button class="linkbtn" id="againPhoto" type="button" data-t="lbl.again">Another photo</button> <span class="dot" aria-hidden="true">·</span> <button class="linkbtn" id="secondPhoto" type="button" data-t="lbl.second">Add 2nd photo (round bottle)</button></p>
 
+        <section id="photoCam" hidden>
+          <div class="camview">
+            <video id="camVideo" playsinline muted></video>
+            <div class="camguide" aria-hidden="true"></div>
+            <p class="camhint" id="camHint"></p>
+            <button class="camwide" id="camWide" type="button" hidden data-t="cam.wide">Wide</button>
+          </div>
+          <div class="camseg" id="camModes" role="group">
+            <button type="button" id="modePhoto" aria-pressed="true" data-t="cam.photo">Photo</button>
+            <button type="button" id="modeSweep" aria-pressed="false" data-t="cam.sweep">Sweep</button>
+          </div>
+          <button class="shutter" id="shutter" type="button" data-t-aria="cam.shutter"><i></i></button>
+          <div class="parts" id="parts">
+            <h4 id="partsHead"></h4>
+            <div class="th" id="thumbs"></div>
+            <p class="sum" id="partsSum"></p>
+          </div>
+          <p class="againrow"><button class="linkbtn" id="camClose" type="button" data-t="cam.close">Close camera</button></p>
+        </section>
         <div id="ocrArea" hidden>
           <p class="minor" data-t="ocr.mark">Move the box over the ingredient list.</p>
           <div class="cropwrap" id="cropWrap">
@@ -105,15 +124,15 @@
           </div>
           <p class="minor" id="oneNote" data-t="ocr.oneNote" hidden>Reads and checks in one step. The text is under "Fix the text" on the result.</p>
           <p class="ocrstatus" id="ocrStatus" aria-live="polite" hidden></p>
-          <div id="checkBar" hidden>
-          <div class="ocrlang">
-            <label for="ocrLang" data-t="ocr.lang">Label language</label>
-            <select id="ocrLang" class="ocrsel">
-              <option value="auto" data-t="ocr.auto">Auto</option><option value="eng">EN</option><option value="deu">DE</option><option value="bul">BG</option><option value="hun">HU</option><option value="ces">CZ</option><option value="slk">SK</option><option value="slv">SL</option>
-            </select>
-          </div>
-          <button class="btn btn-primary wide" id="ocrRead" type="button" data-t="ocr.read">Check</button>
-          </div>
+        </div>
+        <div id="checkBar" hidden>
+        <div class="ocrlang">
+          <label for="ocrLang" data-t="ocr.lang">Label language</label>
+          <select id="ocrLang" class="ocrsel">
+            <option value="auto" data-t="ocr.auto">Auto</option><option value="eng">EN</option><option value="deu">DE</option><option value="bul">BG</option><option value="hun">HU</option><option value="ces">CZ</option><option value="slk">SK</option><option value="slv">SL</option>
+          </select>
+        </div>
+        <button class="btn btn-primary wide" id="ocrRead" type="button" data-t="ocr.read">Check</button>
         </div>
 
         <details class="textfold" id="textFold">
