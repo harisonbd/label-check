@@ -4,7 +4,18 @@ Needs: pip install playwright && playwright install chromium
 Starts a local web server, fakes the Open Food Facts answer, and checks the main screens.
 Screenshots go to tools/shots/ (not for GitHub)."""
 import json, os, sys, threading, http.server, functools
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, Page
+
+# v2.15: the text part of "Read a label" sits in a fold. Tests that type text open the fold first, as a person would.
+def _wrap(name):
+    orig = getattr(Page, name)
+    def f(self, sel, *a, **k):
+        if isinstance(sel, str) and (sel in ('#labelText', '#checkLabel', '#pasteBtn') or sel.startswith('input[name=kind]')) \
+                and self.evaluate("() => { const f = document.getElementById('textFold'); const l = document.getElementById('labelPanel'); return !!f && !l.hidden && !f.open; }"):
+            self.evaluate("() => { const f = document.getElementById('textFold'); f.hidden = false; f.open = true; }")
+        return orig(self, sel, *a, **k)
+    setattr(Page, name, f)
+for _n in ('fill', 'check', 'click'): _wrap(_n)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHOTS = os.path.join(ROOT, 'tools', 'shots')
@@ -422,7 +433,7 @@ with sync_playwright() as p:
     ctx, pg = new_page(b, base, 'bg-BG')
     pg.click('#cardLabel')
     pg.set_input_files('#photoPick', photo)
-    ok(pg.inner_text('#ocrRead') == 'Провери' and pg.is_hidden('#textPart') and pg.is_visible('#oneNote') and pg.input_value('#ocrLang') == 'auto' and pg.inner_text('#ocrLang option[value=auto]') == 'Авто', 'BG: button text + label language "Авто" by default (v2.8)')
+    ok(pg.inner_text('#ocrRead') == 'Провери' and pg.is_hidden('#textFold') and pg.is_visible('#oneNote') and pg.input_value('#ocrLang') == 'auto' and pg.inner_text('#ocrLang option[value=auto]') == 'Авто', 'BG: button text + label language "Авто" by default (v2.8)')
     ok(pg.eval_on_selector_all('#ocrLang option', 'o => o.map(x => x.textContent)')[1:] == ['EN', 'DE', 'BG', 'HU', 'CZ', 'SK', 'SL'], 'v2.8: menu has EN DE BG HU CZ SK SL')
     pg.select_option('#ocrLang', 'deu')
     pg.reload(); pg.evaluate('LC.dbReady'); pg.click('#cardLabel'); pg.set_input_files('#photoPick', photo)
@@ -468,7 +479,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.14' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.14" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.15' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.15" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -845,7 +856,7 @@ with sync_playwright() as p:
     pg.click('.tabbar button[data-go=list]'); pg.click('#vibSwitch')
     ok(pg.evaluate("localStorage.getItem('lc.vibrate')") == 'false', 'vibration switch off is saved')
     # safety: a photo read without the list heading is never green
-    v = pg.evaluate("[LC.analyze({kind:'food', ingredientsText:'Zucker, Salz', read:{photo:true, list:false}}).verdict, LC.analyze({kind:'food', ingredientsText:'Zucker, Salz', read:{photo:true, list:true}}).verdict, LC.analyze({kind:'food', ingredientsText:'Zucker, Salz'}).verdict]")
+    v = pg.evaluate("[LC.analyze({kind:'food', ingredientsText:'Zucker, Salz, Hafer, Wasser', read:{photo:true, list:false}}).verdict, LC.analyze({kind:'food', ingredientsText:'Zucker, Salz, Hafer, Wasser', read:{photo:true, list:true}}).verdict, LC.analyze({kind:'food', ingredientsText:'Zucker, Salz, Hafer, Wasser'}).verdict]")
     ok(v == ['partial', 'ok', 'ok'], 'v2.13 safety: photo read without a list heading -> "Непълен резултат", with heading or typed text -> "Без предупреждения" (%s)' % v)
     pg.click('.tabbar button[data-go=scan]')
     pg.evaluate("LC.showProduct({code:'t-nolist', kind:'food', source:'label', ingredientsText:'Brennwert 0 kJ, Salz 0,02 g', texts:['Brennwert 0 kJ, Salz 0,02 g'], read:{photo:true, list:false}, tags:[], allergens:[], analysis:[]})")
@@ -856,8 +867,8 @@ with sync_playwright() as p:
     pg.click('.tabbar button[data-go=scan]')
     if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
     pg.click('#cardLabel')
-    ok(pg.inner_text('#photoTip') == 'Съвет: снимай отблизо, така че списъкът със съставки да запълва снимката.' and pg.is_visible('#textPart'),
-       'Read a label: close-up tip under the photo buttons; without a photo the text part is shown (paste)')
+    ok(pg.inner_text('#photoTip') == 'Снимай отблизо, само списъка със съставки.' and pg.is_visible('#textFold') and not pg.eval_on_selector('#textFold', 'd => d.open'),
+       'Read a label: close-up tip under the photo cards; the text part is a folded row (paste)')
     ctx.close()
     # EN and DE, light, 320 px
     for loc, lang, nd, pick in [('en-GB', 'en', 'No data', 'Choose the ingredient…'), ('de-DE', 'de', 'Keine Daten', 'Zutat auswählen…')]:
@@ -934,7 +945,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v19')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v20')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -962,6 +973,43 @@ with sync_playwright() as p:
     ok(pg.is_visible('#labelPanel') and pg.is_visible('#ocrArea') and not pg.evaluate("caches.has('lc-share')"), 'shared photo opens "Read a label" with the photo (and is then removed)')
     ok(pg.is_hidden('#updBar'), 'no "new version" line before an update')
     ctx.close()
+    # ---------- v2.15 ----------
+    ctx, pg = new_page(b, base, 'en-GB')
+    pg.click('#cardLabel')
+    ok(pg.locator('#photoStart .scard').count() == 2 and pg.is_visible('#photoTip') and pg.is_visible('#textFold') and pg.is_hidden('#checkBar') and pg.is_hidden('#againRow'),
+       'v2.15: Read a label before a photo: two photo cards, short tip, folded "Type or paste" row')
+    pg.set_input_files('#photoPick', photo); pg.wait_for_selector('#ocrArea:not([hidden])')
+    ok(pg.is_hidden('#photoStart') and pg.is_hidden('#textFold') and pg.is_visible('#againRow') and pg.is_visible('#checkBar'), 'v2.15: after the photo the top part folds away; "Another photo" and the Check bar show')
+    pg.evaluate('window.scrollTo(0, 0)'); pg.wait_for_timeout(200)
+    bb = pg.locator('#checkBar').bounding_box()
+    ok(bb and bb['y'] + bb['height'] <= 844 - 60 and bb['y'] > 300, 'v2.15: the Check bar is in view above the tab bar without scrolling (y=%s)' % (bb and round(bb['y'] + bb['height'])))
+    ok(no_side_scroll(pg), 'v2.15: no sideways scroll with the Check bar')
+    ctx.close()
+
+    ctx, pg = new_page(b, base, 'en-GB')
+    pg.click('#codeLink')
+    ok(pg.is_visible('#manualForm') and pg.is_visible('#codeClose'), 'v2.15: barcode number box has a close button')
+    pg.click('#codeClose')
+    ok(pg.is_hidden('#manualForm') and pg.is_visible('#codeLink') and pg.evaluate('history.state && history.state.view') != 'code', 'v2.15: the close button closes the box and the link is back')
+    pg.click('#codeLink'); pg.go_back(); pg.wait_for_timeout(300)
+    ok(pg.is_hidden('#manualForm') and pg.is_visible('#codeLink') and pg.is_visible('#cardLabel'), 'v2.15: phone Back closes the barcode box (stays in the app)')
+    ctx.close()
+
+    ctx, pg = new_page(b, base, 'en-GB')
+    read_label(pg, SHOWER, 'cosmetic', 'Shower gel')
+    ok('14 read' in pg.inner_text('#endsLine') and pg.inner_text('#endsLine').startswith('#1 ') and 'Methylpropional' in pg.inner_text('#endsLine'), 'v2.15: under the strip: first name, "14 read", last name (%s)' % pg.inner_text('#endsLine').replace('\n', ' | '))
+    ok('Cosmetic' in pg.inner_text('#typeChip') and 'tap if wrong' in pg.inner_text('#typeChip'), 'v2.15: type chip "Cosmetic ▾ tap if wrong" on the card')
+    pg.click('#typeChip'); pg.click('#typeRow .seg:has-text("Food")'); pg.wait_for_selector('#typeChip')
+    ok(pg.evaluate('LC.state.current.p.kind') == 'food' and 'Food' in pg.inner_text('#typeChip'), 'v2.15: choosing another type checks the product again as that type')
+    # F1: a photo read with too few names or a cut end is never "No warnings"
+    v = pg.evaluate("""() => ({
+      few: LC.analyze({ kind: 'cosmetic', ingredientsText: 'Ingredients: Aqua', read: { photo: true, list: true } }).verdict,
+      cut: LC.analyze({ kind: 'cosmetic', ingredientsText: 'Ingredients: Aqua, Glycerin, Alcohol, Menthol, Limonene,', read: { photo: true, list: true } }).verdict,
+      full: LC.analyze({ kind: 'cosmetic', ingredientsText: 'Ingredients: Aqua, Glycerin, Alcohol, Menthol, Limonene', read: { photo: true, list: true } }).verdict,
+      typed: LC.analyze({ kind: 'cosmetic', ingredientsText: 'Ingredients: Aqua' }).verdict })""")
+    ok(v['few'] == 'partial' and v['cut'] == 'partial' and v['full'] != 'partial' and v['typed'] != 'partial', 'v2.15: photo read with 1 name or a cut end is grey, a full list is not, typed text is not (%s)' % v)
+    ctx.close()
+
     # A real update: serve a copy of the app, change its sw.js (as a push does), ask the browser to check.
     import shutil, tempfile
     tmp = tempfile.mkdtemp()
@@ -979,16 +1027,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v19'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v20'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v19' not in keys: break
+        if 'label-check-v20' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v19' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v20' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
     b.close()

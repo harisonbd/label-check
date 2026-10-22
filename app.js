@@ -248,13 +248,23 @@
     // v2.13: text read from a photo where the app found no ingredients heading ("Zutaten:", "Съставки:" …) may be the
     // wrong text (a nutrition table, another language, no list at all). It is never shown as "No warnings".
     const noList = !!(p.read && p.read.photo && !p.read.list);
-    const verdict = counts.red ? 'avoid' : counts.orange ? 'check' : rows.length ? (partial || noList ? 'partial' : 'ok') : 'unknown';
+    // v2.15: a photo read is "No warnings" only with proof of a full list: at least 3 names and an end that is not cut off.
+    const total = rows.filter(r => r.pos).length;
+    const weak = p.read && p.read.photo && !noList ? weakRead(text, total) : '';
+    const verdict = counts.red ? 'avoid' : counts.orange ? 'check' : rows.length ? (partial || noList || weak ? 'partial' : 'ok') : 'unknown';
     return {
-      verdict, rows, counts, known, unknown, noList,
-      summary: summarize(verdict, rows, counts, { n: known, of: listed.length, noList }),
-      total: rows.filter(r => r.pos).length,
+      verdict, rows, counts, known, unknown, noList, weak,
+      summary: summarize(verdict, rows, counts, { n: known, of: listed.length, noList, weak, total }),
+      total,
       fragrance: rows.filter(r => r.fragrance || r.allergen).length
     };
+  }
+
+  function weakRead(text, total) {
+    if (total < 3) return 'Few';
+    const tx = String(text || '').trim();
+    const open = (tx.match(/[(\[]/g) || []).length > (tx.match(/[)\]]/g) || []).length;
+    return open || /[,;(\[:\-–]$/.test(tx) ? 'Cut' : '';
   }
 
   function matchAvoidItem(item, texts) {
@@ -540,6 +550,7 @@
 
   function summarize(verdict, rows, counts, kn) {
     if (verdict === 'unknown') return t('sum.unknown');
+    if (verdict === 'partial' && kn.weak && !kn.noList && !(kn.of && kn.n < kn.of)) return t('sum.weak' + kn.weak, kn);
     if (verdict === 'partial') return t(kn.noList && !(kn.of && kn.n < kn.of) ? 'sum.noList' : 'sum.partial', kn);
     if (verdict === 'avoid') {
       if (counts.red > 1) return t('sum.redN', { n: counts.red });
@@ -896,8 +907,43 @@
           'aria-label': (r.pos ? '#' + r.pos + ' ' : '') + r.label + ', ' + t('g.' + r.group),
           onclick: e => { toggleDetails(true); jumpTo(r.i, e.currentTarget); }
         }))));
+      // v2.15: first name, how many were read, last name – so you do not need to count
+      const named = a.rows.filter(r => r.pos);
+      if (named.length >= 2) {
+        card.append(el('div', { class: 'ends', id: 'endsLine' },
+          el('span', { class: 'e1', text: '#1 ' + shortName(named[0]) }),
+          el('b', { class: 'en', text: t('qa.read', { n: named.length }) }),
+          el('span', { class: 'e2', text: shortName(named[named.length - 1]) + ' #' + named[named.length - 1].pos })));
+      }
     }
+    if (p.ingredientsText && v !== 'unknown') card.append(typeChip(p));
     return card;
+  }
+
+  // v2.15: "Food ▾ tap if wrong" on every card – change the type and the product is checked again.
+  function typeChip(p) {
+    const k = p.kind || 'food', wrap = el('div', { class: 'typerow', id: 'typeRow' });
+    const chip = el('button', { class: 'typechip', type: 'button', id: 'typeChip', 'aria-expanded': 'false' },
+      el('b', { text: t(kindKey(k)) + ' ▾' }), el('small', { text: t('qa.typeHint') }));
+    chip.onclick = () => {
+      chip.setAttribute('aria-expanded', 'true');
+      wrap.replaceChildren(el('div', { class: 'segs typesegs', role: 'group', 'aria-label': t('label.kind') },
+        ['food', 'cosmetic', 'household'].map(v => el('button', { type: 'button', class: 'seg', 'aria-pressed': String(v === k),
+          text: t(kindKey(v)), onclick: () => v === k ? renderResult(p) : setKind(p, v) }))));
+    };
+    wrap.append(chip);
+    return wrap;
+  }
+  function setKind(p, k) {
+    p.kind = k;
+    if (k !== 'cosmetic') delete p.use;
+    if (state.products[p.code]) saveProduct(p);
+    verdictCache.delete(p.code);
+    const a = renderResult(p);
+    state.history.forEach(h => { if (h.code === p.code) h.verdict = a.verdict; });
+    store.set('history', state.history);
+    renderHistory();
+    renderFavs();
   }
 
   // v2.14: the one line on the card. Red / orange: only the names; grey: what to do; green: nothing.
@@ -950,6 +996,7 @@
       return [el('p', { class: 'qy', text: t('qa.noListLine') }),
         p ? el('p', { class: 'qkl' }, el('button', { class: 'linkbtn inline', type: 'button', id: 'fixTextBtn2', text: t('qa.fixText'), onclick: () => fixText(p) })) : null];
     }
+    if (a.verdict === 'partial' && a.weak && !a.unknown) return [el('p', { class: 'qy', text: t('qa.weak' + a.weak, { n: a.total }) })];
     if (a.verdict === 'partial') return [el('p', { class: 'qy', text: t(a.noList ? 'qa.noListLine' : 'qa.partialLine') })];
     return [el('p', { class: 'qy', text: a.summary })];
   }
@@ -993,6 +1040,7 @@
   // Open the label form with the saved text, so a wrong name can be corrected (with fix suggestions).
   function fixText(p) {
     openLabel(p);
+    $('textFold').open = true;
     $('labelText').value = p.ingredientsText || '';
     renderFixes();
     $('labelText').scrollIntoView({ behavior: smooth(), block: 'center' });
@@ -1054,7 +1102,7 @@
       if (seen.has(code)) continue;
       seen.add(code);
       const q = productBy(code);
-      if (!q || (q.kind || 'food') !== (p.kind || 'food')) continue;
+      if (!q || !q.name || (q.kind || 'food') !== (p.kind || 'food')) continue;   // v2.15: no unnamed products
       if (verdictOf(code).verdict !== 'ok') continue;
       out.push(q);
       if (out.length === 2) break;
@@ -1829,6 +1877,7 @@
     ocrFile = null;
     $('ocrArea').hidden = true;
     $('claudeBox').open = false;
+    $('textFold').open = false;
     ocrStatus('');
     const kind = (p && p.kind) || 'food';
     document.querySelectorAll('input[name="kind"]').forEach(i => { i.checked = i.value === kind; });
@@ -1946,9 +1995,16 @@
 
   // v2.13: with a photo, "Check" reads and checks in one step; the text part is shown only when something went wrong
   // (or from "Fix the text" on the result).
-  function setPhotoMode(on) {
-    $('textPart').hidden = !!on;
+  // v2.15: with a photo, the top part (take photo, tip, lead, text fold) folds away and a sticky Check bar stays in view.
+  // openText = something went wrong: show the text fold open, under the photo.
+  function setPhotoMode(on, openText) {
+    $('photoStart').hidden = !!on;
+    $('againRow').hidden = !on;
+    $('labelLead').hidden = !!on;
+    $('checkBar').hidden = !on;
     $('oneNote').hidden = !on;
+    $('textFold').hidden = !!on && !openText;
+    $('textFold').open = !!openText;
   }
 
   function onPhoto(e) {
@@ -2309,11 +2365,11 @@
       updateKindGuess();
       renderFixes();
       if (good) { buzzNext = true; onCheckLabel(); return; }   // one step: straight to the answer
-      setPhotoMode(false);                                     // little text: show it, you can fix or paste it
+      setPhotoMode(true, true);                                // little text: show it, you can fix or paste it
       $('labelText').scrollIntoView({ behavior: 'smooth', block: 'center' });
     } catch (err) {
       ocrStatus(t('ocr.fail'), 'warn');
-      setPhotoMode(false);
+      setPhotoMode(true, true);
     } finally {
       ocrBusy = false;
       $('ocrRead').disabled = false;
@@ -2731,11 +2787,22 @@
   }
 
   // The barcode number box opens from a link (it is not needed often).
-  function showCodeForm(focus) {
+  function showCodeForm(focus, fromHistory) {
     $('manualForm').hidden = false;
     $('codeLink').setAttribute('aria-expanded', 'true');
     $('codeLink').parentElement.hidden = true;
+    if (focus && !fromHistory && !(history.state && history.state.view === 'code')) pushState({ tab: 'scan', view: 'code' });   // v2.15: Back closes the box
     if (focus) $('codeInput').focus();
+  }
+  function hideCodeForm() {
+    $('manualForm').hidden = true;
+    $('codeLink').setAttribute('aria-expanded', 'false');
+    $('codeLink').parentElement.hidden = false;
+    $('codeInput').blur();
+  }
+  function closeCodeForm() {                        // the ✕ button: go back one step so the history stays tidy
+    if (history.state && history.state.view === 'code') { try { history.back(); return; } catch (e) { /* fall through */ } }
+    hideCodeForm();
   }
 
   function setTab(tab) {
@@ -2767,6 +2834,7 @@
 
   window.addEventListener('popstate', e => {
     const st = e.state || { tab: 'scan' };
+    if (st.view !== 'code' && !$('manualForm').hidden) hideCodeForm();
     if (!st.detail) hideDetail();
     if (st.tab !== currentTab) setTab(st.tab);
     if (st.tab !== 'scan') return;
@@ -2809,6 +2877,8 @@
     // The Find screen lives on the Scan tab: switch there first (from My list / History it stayed hidden)
     $('topSearch').addEventListener('click', () => { stopCamera(); if (currentTab !== 'scan') go('scan'); openSearch(); });
     $('codeLink').addEventListener('click', () => showCodeForm(true));
+    $('codeClose').addEventListener('click', closeCodeForm);
+    $('againPhoto').addEventListener('click', () => $('photoInput').click());
     $('torchBtn').addEventListener('click', toggleTorch);
     document.querySelectorAll('#histFilter button').forEach(b => b.addEventListener('click', () => setHistFilter(b.dataset.f)));
     $('offGet').addEventListener('click', getOfflineReaders);
