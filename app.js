@@ -2300,31 +2300,55 @@
   reads.forEach((text, fi) => {
     const seen = new Set();
     ctx.split(String(text || '').replace(HEAD, '')).forEach((raw, pos) => {
-      let name = raw.replace(HEAD, '').replace(/^[\s:;,.\-–]+|[\s:;,]+$/g, '').trim();
+      let name = raw.replace(HEAD, '').replace(/^[\s:;,.\-–]+|[\s:;,]+$/g, '').trim().replace(/^[^:()\[\]]{1,25}:\s+/, '');
       const letters = (name.match(/\p{L}/gu) || []).length;
       if (letters < 5) return;
       const open = (name.match(/[(\[]/g) || []).length, close = (name.match(/[)\]]/g) || []).length;
       const known = ctx.known(name);
       const clean = !JUNK.test(name) && (letters / name.replace(/\s/g, '').length >= 0.5 || /\bE\s?\d{3}/.test(name)) && open === close && /^[\p{L}\p{N}(\[]/u.test(name);
-      const sentence = name.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim().split(/\s+/).length > 7 && !known;           // a sentence of the label, not a name
+      const sentence = !known && (name.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim().split(/\s+/).length > 7 || /\.\s+\p{L}|anwendung|:\s|beilage|beachten|apotheke|arzt\b|use on skin|package leaflet|keep out|außerhalb|reach of/iu.test(name));           // a sentence of the label, not a name
       const q = known ? 3 : clean && !sentence ? 1 : 0;
       if (q === 0) return;
       const k = name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
-      let c = clusters.find(c => c.keys.some(x => x === k || (ctx.dice(x, k) >= 0.8 && Math.min(x.length, k.length) / Math.max(x.length, k.length) >= 0.9 && x.slice(0, 3) === k.slice(0, 3))));
-      if (!c) { c = { keys: [], variants: [], first: fi * 100 + pos }; clusters.push(c); }
-      c.keys.push(k);
+      const id = ctx.ident ? ctx.ident(name) : null;                  // the name the data knows it as (also for a little misread name)
+      let c = (id && clusters.find(c => c.ids.has(id))) || clusters.find(c => c.keys.some(x => x === k || (ctx.dice(x, k) >= 0.8 && Math.min(x.length, k.length) / Math.max(x.length, k.length) >= 0.9 && x.slice(0, 3) === k.slice(0, 3))));
+      if (!c) { c = { keys: [], ids: new Set(), variants: [], first: fi * 100 + pos }; clusters.push(c); }
+      c.keys.push(k); if (id) c.ids.add(id);
       let v = c.variants.find(v => v.name === name);
       if (!v) { v = { name, q, n: 0, frames: new Set() }; c.variants.push(v); }
       if (!v.frames.has(fi)) { v.frames.add(fi); v.n++; }
     });
   });
-  clusters.sort((a, b) => a.first - b.first);
-  return clusters.map(c => c.variants.sort((a, b) => b.q - a.q || b.n - a.n || b.name.length - a.name.length)[0].name);
+  clusters.forEach(c => { c.best = c.variants.sort((x, y) => y.q - x.q || y.n - x.n || y.name.length - x.name.length)[0]; });
+  // an unknown piece that sits inside a longer name (a name cut at the edge of a frame) is not a name of its own
+  const gramsOf = k => { const m = new Set(); for (let i = 0; i < k.length - 1; i++) m.add(k.slice(i, i + 2)); return m; };
+  const kept = clusters.filter(c => {
+    if (c.best.q >= 3 || /\bE\s?\d{3}/.test(c.best.name)) return true;
+    const mine = c.best.name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+    if (mine.length < 8) return true;
+    const g = gramsOf(mine);
+    return !clusters.some(o => {
+      if (o === c) return false;
+      const ok = o.best.name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+      if (ok.length < mine.length + 4) return false;
+      return ok.includes(mine);
+    });
+  });
+  kept.sort((a, b) => a.first - b.first);
+  return kept.map(c => c.best.name);
 }
   const bigramDice = (a, b) => {
     const g = k => { const m = new Map(); for (let i = 0; i < k.length - 1; i++) m.set(k.slice(i, i + 2), (m.get(k.slice(i, i + 2)) || 0) + 1); return m; };
     const A = g(a), B = g(b); let inter = 0; for (const [k, n] of A) inter += Math.min(n, B.get(k) || 0);
     return (2 * inter) / Math.max(1, a.length + b.length - 2);
+  };
+  const nameIdent = n => {
+    try {
+      const r = LCDB.checkCosmetic(n, LANG);
+      if (r.length === 1 && r[0].found) return r[0].name;
+      const sg = LCDB.suggestCosmetic(n);
+      return sg && sg.d <= 2 ? sg.inci : null;
+    } catch (e) { return null; }
   };
   const nameKnown = n => { try { const r = LCDB.checkCosmetic(n, LANG); if (r.length === 1 && r[0].found) return true; return LCDB.checkFood(n, LANG).additives.length > 0; } catch (e) { return false; } };
   async function readParts() {
@@ -2358,7 +2382,7 @@
     for (const x of use) text = text ? joinParts(text, x.text) : x.text;
     if (use.length + (base && base.text ? 1 : 0) > 1) {
       text = dedupeNames(text);                                 // fallback
-      const names = consensusNames((base && base.text ? [base.text] : []).concat(use.map(x => x.text)), { split: tx => LCDB.splitIngredients(tx), known: nameKnown, dice: bigramDice });
+      const names = consensusNames((base && base.text ? [base.text] : []).concat(use.map(x => x.text)), { split: tx => LCDB.splitIngredients(tx), known: nameKnown, dice: bigramDice, ident: nameIdent });
       if (names.length >= 3) text = 'Ingredients: ' + names.join('; ');
     }
     const confs = use.map(x => x.conf).concat(base && typeof base.conf === 'number' ? [base.conf] : []);
@@ -3424,7 +3448,7 @@
 
   // Small test hook (used only by automated checks).
   window.LC = { analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
-    cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
+    cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, nameIdent, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
 
   init();
 })();
