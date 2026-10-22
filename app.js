@@ -1790,11 +1790,16 @@
   let kindTouched = false, kindTimer = null;
 
   // Food, cosmetic or household? Guessed from the names in the text; you can always change it.
+  const SKIN_WORDS = /auf der haut|äußerlich|aeusserlich|arzneimittel|apothekenpflichtig|for external use|for topical use|dermatolog|shampoo|na kožu|за външно/i;
+  const CHEM_NAME = /oxyethylen|polypeptid|succinat|glucopyranosid|cocosfettsäure|macrogol|hydroxyethyl|dioxoimidazolidin/i;
   function guessKind(text) {
     const segs = LCDB.splitIngredients(text).filter(s => /\p{L}{2}/u.test(s));
     if (segs.length < 3) return null;
     const det = segs.filter(s => detergentTerm(s)).length;
     if (det >= 2 || (det >= 1 && DET_RANGE.test(text))) return { kind: 'household', n: det, of: segs.length };
+    // v2.19.1: words that only a skin product / medicine has, or several chemical names: cosmetic, even when the read is bad
+    const chem = segs.filter(x => CHEM_NAME.test(x)).length;
+    if (SKIN_WORDS.test(text) || chem >= 3) return { kind: 'cosmetic', n: 0, of: segs.length, skin: true };
     const rows = LCDB.checkCosmetic(text, LANG);
     let cos = rows.filter(r => r.found || r.fragrance || taughtFor(r.text)).length;
     // A badly read cosmetic list: names that are one or two letters off count too
@@ -1807,7 +1812,7 @@
     const g = guessKind($('labelText').value);
     if (!g) { note.hidden = true; return; }
     document.querySelectorAll('input[name="kind"]').forEach(i => { i.checked = i.value === g.kind; });
-    note.textContent = t('kind.guess.' + g.kind, { n: g.n, of: g.of });
+    note.textContent = t(g.skin ? 'kind.guess.skin' : 'kind.guess.' + g.kind, { n: g.n, of: g.of });
     note.hidden = false;
   }
 
@@ -2285,6 +2290,43 @@
       kept.push(me); return true;
     }).join(' ');
   }
+  // v2.20: names read from several frames: each name once, with its best reading (known in the data > well formed > seen in more frames).
+  // Nothing is joined as running text, so a broken frame cannot break the names of a good one.
+  function consensusNames(reads, ctx) {
+  // ctx: { split(text)->[names], known(name)->bool, dice(a,b)->0..1 }
+  const HEAD = /^\s*(sonstige\s+)?(bestandteile|inhaltsstoffe|zutaten|ingredients|съставки)\s*[:：]?\s*/i;
+  const JUNK = /[©®™@“”‘’"«»|\\<>=+~^_*#]/;
+  const clusters = [];
+  reads.forEach((text, fi) => {
+    const seen = new Set();
+    ctx.split(String(text || '').replace(HEAD, '')).forEach((raw, pos) => {
+      let name = raw.replace(HEAD, '').replace(/^[\s:;,.\-–]+|[\s:;,]+$/g, '').trim();
+      const letters = (name.match(/\p{L}/gu) || []).length;
+      if (letters < 5) return;
+      const open = (name.match(/[(\[]/g) || []).length, close = (name.match(/[)\]]/g) || []).length;
+      const known = ctx.known(name);
+      const clean = !JUNK.test(name) && (letters / name.replace(/\s/g, '').length >= 0.5 || /\bE\s?\d{3}/.test(name)) && open === close && /^[\p{L}\p{N}(\[]/u.test(name);
+      const sentence = name.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim().split(/\s+/).length > 7 && !known;           // a sentence of the label, not a name
+      const q = known ? 3 : clean && !sentence ? 1 : 0;
+      if (q === 0) return;
+      const k = name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+      let c = clusters.find(c => c.keys.some(x => x === k || (ctx.dice(x, k) >= 0.8 && Math.min(x.length, k.length) / Math.max(x.length, k.length) >= 0.9 && x.slice(0, 3) === k.slice(0, 3))));
+      if (!c) { c = { keys: [], variants: [], first: fi * 100 + pos }; clusters.push(c); }
+      c.keys.push(k);
+      let v = c.variants.find(v => v.name === name);
+      if (!v) { v = { name, q, n: 0, frames: new Set() }; c.variants.push(v); }
+      if (!v.frames.has(fi)) { v.frames.add(fi); v.n++; }
+    });
+  });
+  clusters.sort((a, b) => a.first - b.first);
+  return clusters.map(c => c.variants.sort((a, b) => b.q - a.q || b.n - a.n || b.name.length - a.name.length)[0].name);
+}
+  const bigramDice = (a, b) => {
+    const g = k => { const m = new Map(); for (let i = 0; i < k.length - 1; i++) m.set(k.slice(i, i + 2), (m.get(k.slice(i, i + 2)) || 0) + 1); return m; };
+    const A = g(a), B = g(b); let inter = 0; for (const [k, n] of A) inter += Math.min(n, B.get(k) || 0);
+    return (2 * inter) / Math.max(1, a.length + b.length - 2);
+  };
+  const nameKnown = n => { try { const r = LCDB.checkCosmetic(n, LANG); if (r.length === 1 && r[0].found) return true; return LCDB.checkFood(n, LANG).additives.length > 0; } catch (e) { return false; } };
   async function readParts() {
     if (!partsList.length || ocrBusy) return;
     const files = partsList.map(p => p.file), base = prevPart;
@@ -2314,7 +2356,11 @@
     const use = keep.length ? keep : got;
     let text = base && base.text ? base.text : '';
     for (const x of use) text = text ? joinParts(text, x.text) : x.text;
-    if (use.length + (base && base.text ? 1 : 0) > 1) text = dedupeNames(text);
+    if (use.length + (base && base.text ? 1 : 0) > 1) {
+      text = dedupeNames(text);                                 // fallback
+      const names = consensusNames((base && base.text ? [base.text] : []).concat(use.map(x => x.text)), { split: tx => LCDB.splitIngredients(tx), known: nameKnown, dice: bigramDice });
+      if (names.length >= 3) text = 'Ingredients: ' + names.join('; ');
+    }
     const confs = use.map(x => x.conf).concat(base && typeof base.conf === 'number' ? [base.conf] : []);
     lastRead = { photo: true, list: use.some(x => x.list) || !!(base && base.list), conf: confs.length ? Math.round(Math.min(...confs)) : undefined, photos: files.length + (base && base.text ? 1 : 0) };
     clearParts();
@@ -3378,7 +3424,7 @@
 
   // Small test hook (used only by automated checks).
   window.LC = { analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
-    cleanOcr, joinParts, dedupeNames, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
+    cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
 
   init();
 })();

@@ -479,7 +479,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.19' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.19" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.20' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -566,6 +566,10 @@ with sync_playwright() as p:
     ok(pg.eval_on_selector('input[name=kind]:checked', 'i => i.value') == 'household', 'type guess: household (dish soap)')
     pg.fill('#labelText', WAFER); pg.wait_for_timeout(700)
     ok(pg.eval_on_selector('input[name=kind]:checked', 'i => i.value') == 'food', 'type guess: food (wafer)')
+    pg.fill('#labelText', 'Sonstige Bestandteile: Dodecylpoly(oxyethylen)-2-hydrogensulfat, Natriumsalz; Macrogolglycerolcocoate; Natriumhydroxid; Ponceau 4R; Salzsäure 10 %; Kaliumsorbat; gereinigtes Wasser. Zur Anwendung auf der Haut.'); pg.wait_for_timeout(700)
+    ok(pg.eval_on_selector('input[name=kind]:checked', 'i => i.value') == 'cosmetic' and 'skin product' in pg.inner_text('#kindNote') or 'козметика' in pg.inner_text('#kindNote') or 'кожа' in pg.inner_text('#kindNote'), 'v2.19.1: a garbled skin-product label (Ketozolin) is typed Cosmetic, not Food (%s)' % pg.inner_text('#kindNote'))
+    pg.fill('#labelText', 'Zutaten: Weizenmehl, Zucker, Palmfett, Salz, Backtriebmittel Natriumhydrogencarbonat, Säuerungsmittel Zitronensäure, Aroma'); pg.wait_for_timeout(700)
+    ok(pg.eval_on_selector('input[name=kind]:checked', 'i => i.value') == 'food', 'v2.19.1: an ordinary food label with salt and citric acid stays Food')
     pg.check('input[name=kind][value=cosmetic]'); pg.fill('#labelText', WAFER + ', сол'); pg.wait_for_timeout(700)
     ok(pg.eval_on_selector('input[name=kind]:checked', 'i => i.value') == 'cosmetic' and pg.is_hidden('#kindNote'), 'after you pick a type, the app does not change it')
     ok(no_side_scroll(pg), 'label screen with 3 types: no sideways scroll')
@@ -945,7 +949,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v29')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v31')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1043,6 +1047,9 @@ with sync_playwright() as p:
     ok(pg.locator('#thumbs .tn').count() == 1, 'v2.17: the ✕ on a small picture removes that photo')
     ok(pg.evaluate("[...document.querySelectorAll('#thumbs .tn img')].every(i => i.complete && i.naturalWidth > 0)"), 'v2.17.1: the small pictures really show (real images, the page security rule blocks inline styles)')
     d = pg.evaluate("LC.dedupeNames('Aqua, Glycerin, Dodecylpoly(oxyethylen)-2-hydrogensulfat, Natriumsalz; Dodecylpoly(oxyethylen)-2-hydrogensul, Natrium salz; Glycerin')")
+    cn = pg.evaluate("(fr) => LC.consensusNames(fr, { split: t => LCDB.splitIngredients(t), known: LC.nameKnown, dice: LC.bigramDice })", ["Sonstige Bestandteile: Dodecylpoly(oxyethylen)-2-hydrogensulfat, Natriumsalz; Dodecylpoly(oxyethylen)-2-hydrogensulfosuccinat, Dinatriumsalz; Poly(oxyethylen)-120-methyl(D-glucopyranosid)dioleat; Macrogolglycerolcocoate (Ph.Eur.) [7 EO-Einheiten]; Natriumhydroxid; Natriumchlorid; Ponceau 4R (E124); Salzsäure 10 % (in geringen Mengen zur pH-Wert-Einstellung); Kaliumsorbat; Natriumsulfat; Phenoxyethanol; Zitronensäure; gereinigtes Wasser. Zur Anwendung auf der Haut.", "Bestandteile: Do secy Ipolyloxyethylen)-2- hydroger Na “ıumsalz; Dodecylpolyloxyethyleni 3-h drogensulfosuccinat; Dinatriums Po! ‘oxyethylen)-120-methyl(D-glucopyranosid)dioleat; Macrogolglycerolcocoate Ph.Eur.) [7 EO-Einheiten]; Natriumhydroxid; Natriumchlorid; Ponce:. RIEI24); Kaliumsorbat; Natriumsulfat; Phenoxyethanol; Zitronensäure; gereinigtes Wasser", "Atrium ethylen)-1 20-methyl(D-gluc- h i .) En Macrogolglycerolce Oat: O-Einheiten]; © fatriumsulfat; Phenoxyetha“ säure; Gereinigtes Wasser aliumsorbat. BEI24); K:; Parkungsbeilage beachten"])
+    need = ['Natriumchlorid', 'Kaliumsorbat', 'Ponceau 4R (E124)', 'Natriumsulfat', 'Phenoxyethanol', 'Natriumhydroxid', 'Zitronensäure']
+    ok(all(x in cn for x in need) and not any('©' in x or '“' in x for x in cn) and 12 <= len(cn) <= 18 and any(x.endswith('hydrogensulfat') for x in cn) and any(x.endswith('hydrogensulfosuccinat') for x in cn), 'v2.20: three garbled frames give clean names, none of the real names lost, Ponceau (E124) kept (%d names: %s)' % (len(cn), cn[:4]))
     ok(d.count('Dodecylpoly') == 1 and d.count('Glycerin') == 1 and 'Aqua' in d, 'v2.17.1: near-identical names from several pictures count once (%s)' % d)
     pg.click('#modeSweep'); pg.click('#shutter'); pg.wait_for_timeout(4200)
     ok('Move slowly' in pg.inner_text('#camHint'), 'v2.17: sweep: "Move slowly over the list · N pictures"')
@@ -1086,16 +1093,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v29'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v31'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v29' not in keys: break
+        if 'label-check-v31' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v29' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v31' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
     b.close()
