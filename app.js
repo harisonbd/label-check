@@ -2057,13 +2057,15 @@
 
   function setCamUi(on, keepBar) {
     $('photoCam').hidden = !on;
+    $('labelPanel').classList.toggle('camon', on);
     $('photoStart').hidden = on || !$('againRow').hidden;
     if (on) { $('againRow').hidden = true; $('ocrArea').hidden = true; $('textFold').hidden = true; $('labelLead').hidden = true; }
     $('checkBar').hidden = !(on ? partsList.length > 0 : keepBar);
   }
   function renderParts() {
     const th = $('thumbs'), prev = prevPart && prevPart.text ? LCDB.splitIngredients(prevPart.text).length : 0;
-    th.replaceChildren(...partsList.map((p, i) => el('div', { class: 'tn', style: 'background-image:url(' + p.url + ')' },
+    th.replaceChildren(...partsList.map((p, i) => el('div', { class: 'tn' },
+      el('img', { src: p.url, alt: t('parts.photo', { n: i + 1 }) }),
       el('s', { text: String(i + 1) }),
       el('button', { type: 'button', class: 'tx', 'aria-label': t('parts.remove', { n: i + 1 }), text: '✕', onclick: () => { URL.revokeObjectURL(p.url); partsList.splice(i, 1); renderParts(); } }))));
     $('partsHead').textContent = partsList.length ? tn('parts.head', partsList.length) : t('parts.none');
@@ -2089,13 +2091,13 @@
     if (!(history.state && history.state.view === 'cam')) pushState({ tab: 'scan', view: 'cam' });
     setCamMode('photo');
     if (files && files.length) {                                  // photos chosen from the phone: no live view
-      $('camVideo').hidden = true; $('shutter').hidden = true; $('camModes').hidden = true; $('camWide').hidden = true;
+      $('camVideo').hidden = true; $('camWide').hidden = true; $('camZoom').hidden = true; $('camTorch').hidden = true;
       $('photoCam').classList.add('nolive');
       files.slice(0, MAX_PARTS).forEach(f => addPart(f));
       return;
     }
     $('photoCam').classList.remove('nolive');
-    $('camVideo').hidden = false; $('shutter').hidden = false; $('camModes').hidden = false;
+    $('camVideo').hidden = false;
     renderParts();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { closeCam(); $('photoInput').click(); return; }
     try {
@@ -2114,7 +2116,12 @@
       if (caps.focusMode && caps.focusMode.includes('continuous')) await tr.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
       $('camWide').hidden = !(caps.zoom && caps.zoom.min < 1);
       $('camWide').dataset.min = caps.zoom ? caps.zoom.min : 1;
-    } catch (e) { $('camWide').hidden = true; }
+      const z = $('camZoom');
+      z.hidden = !(caps.zoom && caps.zoom.max > caps.zoom.min);
+      if (!z.hidden) { z.min = caps.zoom.min; z.max = Math.min(caps.zoom.max, caps.zoom.min * 6); z.step = caps.zoom.step || 0.1; z.value = tr.getSettings().zoom || 1; }
+      $('camTorch').hidden = !caps.torch;
+      $('camTorch').setAttribute('aria-pressed', 'false');
+    } catch (e) { $('camWide').hidden = true; $('camZoom').hidden = true; $('camTorch').hidden = true; }
   }
   function setCamMode(m) {
     camMode = m;
@@ -2213,26 +2220,66 @@
     $('shutter').classList.remove('stop');
     renderParts();
   }
+  // Tap to focus: the camera is asked to focus on that point (not every phone allows it in the browser).
+  let focusToast = false;
+  async function tapFocus(e) {
+    if (!camStream || e.target.closest('button')) return;
+    const r = $('camView').getBoundingClientRect(), v = $('camVideo');
+    const px = (e.clientX - r.left) / r.width, py = (e.clientY - r.top) / r.height;
+    const tr = camStream.getVideoTracks()[0], caps = tr.getCapabilities ? tr.getCapabilities() : {};
+    // the picture is cropped to fill the view (object-fit: cover): convert the tap to a point of the real picture
+    const vr = v.videoWidth / v.videoHeight, br = r.width / r.height;
+    let x = px, y = py;
+    if (vr > br) x = 0.5 + (px - 0.5) * (br / vr); else y = 0.5 + (py - 0.5) * (vr / br);
+    const ok = !!(caps.focusMode && (caps.focusMode.includes('single-shot') || caps.focusMode.includes('manual')) || caps.pointsOfInterest);
+    if (ok) {
+      try {
+        await tr.applyConstraints({ advanced: [{ focusMode: caps.focusMode && caps.focusMode.includes('single-shot') ? 'single-shot' : 'manual', pointsOfInterest: [{ x, y }] }] });
+        const ring = $('focusRing'); ring.hidden = true; void ring.offsetWidth;
+        ring.style.left = (px * 100) + '%'; ring.style.top = (py * 100) + '%'; ring.hidden = false;
+        setTimeout(() => { ring.hidden = true; }, 900);
+        setTimeout(async () => { try { if (camStream && caps.focusMode.includes('continuous')) await tr.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch (err) { /* ignore */ } }, 2500);
+        return;
+      } catch (err) { /* fall through */ }
+    }
+    if (!focusToast) { focusToast = true; toast(t('cam.noFocus')); }
+  }
   function initCam() {
     $('takePhoto').addEventListener('click', () => openCam());
     $('shutter').addEventListener('click', onShutter);
     $('modePhoto').addEventListener('click', () => { if (!sweep) setCamMode('photo'); });
     $('modeSweep').addEventListener('click', () => { if (!sweep) setCamMode('sweep'); });
     $('camClose').addEventListener('click', () => (history.state && history.state.view === 'cam' ? history.back() : closeCam(true)));
+    $('camView').addEventListener('click', tapFocus);
+    $('camZoom').addEventListener('input', async () => {
+      const tr = camStream && camStream.getVideoTracks()[0];
+      try { await tr.applyConstraints({ advanced: [{ zoom: +$('camZoom').value }] }); $('camWide').setAttribute('aria-pressed', String(+$('camZoom').value <= +$('camWide').dataset.min)); } catch (e) { /* not possible */ }
+    });
+    $('camTorch').addEventListener('click', async () => {
+      const tr = camStream && camStream.getVideoTracks()[0], b = $('camTorch'), on = b.getAttribute('aria-pressed') !== 'true';
+      try { await tr.applyConstraints({ advanced: [{ torch: on }] }); b.setAttribute('aria-pressed', String(on)); } catch (e) { toast(t('toast.torchFail')); }
+    });
     $('camWide').addEventListener('click', async () => {
       const tr = camStream && camStream.getVideoTracks()[0], b = $('camWide'), on = b.getAttribute('aria-pressed') !== 'true';
-      try { await tr.applyConstraints({ advanced: [{ zoom: on ? +b.dataset.min : 1 }] }); b.setAttribute('aria-pressed', String(on)); } catch (e) { /* not possible */ }
+      try { await tr.applyConstraints({ advanced: [{ zoom: on ? +b.dataset.min : 1 }] }); b.setAttribute('aria-pressed', String(on)); if (!$('camZoom').hidden) $('camZoom').value = on ? b.dataset.min : 1; } catch (e) { /* not possible */ }
     });
   }
 
   // Read every photo (the box finds the list on each), join the texts, check once.
+  // The same list read from several pictures comes back with small spelling differences: near-identical names count once.
   function dedupeNames(text) {
-    const seen = new Set();
+    const grams = k => { const g = new Map(); for (let i = 0; i < k.length - 1; i++) g.set(k.slice(i, i + 2), (g.get(k.slice(i, i + 2)) || 0) + 1); return g; };
+    const dice = (a, b) => {
+      let inter = 0; for (const [k, n] of a.g) inter += Math.min(n, b.g.get(k) || 0);
+      return (2 * inter) / Math.max(1, a.len + b.len - 2);
+    };
+    const kept = [];
     return String(text).split(/(?<=[,;])\s*/).filter(seg => {
       const k = seg.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
-      if (k.length < 4) return true;
-      if (seen.has(k)) return false;
-      seen.add(k); return true;
+      if (k.length < 5) return true;
+      const me = { g: grams(k), len: k.length };
+      if (kept.some(o => dice(o, me) >= 0.7)) return false;
+      kept.push(me); return true;
     }).join(' ');
   }
   async function readParts() {
@@ -3321,7 +3368,7 @@
 
   // Small test hook (used only by automated checks).
   window.LC = { analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
-    cleanOcr, joinParts, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
+    cleanOcr, joinParts, dedupeNames, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
 
   init();
 })();

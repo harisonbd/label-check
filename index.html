@@ -15,7 +15,7 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>Label Check <span class="ver">v2.17</span></h1>
+    <h1>Label Check <span class="ver">v2.18</span></h1>
     <button class="iconbtn topsearch" id="topSearch" type="button" data-t-aria="card.search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg></button>
     <div class="langsw" id="langSwitch" role="group" aria-label="Language">
       <button type="button" data-lang="en" lang="en" aria-pressed="false">EN</button>
@@ -96,23 +96,27 @@
         <p class="againrow" id="againRow" hidden><button class="linkbtn" id="againPhoto" type="button" data-t="lbl.again">Another photo</button> <span class="dot" aria-hidden="true">·</span> <button class="linkbtn" id="secondPhoto" type="button" data-t="lbl.second">Add 2nd photo (round bottle)</button></p>
 
         <section id="photoCam" hidden>
-          <div class="camview">
+          <div class="camview" id="camView">
             <video id="camVideo" playsinline muted></video>
-            <div class="camguide" aria-hidden="true"></div>
+            <div class="camtop">
+              <button class="camx" id="camClose" type="button" data-t-aria="cam.close">✕</button>
+              <div class="camseg" id="camModes" role="group">
+                <button type="button" id="modePhoto" aria-pressed="true" data-t="cam.photo">Photo</button>
+                <button type="button" id="modeSweep" aria-pressed="false" data-t="cam.sweep">Sweep</button>
+              </div>
+              <button class="camwide" id="camWide" type="button" hidden data-t="cam.wide">Wide</button>
+            </div>
             <p class="camhint" id="camHint"></p>
-            <button class="camwide" id="camWide" type="button" hidden data-t="cam.wide">Wide</button>
+            <i class="focusring" id="focusRing" hidden></i>
+            <button class="camlight" id="camTorch" type="button" hidden aria-pressed="false" data-t-aria="cam.torch"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8l-1 6H9zM9 9l1 12h4l1-12M12 13v2"/></svg></button>
+            <input class="camzoom" id="camZoom" type="range" hidden data-t-aria="cam.zoom">
+            <button class="shutter" id="shutter" type="button" data-t-aria="cam.shutter"><i></i></button>
           </div>
-          <div class="camseg" id="camModes" role="group">
-            <button type="button" id="modePhoto" aria-pressed="true" data-t="cam.photo">Photo</button>
-            <button type="button" id="modeSweep" aria-pressed="false" data-t="cam.sweep">Sweep</button>
-          </div>
-          <button class="shutter" id="shutter" type="button" data-t-aria="cam.shutter"><i></i></button>
           <div class="parts" id="parts">
             <h4 id="partsHead"></h4>
             <div class="th" id="thumbs"></div>
             <p class="sum" id="partsSum"></p>
           </div>
-          <p class="againrow"><button class="linkbtn" id="camClose" type="button" data-t="cam.close">Close camera</button></p>
         </section>
         <div id="ocrArea" hidden>
           <p class="minor" data-t="ocr.mark">Move the box over the ingredient list.</p>

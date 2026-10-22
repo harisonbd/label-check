@@ -799,7 +799,7 @@ details.claudebox .steps { margin-top: 2px; }
 .doors { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.25rem), 1fr)); gap: 10px; margin: 0 0 10px; }
 .doors .btn { min-height: 56px; padding: 8px 10px; font-size: 1.02rem; display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; }
 .doors .btn:only-child { grid-column: 1 / -1; }
-.doors svg { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.doors svg, #secondBtn svg { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 #detBtn[aria-expanded="true"] { border-color: var(--accent); }
 .nextwide { width: 100%; min-height: 54px; margin: 0 0 10px; }
 .dtop { background: var(--card); border-radius: 14px; padding: 12px 14px; margin: 0 0 12px; }
@@ -846,27 +846,39 @@ details.textfold[open] > summary { margin-bottom: 6px; }
 .photocards .scard { flex-direction: column; justify-content: center; align-items: center; text-align: center; gap: 10px; min-height: 132px; padding: 18px 10px; }
 .photocards .scard svg { width: 34px; height: 34px; }
 
-/* ---------- v2.17: in-app camera, sweep, "Your photos" strip ---------- */
-#photoCam { margin-top: 8px; }
-.camview { position: relative; height: 46vh; max-height: 380px; min-height: 240px; border-radius: 18px; overflow: hidden; background: #000; }
+/* ---------- v2.17/v2.18: in-app camera on one screen ---------- */
+#photoCam { margin-top: 0; }
+#labelPanel.camon .panel-back, #labelPanel.camon #labelTitle { display: none; }
+.camview { position: relative; height: min(46vh, 340px); min-height: 230px; border-radius: 18px; overflow: hidden; background: #000; touch-action: manipulation; }
 .camview video { width: 100%; height: 100%; object-fit: cover; display: block; }
-.camguide { position: absolute; left: 8%; right: 8%; top: 28%; height: 30%; border: 2px solid rgba(255,255,255,.6); border-radius: 10px; pointer-events: none; }
-.camhint { position: absolute; left: 10px; right: 10px; bottom: 10px; margin: 0; padding: 6px 10px; border-radius: 10px; background: rgba(0,0,0,.65); color: #fff; font-size: .85rem; text-align: center; }
-.camwide { position: absolute; top: 10px; right: 10px; font: inherit; font-size: .85rem; font-weight: 700; padding: 6px 12px; border-radius: 999px; border: 1px solid rgba(255,255,255,.7); background: rgba(0,0,0,.55); color: #fff; cursor: pointer; }
+.camtop { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.camx, .camwide { font: inherit; font-weight: 700; min-width: 40px; height: 40px; padding: 0 12px; border-radius: 999px; border: 1px solid rgba(255,255,255,.7); background: rgba(0,0,0,.55); color: #fff; cursor: pointer; }
+.camwide { font-size: .85rem; }
 .camwide[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
-.camseg { display: flex; margin-top: 12px; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--card); }
-.camseg button { font: inherit; font-weight: 650; flex: 1 1 0; min-height: 42px; border: 0; background: none; color: var(--muted); cursor: pointer; }
+.camwide[hidden] { display: none; }
+.camseg { display: flex; border: 1px solid rgba(255,255,255,.7); border-radius: 999px; overflow: hidden; background: rgba(0,0,0,.55); }
+.camseg button { font: inherit; font-weight: 650; min-height: 40px; padding: 0 16px; border: 0; background: none; color: #fff; cursor: pointer; }
 .camseg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
-.shutter { display: flex; align-items: center; justify-content: center; width: 76px; height: 76px; margin: 14px auto 0; padding: 0; border-radius: 50%; border: 5px solid var(--ink); background: none; cursor: pointer; }
-.shutter i { width: 54px; height: 54px; border-radius: 50%; background: var(--accent); transition: border-radius .15s, width .15s, height .15s; }
+.camhint { position: absolute; left: 10px; right: 10px; top: 58px; margin: 0 auto; width: fit-content; max-width: calc(100% - 20px); padding: 5px 10px; border-radius: 10px; background: rgba(0,0,0,.65); color: #fff; font-size: .82rem; text-align: center; pointer-events: none; }
+.shutter { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; width: 70px; height: 70px; margin: 0; padding: 0; border-radius: 50%; border: 4px solid #fff; background: rgba(0,0,0,.25); cursor: pointer; }
+.shutter i { width: 50px; height: 50px; border-radius: 50%; background: var(--accent); transition: border-radius .15s, width .15s, height .15s; }
 .shutter.sweep i { background: var(--red); }
-.shutter.stop i { border-radius: 10px; width: 30px; height: 30px; }
-.parts { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); }
-.parts h4 { margin: 0 0 8px; font-size: .9rem; color: var(--muted); font-weight: 600; }
+.shutter.stop i { border-radius: 10px; width: 28px; height: 28px; }
+.focusring { position: absolute; width: 64px; height: 64px; margin: -32px 0 0 -32px; border: 2px solid #fff; border-radius: 50%; pointer-events: none; animation: lcfocus .9s ease-out forwards; }
+@keyframes lcfocus { from { transform: scale(1.5); opacity: 1; } to { transform: scale(1); opacity: .2; } }
+.parts { margin-top: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); }
+.parts h4 { margin: 0 0 6px; font-size: .85rem; color: var(--muted); font-weight: 600; }
 .th { display: flex; gap: 10px; flex-wrap: wrap; }
-.th .tn { position: relative; width: 64px; height: 64px; border-radius: 10px; border: 2px solid var(--line); background: #000 center/cover; }
-.th .tn s { position: absolute; left: 5px; bottom: 2px; text-decoration: none; font-weight: 800; font-size: .8rem; color: #fff; text-shadow: 0 0 4px #000; }
+.th .tn { position: relative; width: 52px; height: 52px; border-radius: 10px; border: 2px solid var(--line); background: #000; }
+.th .tn img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; display: block; }
+.th .tn s { position: absolute; left: 5px; bottom: 2px; text-decoration: none; font-weight: 800; font-size: .75rem; color: #fff; text-shadow: 0 0 4px #000; }
 .th .tx { position: absolute; top: -9px; right: -9px; width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--ink); font-size: .7rem; cursor: pointer; }
 .th .tx::after { content: ''; position: absolute; inset: -8px; }
-.parts .sum { margin: 8px 0 0; font-size: .88rem; color: var(--muted); }
+.parts .sum { margin: 6px 0 0; font-size: .82rem; color: var(--muted); }
 #photoCam.nolive .camview { display: none; }
+#secondBtn { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.camlight { position: absolute; left: 14px; bottom: 22px; width: 46px; height: 46px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid rgba(255,255,255,.7); background: rgba(0,0,0,.55); color: #fff; cursor: pointer; }
+.camlight svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.camlight[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.camlight[hidden], .camzoom[hidden] { display: none; }
+.camzoom { position: absolute; right: 12px; bottom: 34px; width: min(34%, 130px); margin: 0; accent-color: var(--accent); }
