@@ -182,7 +182,7 @@
   let DBINFO = null;   // null = loading, false = failed, object = ready
   const META = () => (DBINFO ? LCDB.meta() : null);
   const dbReady = (window.LCDB ? LCDB.load('data/') : Promise.reject(new Error('db.js missing')))
-    .then(info => { DBINFO = info; return info; })
+    .then(info => { DBINFO = info; setTimeout(() => { try { LCDB.suggestCosmetic('Warmup index'); } catch (e) { /* ignore */ } }, 2500); return info; })   // v2.18.1: build the fix-suggestion index while idle, not on the first Cosmetic tap
     .catch(() => { DBINFO = false; return null; });
 
   // ---------- Our product list (data/products.json): products the online databases do not have ----------
@@ -2037,6 +2037,7 @@
     $('photoStart').hidden = !!on;
     $('againRow').hidden = !on;
     $('labelLead').hidden = !!on;
+    $('labelPanel').classList.toggle('photomode', !!on);
     $('checkBar').hidden = !on;
     $('oneNote').hidden = !on;
     $('textFold').hidden = !!on && !openText;

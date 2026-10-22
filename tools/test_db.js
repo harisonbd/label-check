@@ -161,6 +161,7 @@ const ok = (cond, msg) => { if (!cond) { fails++; console.log('  FAIL: ' + msg);
   const sug = s => { const r = LCDB.suggestCosmetic(s); return r ? r.inci : null; };
   ok(sug('GLYCERN') === 'GLYCERIN' && sug('Phenoxyetanol') === 'PHENOXYETHANOL' && sug('SODIUM LAURETH SULFAT') === 'SODIUM LAURETH SULFATE', 'one or two letters off: GLYCERIN, PHENOXYETHANOL, SODIUM LAURETH SULFATE');
   ok(sug('CEIL ALCOHOL') === 'CETYL ALCOHOL' && sug('CAPRYLHYDROMMLACID') === 'CAPRYLHYDROXAMIC ACID', 'Balea photo: CEIL ALCOHOL, CAPRYLHYDROMMLACID');
+  ok(!sug('Natriumchlorid') && !sug('Natriumsulfat') && !sug('Kaliumsorbat') && !sug('Natriumhydroxid'), 'v2.18.1: German salt names get no wrong English guess (was Barium Chloride, Barium Sulfate, Calcium Sorbate)');
   ok(sug('150- mopyL MYRISTATE') === 'ISOPROPYL MYRISTATE', 'digits read for letters: 150- mopyL = ISOPROPYL');
   ok(LCDB.suggestCosmetic('Tocopheryl Acetat (Vitamin E)').from === 'Tocopheryl Acetat', 'only the name before the bracket is replaced');
   ok(['Glycerin', 'BANANA', 'Wasser', 'Kann Spuren enthalten', 'Hergestellt in Deutschland', 'CI 77481', 'захар', 'Aqua'].every(s => !sug(s)), 'no suggestion: known names, short or other words, unclear numbers, Cyrillic');

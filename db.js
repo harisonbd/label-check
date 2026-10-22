@@ -370,6 +370,7 @@
     for (const q of tries) {
       for (let len = q.length - max; len <= q.length + max; len++) {
         for (const [nk, name] of fuzzyByLen.get(len) || []) {
+          if (nk[0] !== q[0]) continue;   // v2.18.1: the first letter must be right (Natriumchlorid -> Barium Chloride was a wrong guess)
           const d = lev(q, nk, best ? Math.min(max, best.d) : max);
           if (d > max) continue;
           const it = cosIndex.get(nk);
