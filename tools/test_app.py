@@ -479,7 +479,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.20.2' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.2" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.20.3' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -949,7 +949,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v33')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v34')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1028,6 +1028,10 @@ with sync_playwright() as p:
     pl2 = pg.evaluate("() => { const s = document.getElementById('ocrStatus'); s.hidden = false; s.textContent = 'Looking for the ingredient list… · photo 5 of 8'; const r = id => document.getElementById(id).getBoundingClientRect(); const o = { status: r('ocrStatus').bottom, checkTop: r('checkBar').top, doc: document.documentElement.scrollHeight - innerHeight }; s.hidden = true; return o }")
     ok(pl2['status'] <= pl2['checkTop'] + 1, 'v2.18.2: while reading ("photo 5 of 8") the status line is above the Check bar, no scrolling needed (%s)' % pl2)
     ok(pl['title'] == 'none' and pl['again'] <= pl['vh'] and pl['check'] <= pl['vh'] and pl['img'] < pl['check'], 'v2.18: the photo screen (picture, box, Another photo, Check) fits one screen (%s)' % pl)
+    gk = pg.evaluate("(tx) => LC.guessKind(tx)", "Glycerin, Pantuene Cetyl Alcohol, Glyceryl Stearate, Dicaprylyl Ether, Propyl Myristate, Allantoin, Caprylyl Glycol, Caprylhydroxamic Acid, Citric Acid, Panthenol, Sodium Hydroxide, Aqua, Parfum")
+    ok(gk and gk['kind'] == 'cosmetic', 'v2.20.3: a cream list with Glycerin / Citric Acid (also food) is typed Cosmetic by its cosmetic-only names (%s)' % gk)
+    gf = pg.evaluate("(tx) => LC.guessKind(tx)", "Zucker, Weizenmehl, Palmfett, Kakaopulver, Emulgator Sojalecithin, Salz, Backtriebmittel Natriumcarbonate, Aroma, Magermilchpulver")
+    ok(gf and gf['kind'] == 'food', 'v2.20.3: a food list stays Food (%s)' % gf)
     ok(pg.is_visible('#secondPhoto') and 'round bottle' in pg.inner_text('#secondPhoto'), 'v2.16: "Add 2nd photo (round bottle)" next to "Another photo"')
     pg.evaluate("LC.showProduct({code:'label-x', kind:'food', source:'label', name:'x', ingredientsText:'Zutaten: Aqua', read:{photo:true, list:true}, texts:['Zutaten: Aqua'], tags:[], allergens:[], analysis:[], fetchedAt:Date.now()})")
     pg.wait_for_selector('#result:not([hidden]) #answer')
@@ -1093,16 +1097,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v33'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v34'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v33' not in keys: break
+        if 'label-check-v34' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v33' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v34' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
     b.close()
