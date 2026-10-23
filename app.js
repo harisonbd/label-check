@@ -2304,7 +2304,9 @@
       const letters = (name.match(/\p{L}/gu) || []).length;
       if (letters < 5) return;
       const open = (name.match(/[(\[]/g) || []).length, close = (name.match(/[)\]]/g) || []).length;
-      const known = ctx.known(name);
+      const words = name.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim().split(/\s+/).length;
+      const known = ctx.known(name) && words <= 7 && name.length <= 70 && !/\.\s+\p{L}/u.test(name);   // a long run of text is never "a known name" because one word in it is known
+      if (JUNK.test(name) || (!known && words >= 3 && name.split(/\s+/).filter(w => w.replace(/[^\p{L}]/gu, '').length <= 3).length >= words - 1)) return;   // garbage (© @ …, or a string of tiny word pieces) is no name
       const clean = !JUNK.test(name) && (letters / name.replace(/\s/g, '').length >= 0.5 || /\bE\s?\d{3}/.test(name)) && open === close && /^[\p{L}\p{N}(\[]/u.test(name);
       const sentence = !known && (name.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim().split(/\s+/).length > 7 || /\.\s+\p{L}|anwendung|:\s|beilage|beachten|apotheke|arzt\b|use on skin|package leaflet|keep out|außerhalb|reach of/iu.test(name));           // a sentence of the label, not a name
       const q = known ? 3 : clean && !sentence ? 1 : 0;
