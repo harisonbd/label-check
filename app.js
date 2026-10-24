@@ -856,6 +856,10 @@
       p.source === 'label' && isBarcode(p.code)
         ? el('button', { class: 'btn btn-ghost nextwide', type: 'button', text: t('btn.lookupOnline'), onclick: () => lookup(p.code, true) })
         : null,
+      // v2.21: one file with what the app read and decided (and the photos), to send to Claude instead of screenshots
+      p.source === 'label' ? el('div', { class: 'repbox' },
+        el('button', { class: 'linkbtn', id: 'repBtn', type: 'button', text: t('btn.report'), onclick: reportResult }),
+        el('label', { class: 'repopt' }, el('input', { type: 'checkbox', id: 'repPhotos', checked: store.get('repPhotos', true) !== false, onchange: e => store.set('repPhotos', e.target.checked) }), ' ' + t('rep.photos'))) : null,
       p.kind === 'cosmetic' && known && needsUse(p, a) ? useBar(p) : null,
       el('div', { id: 'details', class: 'details', hidden: known ? !state.detailsOpen : null }, ...[
         known ? detailsTop(p, a) : null,
@@ -1422,6 +1426,49 @@
     toast((await copyText(text)) ? t('toast.shareCopied') : t('toast.copyFail'));
   }
 
+  // ---------- v2.21: Report this result (one file; the person sends it, nothing is sent by the app) ----------
+  async function smallPhoto(file) {
+    try {
+      const bmp = await createImageBitmap(file);
+      const k = Math.min(1, 900 / Math.max(bmp.width, bmp.height));
+      const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+      c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+      return c.toDataURL('image/jpeg', 0.7);
+    } catch (e) { return null; }
+  }
+  async function buildReport(withPhotos) {
+    const { p, a } = state.current;
+    const rows = a.rows.map(r => ({ pos: r.pos || null, text: r.text || '', label: r.label || '', group: r.group, level: r.level || '', auto: r.auto || undefined, ask: r.ask ? { from: r.ask.from, to: r.ask.to } : undefined }));
+    const out = {
+      app: 'Label Check', version: (document.querySelector('.ver') || {}).textContent || '', created: new Date().toISOString(), language: LANG,
+      screen: [innerWidth, innerHeight], agent: String(navigator.userAgent || '').slice(0, 160),
+      kind: p.kind, verdict: a.verdict, summary: a.summary, counts: a.counts, known: a.known, unknown: a.unknown, weak: a.weak || '', noList: !!a.noList,
+      read: p.read || null, guess: (() => { try { return guessKind(p.ingredientsText); } catch (e) { return null; } })(),
+      text: p.ingredientsText || '', name: p.name || '', frames: rep ? rep.frames : [], merge: rep && rep.merge ? rep.merge : null, rows
+    };
+    if (withPhotos && rep && rep.photos.length) out.photos = (await Promise.all(rep.photos.map(smallPhoto))).filter(Boolean);
+    return out;
+  }
+  async function reportResult() {
+    if (!state.current) return;
+    const cb = $('repPhotos'), withPhotos = !cb || cb.checked;
+    const btn = $('repBtn'); if (btn) btn.disabled = true;
+    try {
+      const data = await buildReport(withPhotos);
+      const d = new Date(), pad = n => String(n).padStart(2, '0');
+      const name = 'label-check-report-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.json';
+      const file = new File([JSON.stringify(data)], name, { type: 'application/json' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: 'Label Check report' }); return; }
+        catch (e) { if (e && e.name === 'AbortError') return; }
+      }
+      const url = URL.createObjectURL(file), a = document.createElement('a');
+      a.href = url; a.download = name; document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      toast(t('rep.saved'));
+    } finally { if (btn) btn.disabled = false; }
+  }
+
   // ---------- Favourites ----------
   function toggleFav(p) {
     const on = state.favs.includes(p.code);
@@ -1805,8 +1852,11 @@
     // A badly read cosmetic list: names that are one or two letters off count too
     if (cos / segs.length < 0.6 && cos / segs.length >= 0.25) cos += rows.filter(r => !r.found && !r.fragrance && LCDB.suggestCosmetic(r.text)).length;
     // v2.20.3: names that exist in the cosmetic data but are no food additive (Cetyl Alcohol, Panthenol, Allantoin ...): four or more = a cream, even if Glycerin / Citric Acid also fit food
-    const cosOnly = rows.filter(r => r.found && !taughtFor(r.text) && !(LCDB.checkFood(r.text, LANG).additives || []).length).length;
+    const cosOnly = rows.filter(r => r.found && !taughtFor(r.text) && !LCDB.knownFood(r.text) && !(LCDB.checkFood(r.text, LANG).additives || []).length).length;
     if (cosOnly >= 4 && cosOnly / segs.length >= 0.25) return { kind: 'cosmetic', n: cos, of: segs.length };
+    // v2.21: plain food names (Weizenmehl, Zucker, Манитол ...) that the cosmetic data does not know: a food
+    const foodOnly = rows.filter(r => !r.fragrance && LCDB.knownFood(r.text)).length;
+    if (foodOnly >= 4 && foodOnly / segs.length >= 0.5) return { kind: 'food', n: cos, of: segs.length };
     return cos / segs.length >= 0.6 ? { kind: 'cosmetic', n: cos, of: segs.length } : { kind: 'food', n: cos, of: segs.length };
   }
   function updateKindGuess() {
@@ -2008,6 +2058,7 @@
     openCam(true);
   }
 
+  let rep = null;        // v2.21: what the reader saw, for "Report this result": { frames: [...], photos: [File], merge }
   let lastRead = null;   // v2.13: { photo: true, list: heading found } for the text now in the box (null after typing)
   const ocrWait = {};
   const crop = { x: 0.06, y: 0.3, w: 0.88, h: 0.4 };   // part of the photo, 0..1
@@ -2355,7 +2406,7 @@
       return sg && sg.d <= 2 ? sg.inci : null;
     } catch (e) { return null; }
   };
-  const nameKnown = n => { try { const r = LCDB.checkCosmetic(n, LANG); if (r.length === 1 && r[0].found) return true; return LCDB.checkFood(n, LANG).additives.length > 0; } catch (e) { return false; } };
+  const nameKnown = n => { try { const r = LCDB.checkCosmetic(n, LANG); if (r.length === 1 && r[0].found) return true; return LCDB.checkFood(n, LANG).additives.length > 0 || LCDB.knownFood(n); } catch (e) { return false; } };
   async function readParts() {
     if (!partsList.length || ocrBusy) return;
     const files = partsList.map(p => p.file), base = prevPart;
@@ -2380,6 +2431,7 @@
       }
     } finally { partTag = ''; readingIdx = -1; setProg(null); pc.hidden = true; pc.classList.remove('reading'); lp.classList.remove('reading'); }
     const got = collect; collect = null;
+    rep = { frames: (base && rep ? rep.frames : []).concat(got.map(x => x.fr)), photos: (base && rep ? rep.photos : []).concat(files) };
     // frames that are too blurry (a sweep) add only junk: keep reads with confidence 50+ and some text
     const keep = got.filter(x => x.conf >= 50 && x.text.replace(/[^\p{L}]/gu, '').length >= 15);
     const use = keep.length ? keep : got;
@@ -2389,6 +2441,7 @@
       text = dedupeNames(text);                                 // fallback
       const names = consensusNames((base && base.text ? [base.text] : []).concat(use.map(x => x.text)), { split: tx => LCDB.splitIngredients(tx), known: nameKnown, dice: bigramDice, ident: nameIdent });
       if (names.length >= 3) text = 'Ingredients: ' + names.join('; ');
+      rep.merge = { used: use.length, of: got.length, names, joined: names.length >= 3 };
     }
     const confs = use.map(x => x.conf).concat(base && typeof base.conf === 'number' ? [base.conf] : []);
     lastRead = { photo: true, list: use.some(x => x.list) || !!(base && base.list), conf: confs.length ? Math.round(Math.min(...confs)) : undefined, photos: files.length + (base && base.text ? 1 : 0) };
@@ -2755,10 +2808,13 @@
       let text = cleanOcr(fromList || r.text);
       // The list was found when the read text has its heading (in the read box, or as "Zutaten:" in the text)
       lastRead = { photo: true, list: !!fromList || new RegExp(HEAD_RE.source, 'iu').test(r.text), conf: Math.round(r.conf) };
+      const frame = { lang: used, switched, conf: Math.round(r.conf), list: lastRead.list, boxed: !!fromList, read: String(r.text || '').slice(0, 3000), clean: text.slice(0, 3000) };
       if (collect) {                                                    // v2.17: one of several photos: keep the text, check later
-        collect.push({ text, conf: r.conf, list: lastRead.list });
+        collect.push({ text, conf: r.conf, list: lastRead.list, fr: frame });
         return;
       }
+      if (!prevPart || !rep) rep = { frames: [], photos: [] };          // v2.21: the report keeps every photo of this product
+      rep.frames.push(frame); rep.photos.push(ocrFile);
       if (prevPart) {                                                   // v2.16: second photo: join with the first
         text = joinParts(prevPart.text, text);
         lastRead.list = lastRead.list || prevPart.list;
@@ -2803,16 +2859,6 @@
       }
     } else {
       toast(t('toast.noShare'));
-    }
-  }
-
-  async function onPaste() {
-    try {
-      const txt = await navigator.clipboard.readText();
-      if (txt) { $('labelText').value = txt.trim(); updateKindGuess(); renderFixes(); }
-      else toast(t('toast.clipEmpty'));
-    } catch (e) {
-      toast(t('toast.pasteBlocked'));
     }
   }
 
@@ -3315,7 +3361,7 @@
     $('ocrLang').addEventListener('change', e => store.set('ocrPick', e.target.value));
     document.querySelectorAll('input[name="kind"]').forEach(i => i.addEventListener('change', () => { kindTouched = true; $('kindNote').hidden = true; renderFixes(); }));
     $('labelText').addEventListener('input', () => {
-      lastRead = null; prevPart = null;   // you typed or pasted: it is your text now
+      lastRead = null; prevPart = null; rep = null;   // you typed or pasted: it is your text now
       clearTimeout(kindTimer); kindTimer = setTimeout(updateKindGuess, 400);
       clearTimeout(fixTimer); fixTimer = setTimeout(renderFixes, 700);
     });
@@ -3327,7 +3373,6 @@
     $('copyPrompt').addEventListener('click', async () => {
       toast((await copyText(PROMPT)) ? t('toast.qCopied2') : t('toast.copyFail'));
     });
-    $('pasteBtn').addEventListener('click', onPaste);
     $('checkLabel').addEventListener('click', onCheckLabel);
     $('avoidForm').addEventListener('submit', e => {
       e.preventDefault();
@@ -3453,7 +3498,7 @@
 
   // Small test hook (used only by automated checks).
   window.LC = { analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
-    cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, nameIdent, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
+    buildReport, getRep: () => rep, cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, nameIdent, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
 
   init();
 })();
