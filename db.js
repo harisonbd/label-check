@@ -136,7 +136,7 @@
 
   // ---------- label splitting
   function stripLabelWord(text) {
-    return String(text || '').replace(/^\s*(ingredients?|ingr[eé]dients?|inci|zutaten|inhaltsstoffe|bestandteile|съставки|състав|composition|összetevők|složení|zloženie|sestavine)\s*[:：]\s*/i, '');
+    return String(text || '').replace(/^\s*(ingredients?|ingr[eé]dients?|inci|zutaten|inhaltsstoffe|bestandteile|hilfsstoffe|excipients?|съставки|състав|помощни вещества|други вещества|composition|összetevők|složení|zloženie|sestavine)\s*[:：]\s*/i, '');
   }
   // Split at , ; • · and new lines that are not inside brackets. A comma between digits (1,3-diol) does not split.
   function splitIngredients(text) {
@@ -248,8 +248,10 @@
   // ("Hartweizengrieß. Kann Spuren von Soja …"), so pieces from traceFrom on are traces. The app uses the same pieces.
   function labelSegments(text) {
     const s = String(text || ''), m = TRACES_RE.exec(s);
-    const main = splitIngredients(m ? s.slice(0, m.index) : s);
-    const traces = m ? splitIngredients(s.slice(m.index)) : [];
+    // v2.21.3: a piece that is only an amount ("500 MG", "48%", "100 MG)") is a dose table, no ingredient
+    const amount = x => /^[\s(\[]*[\d.,]+\s*(mg|mcg|µg|μg|g|kg|ml|l|kcal|kj|iu|ie|%)?[\s)\]]*$/i.test(x);
+    const main = splitIngredients(m ? s.slice(0, m.index) : s).filter(x => !amount(x));
+    const traces = m ? splitIngredients(s.slice(m.index)).filter(x => !amount(x)) : [];
     return { segs: main.concat(traces), traceFrom: m ? main.length + 1 : Infinity };
   }
 
@@ -399,6 +401,31 @@
   }
 
 
+  // v2.22: the closest known names for a name the app could not match (for the "tap the right one" list). [] when nothing is close.
+  function closest(seg, n) {
+    if (!cosIndex) return [];
+    const from = String(seg || '').replace(/\s*[\[(].*$/, '').replace(/[\s*°¹²³†‡.:]+$/, '').replace(/^[\s*°.:\-–]+/, '');
+    const k = key(from);
+    if (k.length < 6 || /[а-я]/.test(k) || cosIndex.has(k)) return [];
+    ensureFuzzy();
+    const max = Math.max(2, Math.floor(k.length * 0.3));
+    const kd = k.replace(/[0158]/g, c => OCR_DIGIT[c]);
+    const best = new Map();   // INCI name -> distance
+    for (const q of (kd !== k ? [k, kd] : [k])) {
+      for (let len = q.length - max; len <= q.length + max; len++) {
+        for (const [nk, name] of fuzzyByLen.get(len) || []) {
+          if (nk[0] !== q[0]) continue;
+          const dd = lev(q, nk, max);
+          if (dd > max) continue;
+          const it = cosIndex.get(nk);
+          if (!it) continue;
+          if (!best.has(it[0]) || best.get(it[0]) > dd) best.set(it[0], dd);
+        }
+      }
+    }
+    return [...best.entries()].sort((a, b) => a[1] - b[1] || a[0].length - b[0].length).slice(0, n || 3).map(x => x[0]);
+  }
+
   // v2.21.1: a block of text that holds one or more known names with a little noise around them ("ALLA SODIUM CETEARYL SULFF MIC ACID").
   // Returns [{ from, to }] for the names found inside, and "rest" pieces that stay as they are. null when nothing clear is inside.
   function findInside(seg) {
@@ -495,6 +522,6 @@
     return out;
   }
 
-  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, suggestCosmetic, findInside, checkFood, knownFood, cosAllergens, foodAllergens, search, foodToCosmetic, meta: () => META, SEV };
+  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, suggestCosmetic, closest, findInside, checkFood, knownFood, cosAllergens, foodAllergens, search, foodToCosmetic, meta: () => META, SEV };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.LCDB = api;
 })(typeof window !== 'undefined' ? window : globalThis);

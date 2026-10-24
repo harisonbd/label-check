@@ -22,6 +22,12 @@
     'Reply with the ingredients only, as plain text, separated by commas, in the language on the label.\n' +
     'If the label is not in English, add one more line that starts with "EN:" and gives the English translation.';
 
+  // v2.22: the first lines of the one file the user sends to Claude (Claude reads this note, then the JSON below it)
+  const CLAUDE_NOTE =
+    'NOTE FOR CLAUDE: This file comes from the Label Check app (one product scan). The JSON below has: what the app read ("text", "rows", "frames"), its verdict, and the label photos ("photos", base64 JPEG).\n' +
+    'Please: 1) read the ingredient list from the photos yourself, 2) compare it with "text" and "rows", 3) tell me which names the app missed or misread and why, 4) give the correct list.\n' +
+    'Keep the answer short. Plain English.\n\n';
+
   const QUICK_PICKS = [
     'palm oil, palm fat, palm kernel*, palmöl, palmfett, palmkern*, палмово масло, палмова мазнина, палмов*',
     'glucose-fructose syrup, glukose-fruktose-sirup, isoglucose, глюкозо-фруктозен сироп',
@@ -254,7 +260,7 @@
     const weak = (p.read && p.read.photo && !noList ? weakRead(text, total, p.read.conf) : '') || (garbledN >= 2 && garbledN / Math.max(1, total) >= 0.2 ? 'Blur' : '');
     const verdict = counts.red ? 'avoid' : counts.orange ? 'check' : rows.length ? (partial || noList || weak ? 'partial' : 'ok') : 'unknown';
     return {
-      verdict, rows, counts, known, unknown, noList, weak,
+      verdict, rows, counts, known, unknown, noList, weak, supplement: p.kind !== 'cosmetic' && p.kind !== 'household' && isSupplementText(text),
       summary: summarize(verdict, rows, counts, { n: known, of: listed.length, noList, weak, total }),
       total,
       fragrance: rows.filter(r => r.fragrance || r.allergen).length
@@ -432,6 +438,9 @@
       return /\p{L}\d+\p{L}/u.test(x) || (x.length >= 5 && /^\p{Lu}+\p{Ll}\p{Lu}+$/u.test(x));
     });
   }
+  // v2.21.3: a food supplement shows doses (mg, µg, IU) or says so. Only its "other ingredients" are checked, not the vitamins and minerals.
+  const SUPP_RE = /food supplement|dietary supplement|nahrungsergänzung|nahrungserg|complément alimentaire|integratore|хранителна добавка|\d\s*(mg|µg|μg|mcg|iu)\b[^,;]{0,40}(\d\s*(mg|µg|μg|mcg|iu)\b|%)/i;
+  const isSupplementText = txt => SUPP_RE.test(String(txt || ''));
   function analyzeFood(p, text) {
     const { segs, traceFrom } = LCDB.labelSegments(text);   // pieces from traceFrom on are "may contain traces"
     const segN = segs.map(nrm);
@@ -865,6 +874,7 @@
         el('button', { class: 'btn ' + (grey ? 'btn-primary' : 'btn-ghost'), id: 'againBtn', type: 'button', onclick: () => openLabel(p) },
           icon(ICON.again), el('span', { text: t(p.source === 'label' ? 'btn.again' : 'btn.photoLabel') }))),
       el('button', { class: 'btn ' + (grey ? 'btn-ghost' : 'btn-primary') + ' nextwide', id: 'nextBtn', type: 'button', text: t('btn.nextProduct'), onclick: scanNext }),
+      grey && p.read && p.read.photo ? el('p', { class: 'minor caphint', id: 'capHint', text: t('cap.' + (a.weak || (a.unknown ? 'Glare' : 'Few'))) }) : null,
       grey && a.verdict !== 'unknown' && p.read && p.read.photo ? el('button', { class: 'btn btn-ghost nextwide', id: 'secondBtn', type: 'button', onclick: () => secondPhoto(p) },
         icon(ICON.again), el('span', { text: t('btn.second') })) : null,
       p.source === 'label' && isBarcode(p.code)
@@ -872,8 +882,9 @@
         : null,
       // v2.21: one file with what the app read and decided (and the photos), to send to Claude instead of screenshots
       p.source === 'label' ? el('div', { class: 'repbox' },
-        el('button', { class: 'linkbtn', id: 'repBtn', type: 'button', text: t('btn.report'), onclick: reportResult }),
+        el('button', { class: 'btn btn-ghost', id: 'repBtn', type: 'button', text: t('btn.report'), onclick: reportResult }),
         el('label', { class: 'repopt' }, el('input', { type: 'checkbox', id: 'repPhotos', checked: store.get('repPhotos', true) !== false, onchange: e => store.set('repPhotos', e.target.checked) }), ' ' + t('rep.photos'))) : null,
+      p.kind === 'cosmetic' && known ? tickCard(a) : null,
       p.kind === 'cosmetic' && known && needsUse(p, a) ? useBar(p) : null,
       el('div', { id: 'details', class: 'details', hidden: known ? !state.detailsOpen : null }, ...[
         known ? detailsTop(p, a) : null,
@@ -991,7 +1002,7 @@
       ? el('p', { class: 'legend', id: 'legend' }, GROUPS.filter(g => a.counts[g]).map(g =>
           el('span', {}, el('i', { class: 'g-' + g, 'aria-hidden': 'true' }), el('b', { text: String(a.counts[g]) }), ' ' + t('legend.' + g))))
       : null;
-    return el('div', { class: 'dtop', id: 'dtop' }, ...answerLines(a, p), knownLine(p, a), legend);
+    return el('div', { class: 'dtop', id: 'dtop' }, ...answerLines(a, p), knownLine(p, a), a.supplement ? el('p', { class: 'qk1', id: 'suppNote', text: t('note.supp') }) : null, legend);
   }
 
   // Red: what and why. Orange: what. Green: what was checked. Never "safe".
@@ -1470,10 +1481,10 @@
     try {
       const data = await buildReport(withPhotos);
       const d = new Date(), pad = n => String(n).padStart(2, '0');
-      const name = 'label-check-report-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.json';
-      const file = new File([JSON.stringify(data)], name, { type: 'application/json' });
+      const name = 'label-check-for-claude-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.txt';
+      const file = new File([CLAUDE_NOTE + JSON.stringify(data)], name, { type: 'text/plain' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        try { await navigator.share({ files: [file], title: 'Label Check report' }); return; }
+        try { await navigator.share({ files: [file], title: 'Label Check' }); toast(t('rep.sent')); return; }
         catch (e) { if (e && e.name === 'AbortError') return; }
       }
       const url = URL.createObjectURL(file), a = document.createElement('a');
@@ -1737,6 +1748,26 @@
     body.push(el('p', { class: 'minor', style: null, text: t('d.studiesNote') }));
 
     $('detailBody').replaceChildren(...body.filter(Boolean));
+  }
+
+  // v2.22: names the app could not match, with the 3 closest known names. One tap = the right one (saved on this phone, like Teach).
+  function tickCard(a) {
+    const items = [];
+    for (const r of a.rows.filter(isUnknown)) {
+      const no = (taughtFor(r.text) || {}).no;
+      const ch = (r.choices && r.choices.length ? r.choices : LCDB.closest(r.text, 3)).filter(n => n !== no).slice(0, 3);
+      if (ch.length) items.push({ r, ch });
+      if (items.length >= 4) break;
+    }
+    if (!items.length) return null;
+    return el('div', { class: 'd-card teach tick', id: 'tickCard' },
+      el('h3', { text: t('tick.title') }),
+      el('p', { class: 'minor', text: t('tick.line') }),
+      ...items.map((it, i) => el('div', { class: 'tickrow', id: 'tick' + i },
+        el('p', { class: 'tickfrom' }, el('em', { text: cleanSeg(it.r.text) })),
+        el('div', { class: 'tickbtns' },
+          ...it.ch.map((n, k) => el('button', { class: 'btn btn-ghost', type: 'button', id: 'tick' + i + 'c' + k, text: niceName(n), onclick: () => teach(it.r.text, n) })),
+          el('button', { class: 'linkbtn', type: 'button', id: 'tick' + i + 'x', text: t('tick.none'), onclick: () => openPicker(it.r) })))));
   }
 
   // ---------- Teach the app (v2.12): "GLYCERN is Glycerin", saved on this phone for all products ----------
@@ -2728,8 +2759,8 @@
 
   // Ingredient headings in the languages seen on EU labels, by language. Two headings with the same language
   // ("Zutaten Teig / Zutaten Füllung") stay together; a heading in another language starts a new block.
-  const HEADS = { en: 'ingredients', fr: 'ingrédients', it: 'ingredienti', es: 'ingredientes', nl: 'ingrediënten', ro: 'ingrediente',
-    sv: 'ingredienser', de: 'zutaten|inhaltsstoffe|bestandteile', bg: 'съставки|състав', hr: 'sastojci', sl: 'sestavine', cs: 'složení',
+  const HEADS = { en: 'ingredients|excipients', fr: 'ingrédients', it: 'ingredienti', es: 'ingredientes', nl: 'ingrediënten', ro: 'ingrediente',
+    sv: 'ingredienser', de: 'zutaten|inhaltsstoffe|bestandteile|hilfsstoffe', bg: 'съставки|състав|помощни вещества|други вещества', hr: 'sastojci', sl: 'sestavine', cs: 'složení',
     sk: 'zloženie', hu: 'összetevők', pl: 'składniki', fi: 'ainesosat', ru: 'состав' };
   // A heading can be several words joined by "/" ("INGREDIENTS/SASTOJCI/СЪСТАВКИ:"); group 1 is the first word.
   const HEAD_RE = new RegExp('(?<!\\p{L})(' + Object.values(HEADS).join('|') + ')(?:\\s*\\/\\s*[\\p{L}]+)*\\s*[:：]', 'giu');
@@ -3548,7 +3579,7 @@
 
   // Small test hook (used only by automated checks).
   window.LC = { analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
-    buildReport, getRep: () => rep, repairNames, garbledName, cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, nameIdent, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
+    buildReport, getRep: () => rep, repairNames, garbledName, isSupplementText, cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, nameIdent, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
 
   init();
 })();

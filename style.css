@@ -909,3 +909,9 @@ details.textfold[open] > summary { margin-bottom: 6px; }
 .repbox { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 6px 2px 0; flex-wrap: wrap; }
 .repopt { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9rem; color: var(--muted, #9aa3b2); }
 .repopt input { width: 18px; height: 18px; }
+
+.tick .tickrow { margin-top: 10px; }
+.tick .tickfrom { margin: 0 0 6px; }
+.tick .tickbtns { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tick .tickbtns .btn { min-height: 44px; }
+.caphint { margin: 4px 2px 0; }
