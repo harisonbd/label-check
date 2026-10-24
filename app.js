@@ -2557,9 +2557,15 @@
 
   // From the piece with the heading to the first piece that ends with a full stop. A "may contain" piece right after
   // stays (traces). Pieces before the heading and other languages after the list are left out.
-  function listPieces(pieces) {
-    const start = pieces.findIndex(p => p.head);
-    if (start < 0) return null;
+  // v2.24: with several languages on the pack, take the English list first, then the Cyrillic one, then the first one found.
+  // A list with fewer than 3 names (or cut off) does not win: the next one is tried.
+  const headRank = p => {
+    const w = p.words.find(x => isListHead(x.t));
+    const part = w ? String(w.t).split(/[\/:|,.;]+/).map(s => s.trim()).find(s => LIST_HEAD.test(s)) : '';
+    const l = part ? headLang(part.toLowerCase()) : '';
+    return l === 'en' ? 0 : l === 'bg' ? 1 : 2;
+  };
+  function listFrom(pieces, start) {
     const out = [];
     for (let i = start, done = false; i < pieces.length; i++) {
       const tx = pieces[i].text.trim();
@@ -2569,6 +2575,16 @@
       if (/[.!]["'”)]*\s*$/.test(tx) && tx.replace(/[^\p{L}]/gu, '').length > 25) done = true;   // v2.16: a heading alone ("Bestandteile.") does not end the list
     }
     return out;
+  }
+  function listPieces(pieces) {
+    const heads = pieces.map((p, i) => (p.head ? i : -1)).filter(i => i >= 0);
+    if (!heads.length) return null;
+    const order = heads.length > 1 ? heads.slice().sort((x, y) => headRank(pieces[x]) - headRank(pieces[y]) || x - y) : heads;
+    for (const s of order) {
+      const out = listFrom(pieces, s);
+      if (heads.length === 1 || LCDB.labelSegments(out.map(p => p.text.trim()).join('\n')).segs.length >= 3) return out;
+    }
+    return listFrom(pieces, heads[0]);
   }
   function listFromPieces(pieces) {
     const ps = listPieces(pieces);
@@ -2855,6 +2871,18 @@
     let heads = [...s.matchAll(HEAD_RE)];
     if (!heads.length) return s;
     if (heads[0].index > 0) { s = s.slice(heads[0].index); heads = [...s.matchAll(HEAD_RE)]; }
+    // v2.24: several languages: the English block first, then the Cyrillic one (a block with fewer than 3 names does not win)
+    if (heads.length > 1 && new Set(heads.map(h => headLang(h[1]))).size > 1) {
+      const rk = h => { const l = headLang(h[1]); return l === 'en' ? 0 : l === 'bg' ? 1 : 2; };
+      const want = heads.map((h, i) => ({ h, i })).sort((x, y) => rk(x.h) - rk(y.h) || x.i - y.i);
+      for (const { h, i } of want) {
+        if (i === 0) break;                                   // the first block is the best one: nothing to change
+        if (rk(h) >= rk(heads[0])) break;
+        const nextH = heads.slice(i + 1).find(n => headLang(n[1]) !== headLang(h[1]) && s.slice(h.index + h[0].length, n.index).replace(/[^\p{L}]/gu, '').length >= 15);
+        const part = s.slice(h.index, nextH ? nextH.index : undefined);
+        if (part.split(',').length >= 3) { s = part.trim(); heads = [...s.matchAll(HEAD_RE)]; break; }
+      }
+    }
     const first = headLang(heads[0][1]), start = heads[0][0].length;
     // A joined heading ("INGREDIENTS/SASTOJCI/СЪСТАВКИ:") is taken away, so the list starts with the first name.
     const joined = heads[0][0].includes('/');
@@ -3607,7 +3635,7 @@
 
   // Small test hook (used only by automated checks).
   window.LC = { analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
-    buildReport, getRep: () => rep, repairNames, garbledName, isSupplementText, cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, nameIdent, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
+    buildReport, tsvPieces, listPieces, getRep: () => rep, repairNames, garbledName, isSupplementText, cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, nameIdent, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
 
   init();
 })();

@@ -488,7 +488,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.23' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.24' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -630,7 +630,7 @@ with sync_playwright() as p:
     pg.goto(root + '?go=search'); pg.evaluate('LC.dbReady'); pg.wait_for_timeout(200)
     ok(pg.is_visible('#searchPanel'), 'long-press menu "Find one ingredient" (?go=search)')
     cut = pg.evaluate("[LC.cleanOcr('Zutaten: Zucker, Weizenmehl, Palmöl, Haselnüsse 8%. Ingredients: sugar, wheat flour, palm oil'), LC.cleanOcr('Zutaten Teig: Mehl, Butter, Zucker. Zutaten Füllung: Äpfel, Zimt'), LC.cleanOcr('Összetevők: búzaliszt, cukor, só. Složení: pšeničná mouka, cukr')]")
-    ok(cut == ['Zutaten: Zucker, Weizenmehl, Palmöl, Haselnüsse 8%.', 'Zutaten Teig: Mehl, Butter, Zucker. Zutaten Füllung: Äpfel, Zimt', 'Összetevők: búzaliszt, cukor, só.'], 'text stops at a heading in another language, same-language headings stay (%s)' % cut)
+    ok(cut == ['Ingredients: sugar, wheat flour, palm oil', 'Zutaten Teig: Mehl, Butter, Zucker. Zutaten Füllung: Äpfel, Zimt', 'Összetevők: búzaliszt, cukor, só.'], 'text stops at a heading in another language (v2.24: English wins over German), same-language headings stay (%s)' % cut)
     man = json.load(open(os.path.join(ROOT, 'manifest.json'), encoding='utf-8'))
     ok(man['share_target']['params']['files'][0]['name'] == 'photo' and [s['url'] for s in man['shortcuts']] == ['./?go=scan', './?go=label', './?go=search'], 'manifest: share target + 3 shortcuts')
     ctx.close()
@@ -958,7 +958,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v40')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v41')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1190,6 +1190,33 @@ with sync_playwright() as p:
     ctx.close()
     bp.close()
 
+
+    # ---- v2.24: several languages on the pack: English list first, then Cyrillic, then the first one ----
+    print('v2.24: list language priority')
+    ctx, pg = new_page(b, base, 'en-GB')
+    def tsv(paras):
+        rows = ['level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext']
+        y = 10
+        for bi, text in enumerate(paras):
+            for wi, w in enumerate(text.split()):
+                rows.append('\t'.join(['5', '1', str(bi + 1), '1', '1', str(wi + 1), str(10 + wi * 60), str(y), '55', '20', '90', w]))
+            y += 80
+        return '\n'.join(rows)
+    def pick(paras):
+        return pg.evaluate("(tsv) => LC.listPieces(LC.tsvPieces(tsv)).map(p => p.text).join(' | ')", tsv(paras))
+    DE = 'Zutaten: Zucker, Weizenmehl, Salz, Palmfett, Kakaopulver.'; EN = 'Ingredients: sugar, wheat flour, salt, palm fat, cocoa powder.'; BG = 'Съставки: захар, пшенично брашно, сол, палмова мазнина, какао.'
+    r = pick([DE, EN]); ok(r.startswith('Ingredients:') and 'Zutaten' not in r, 'v2.24: German first, English second: the English list is taken (%s)' % r[:40])
+    r = pick([DE, BG]); ok(r.startswith('Съставки:') and 'Zutaten' not in r, 'v2.24: German and Bulgarian, no English: the Cyrillic list is taken')
+    r = pick([BG, EN]); ok(r.startswith('Ingredients:'), 'v2.24: Bulgarian and English: English wins')
+    r = pick([DE, 'Ingredients: sugar.']); ok(r.startswith('Zutaten:'), 'v2.24: an English list with fewer than 3 names does not win (%s)' % r[:40])
+    r = pick([DE]); ok(r.startswith('Zutaten:'), 'v2.24: one list only: as before')
+    r = pick([DE, 'Zutaten: Wasser, Zucker, Aroma.']); ok(r.startswith('Zutaten: Zucker'), 'v2.24: two lists in the same language: the first one, as before')
+    c = pg.evaluate("(t) => LC.cleanOcr(t)", 'Zutaten: Zucker, Weizenmehl, Salz, Palmfett, Kakaopulver. Ingredients: sugar, wheat flour, salt, palm fat, cocoa powder. Sastojci: secer, brasno, sol, mast.')
+    ok(c.startswith('Ingredients:') and 'Zucker' not in c and 'secer' not in c, 'v2.24: text with several languages: only the English list is kept (%s)' % c[:60])
+    c = pg.evaluate("(t) => LC.cleanOcr(t)", 'Zutaten: Zucker, Weizenmehl, Salz, Palmfett, Kakaopulver. Sastojci: secer, brasno, sol, mast.')
+    ok(c.startswith('Zutaten:') and 'secer' not in c, 'v2.24: no English or Cyrillic: the first list, as before')
+    ctx.close()
+
     # A real update: serve a copy of the app, change its sw.js (as a push does), ask the browser to check.
     import shutil, tempfile
     tmp = tempfile.mkdtemp()
@@ -1207,16 +1234,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v40'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v41'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v40' not in keys: break
+        if 'label-check-v41' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v40' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v41' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
     b.close()
