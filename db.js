@@ -8,7 +8,7 @@
   'use strict';
   const SEV = { b: 5, c: 4, u: 3, r: 2, n: 1 };
   const COSING_URL = 'https://ec.europa.eu/growth/tools-databases/cosing/reference/annexes/list/';
-  let META = null, COS = null, FOOD = null;
+  let META = null, COS = null, FOOD = null, FOODNAMES = null;
   let cosIndex = null, eIndex = null, foodNames = null, allergenNames = null;
 
   // Lower case, ß -> ss, no accents, keep a-z, 0-9 and Cyrillic. Same rule on both sides of a match.
@@ -123,7 +123,15 @@
       }
     }
     allergenNames.sort((x, y) => y[0].length - x[0].length);
-    return { version: META.version, cosmetics: COS.items.length, additives: FOOD.additives.length };
+    // v2.21: plain food names in many languages (Open Food Facts, ODbL). Optional: without the file the app works as before.
+    try { const nf = await get(base + 'names-food.json'); FOODNAMES = new Set((nf && nf.names) || []); } catch (e) { FOODNAMES = null; }
+    return { version: META.version, cosmetics: COS.items.length, additives: FOOD.additives.length, foodNames: FOODNAMES ? FOODNAMES.size : 0 };
+  }
+  // Is this label name a plain food ingredient the app knows ("Weizenmehl (45 %)", "Манитол")?
+  function knownFood(seg) {
+    if (!FOODNAMES) return false;
+    const base = norm(String(seg || '').replace(/\([^)]*\)|\[[^\]]*\]/g, ' ').replace(/\d+[.,]?\d*\s*%/g, ' '));
+    return base.length >= 4 && FOODNAMES.has(base);
   }
 
   // ---------- label splitting
@@ -434,6 +442,6 @@
     return out;
   }
 
-  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, suggestCosmetic, checkFood, cosAllergens, foodAllergens, search, foodToCosmetic, meta: () => META, SEV };
+  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, suggestCosmetic, checkFood, knownFood, cosAllergens, foodAllergens, search, foodToCosmetic, meta: () => META, SEV };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.LCDB = api;
 })(typeof window !== 'undefined' ? window : globalThis);

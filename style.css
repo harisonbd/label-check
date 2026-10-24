@@ -904,3 +904,8 @@ details.textfold[open] > summary { margin-bottom: 6px; }
 #labelPanel.reading .ocrstatus { margin-top: 8px; }
 .againrow { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; white-space: nowrap; font-size: .92rem; overflow: hidden; }
 .againrow .linkbtn { font-size: inherit; padding: 6px 0; }
+
+/* v2.21: Report this result */
+.repbox { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 6px 2px 0; flex-wrap: wrap; }
+.repopt { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9rem; color: var(--muted, #9aa3b2); }
+.repopt input { width: 18px; height: 18px; }

@@ -1804,6 +1804,9 @@
     let cos = rows.filter(r => r.found || r.fragrance || taughtFor(r.text)).length;
     // A badly read cosmetic list: names that are one or two letters off count too
     if (cos / segs.length < 0.6 && cos / segs.length >= 0.25) cos += rows.filter(r => !r.found && !r.fragrance && LCDB.suggestCosmetic(r.text)).length;
+    // v2.20.3: names that exist in the cosmetic data but are no food additive (Cetyl Alcohol, Panthenol, Allantoin ...): four or more = a cream, even if Glycerin / Citric Acid also fit food
+    const cosOnly = rows.filter(r => r.found && !taughtFor(r.text) && !(LCDB.checkFood(r.text, LANG).additives || []).length).length;
+    if (cosOnly >= 4 && cosOnly / segs.length >= 0.25) return { kind: 'cosmetic', n: cos, of: segs.length };
     return cos / segs.length >= 0.6 ? { kind: 'cosmetic', n: cos, of: segs.length } : { kind: 'food', n: cos, of: segs.length };
   }
   function updateKindGuess() {
@@ -2308,7 +2311,7 @@
       const known = ctx.known(name) && words <= 7 && name.length <= 70 && !/\.\s+\p{L}/u.test(name);   // a long run of text is never "a known name" because one word in it is known
       if (JUNK.test(name) || (!known && words >= 3 && name.split(/\s+/).filter(w => w.replace(/[^\p{L}]/gu, '').length <= 3).length >= words - 1)) return;   // garbage (© @ …, or a string of tiny word pieces) is no name
       const clean = !JUNK.test(name) && (letters / name.replace(/\s/g, '').length >= 0.5 || /\bE\s?\d{3}/.test(name)) && open === close && /^[\p{L}\p{N}(\[]/u.test(name);
-      const sentence = !known && (name.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim().split(/\s+/).length > 7 || /\.\s+\p{L}|anwendung|:\s|beilage|beachten|apotheke|arzt\b|use on skin|package leaflet|keep out|außerhalb|reach of/iu.test(name));           // a sentence of the label, not a name
+      const sentence = !known && (name.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim().split(/\s+/).length > 7 || /\.\s+\p{L}|drogerie|markt\b|d\.?o\.?o\b|gmbh|parabe|colorant|made in|hergestellt|anwendung|:\s|beilage|beachten|apotheke|arzt\b|use on skin|package leaflet|keep out|außerhalb|reach of/iu.test(name));           // a sentence of the label, not a name
       const q = known ? 3 : clean && !sentence ? 1 : 0;
       if (q === 0) return;
       const k = name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');

@@ -12,6 +12,8 @@ Built 2026-10-20 by `tools/build_db.py`. Works offline. Test: `node tools/test_d
 
 ## Sources (all free)
 
+- **names-food.json** (v2.21): plain food ingredient names (about 48,000, 15 languages) from the Open Food Facts taxonomies (ingredients.txt, additives.txt), licence ODbL. Build: `python tools/build_names.py <openfoodfacts-server>/taxonomies data/names-food.json`. Used only to know a name; it adds no warnings.
+
 | Source | Used for | Downloaded |
 |---|---|---|
 | [EU CosIng](https://ec.europa.eu/growth/tools-databases/cosing/) – all 33,656 ingredients + Annexes II–VI (2,389 entries) | cosmetics: function, banned / restricted, fragrance allergens | 2026-10-20 |

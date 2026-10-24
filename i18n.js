@@ -146,6 +146,7 @@ window.LC_TEXT = {
     'parts.photo': 'Photo {n}',
     'cam.photo': 'Photo', 'cam.sweep': 'Sweep', 'cam.wide': 'Wide', 'cam.close': 'Close camera', 'cam.shutter': 'Take photo', 'cam.hint.photo': 'Take a photo. Turn the bottle, take the next.', 'cam.hint.sweepStart': 'Tap the button, then move slowly over the list.', 'cam.hint.sweep': 'Move slowly over the list · {n} pictures', 'parts.none': 'Your photos', 'parts.head.one': 'Your photos · {n}', 'parts.head.other': 'Your photos · {n}', 'parts.kept': 'Kept from before: {n} names', 'parts.next': 'Add more, or tap Check.', 'parts.flat': 'No photo yet. 1 photo is enough for flat labels.', 'parts.max': 'At most {n} photos.', 'parts.remove': 'Remove photo {n}', 'parts.of': 'photo {i} of {n}',
     'sum.weakBlur': 'The photo text is not clear.', 'qa.weakBlur': 'The photo text is not clear (many names look wrong), so the app cannot say "No warnings".',
+    'btn.report': 'Report this result', 'rep.photos': 'include photos', 'rep.saved': 'Report file saved. Send it to Claude.',
     'lbl.second': 'Add 2nd photo (round bottle)', 'btn.second': 'Add 2nd photo (round bottle)',
     'qa.read': '{n} read', 'qa.typeHint': 'tap if wrong', 'sum.weakFew': 'Only {total} names read.', 'sum.weakCut': 'The list looks cut off.', 'qa.weakFew': 'Only {n} names were read. A full list is longer, so the app cannot say "No warnings".', 'qa.weakCut': 'The list looks cut off at the end, so the app cannot say "No warnings".',
     'name.edit': 'Change the name', 'name.save': 'Save',
@@ -340,7 +341,7 @@ window.LC_TEXT = {
     'toast.shareCopied': 'Result copied. Paste it where you want.',
 
     'credit.product': 'Product data: {off} and {obf} contributors, licensed under the {odbl}.',
-    'credit.ingredient': 'Ingredient data: European Commission (CosIng, food additives database), edlists.org, IARC/WHO, Open Food Facts (ODbL).',
+    'credit.ingredient': 'Ingredient data: European Commission (CosIng, food additives database), edlists.org, IARC/WHO, Open Food Facts (ODbL). Food names in many languages: Open Food Facts (ODbL).',
     'credit.ocr': 'Label reading on the phone: {tess} (tesseract.js-core, tessdata_fast), licence {apache}.',
     'credit.guide': 'Results are a guide, not medical advice.'
   },
@@ -487,6 +488,7 @@ window.LC_TEXT = {
     'parts.photo': 'Foto {n}',
     'cam.photo': 'Foto', 'cam.sweep': 'Schwenk', 'cam.wide': 'Weitwinkel', 'cam.close': 'Kamera schließen', 'cam.shutter': 'Foto machen', 'cam.hint.photo': 'Foto machen. Flasche drehen, nächstes Foto.', 'cam.hint.sweepStart': 'Knopf tippen, dann langsam über die Liste fahren.', 'cam.hint.sweep': 'Langsam über die Liste fahren · {n} Bilder', 'parts.none': 'Deine Fotos', 'parts.head.one': 'Deine Fotos · {n}', 'parts.head.other': 'Deine Fotos · {n}', 'parts.kept': 'Von vorher behalten: {n} Namen', 'parts.next': 'Mehr hinzufügen oder Prüfen tippen.', 'parts.flat': 'Noch kein Foto. Für flache Etiketten reicht 1 Foto.', 'parts.max': 'Höchstens {n} Fotos.', 'parts.remove': 'Foto {n} entfernen', 'parts.of': 'Foto {i} von {n}',
     'sum.weakBlur': 'Der Text auf dem Foto ist nicht klar.', 'qa.weakBlur': 'Der Text auf dem Foto ist nicht klar (viele Namen wirken falsch), darum kann die App nicht „Keine Warnungen“ sagen.',
+    'btn.report': 'Ergebnis melden', 'rep.photos': 'Fotos mitsenden', 'rep.saved': 'Berichtsdatei gespeichert. Schicke sie an Claude.',
     'lbl.second': '2. Foto dazu (runde Flasche)', 'btn.second': '2. Foto dazu (runde Flasche)',
     'qa.read': '{n} gelesen', 'qa.typeHint': 'antippen, wenn falsch', 'sum.weakFew': 'Nur {total} Namen gelesen.', 'sum.weakCut': 'Die Liste wirkt abgeschnitten.', 'qa.weakFew': 'Nur {n} Namen wurden gelesen. Eine volle Liste ist länger, darum kann die App nicht „Keine Warnungen“ sagen.', 'qa.weakCut': 'Die Liste wirkt am Ende abgeschnitten, darum kann die App nicht „Keine Warnungen“ sagen.',
     'name.edit': 'Namen ändern', 'name.save': 'Speichern',
@@ -681,7 +683,7 @@ window.LC_TEXT = {
     'toast.shareCopied': 'Ergebnis kopiert. Füge es ein, wo du willst.',
 
     'credit.product': 'Produktdaten: {off} und {obf} Mitwirkende, Lizenz {odbl}.',
-    'credit.ingredient': 'Inhaltsstoffdaten: Europäische Kommission (CosIng, Datenbank für Lebensmittelzusatzstoffe), edlists.org, IARC/WHO, Open Food Facts (ODbL).',
+    'credit.ingredient': 'Inhaltsstoffdaten: Europäische Kommission (CosIng, Datenbank für Lebensmittelzusatzstoffe), edlists.org, IARC/WHO, Open Food Facts (ODbL). Lebensmittelnamen in vielen Sprachen: Open Food Facts (ODbL).',
     'credit.ocr': 'Etikett lesen auf dem Handy: {tess} (tesseract.js-core, tessdata_fast), Lizenz {apache}.',
     'credit.guide': 'Die Ergebnisse sind eine Orientierung, keine medizinische Beratung.'
   },
@@ -828,6 +830,7 @@ window.LC_TEXT = {
     'parts.photo': 'Снимка {n}',
     'cam.photo': 'Снимка', 'cam.sweep': 'Плъзгане', 'cam.wide': 'Широк', 'cam.close': 'Затвори камерата', 'cam.shutter': 'Снимай', 'cam.hint.photo': 'Снимай. Завърти бутилката, снимай пак.', 'cam.hint.sweepStart': 'Натисни бутона и мини бавно над списъка.', 'cam.hint.sweep': 'Мини бавно над списъка · {n} кадъра', 'parts.none': 'Твоите снимки', 'parts.head.one': 'Твоите снимки · {n}', 'parts.head.other': 'Твоите снимки · {n}', 'parts.kept': 'Запазени отпреди: {n} имена', 'parts.next': 'Добави още или натисни Провери.', 'parts.flat': 'Още няма снимка. За плоски етикети стига 1 снимка.', 'parts.max': 'Най-много {n} снимки.', 'parts.remove': 'Махни снимка {n}', 'parts.of': 'снимка {i} от {n}',
     'sum.weakBlur': 'Текстът на снимката не е ясен.', 'qa.weakBlur': 'Текстът на снимката не е ясен (много имена изглеждат грешни), затова приложението не може да каже „Няма предупреждения“.',
+    'btn.report': 'Подай сигнал за резултата', 'rep.photos': 'с снимките', 'rep.saved': 'Файлът е запазен. Изпрати го на Claude.',
     'lbl.second': 'Втора снимка (кръгла бутилка)', 'btn.second': 'Втора снимка (кръгла бутилка)',
     'qa.read': '{n} прочетени', 'qa.typeHint': 'докосни, ако не е вярно', 'sum.weakFew': 'Прочетени само {total} имена.', 'sum.weakCut': 'Списъкът изглежда отрязан.', 'qa.weakFew': 'Прочетени са само {n} имена. Пълният списък е по-дълъг, затова приложението не може да каже „Няма предупреждения“.', 'qa.weakCut': 'Списъкът изглежда отрязан в края, затова приложението не може да каже „Няма предупреждения“.',
     'name.edit': 'Промени името', 'name.save': 'Запази',
@@ -1022,7 +1025,7 @@ window.LC_TEXT = {
     'toast.shareCopied': 'Резултатът е копиран. Постави го, където искаш.',
 
     'credit.product': 'Данни за продуктите: сътрудници на {off} и {obf}, лиценз {odbl}.',
-    'credit.ingredient': 'Данни за съставките: Европейска комисия (CosIng, база за хранителни добавки), edlists.org, IARC/СЗО, Open Food Facts (ODbL).',
+    'credit.ingredient': 'Данни за съставките: Европейска комисия (CosIng, база за хранителни добавки), edlists.org, IARC/СЗО, Open Food Facts (ODbL). Имена на храни на много езици: Open Food Facts (ODbL).',
     'credit.ocr': 'Четене на етикети на телефона: {tess} (tesseract.js-core, tessdata_fast), лиценз {apache}.',
     'credit.guide': 'Резултатите са ориентир, не медицински съвет.'
   }

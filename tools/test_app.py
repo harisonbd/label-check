@@ -10,7 +10,7 @@ from playwright.sync_api import sync_playwright, Page
 def _wrap(name):
     orig = getattr(Page, name)
     def f(self, sel, *a, **k):
-        if isinstance(sel, str) and (sel in ('#labelText', '#checkLabel', '#pasteBtn') or sel.startswith('input[name=kind]')) \
+        if isinstance(sel, str) and (sel in ('#labelText', '#checkLabel') or sel.startswith('input[name=kind]')) \
                 and self.evaluate("() => { const f = document.getElementById('textFold'); const l = document.getElementById('labelPanel'); return !!f && !l.hidden && !f.open; }"):
             self.evaluate("() => { const f = document.getElementById('textFold'); f.hidden = false; f.open = true; }")
         return orig(self, sel, *a, **k)
@@ -479,7 +479,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.20.3' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.21' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -949,7 +949,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v34')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v35')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1030,6 +1030,10 @@ with sync_playwright() as p:
     ok(pl['title'] == 'none' and pl['again'] <= pl['vh'] and pl['check'] <= pl['vh'] and pl['img'] < pl['check'], 'v2.18: the photo screen (picture, box, Another photo, Check) fits one screen (%s)' % pl)
     gk = pg.evaluate("(tx) => LC.guessKind(tx)", "Glycerin, Pantuene Cetyl Alcohol, Glyceryl Stearate, Dicaprylyl Ether, Propyl Myristate, Allantoin, Caprylyl Glycol, Caprylhydroxamic Acid, Citric Acid, Panthenol, Sodium Hydroxide, Aqua, Parfum")
     ok(gk and gk['kind'] == 'cosmetic', 'v2.20.3: a cream list with Glycerin / Citric Acid (also food) is typed Cosmetic by its cosmetic-only names (%s)' % gk)
+    gw = pg.evaluate("(tx) => LC.guessKind(tx)", "Wasser, Zucker, Salz, Glycerin, Zitronensäure, Aroma, Sonnenblumenöl, Weizenmehl")
+    ok(gw and gw['kind'] == 'food', 'v2.21: plain German food words (Wasser, Zucker, Weizenmehl ...) are typed Food by the names file (%s)' % gw)
+    gb = pg.evaluate("(tx) => LC.guessKind(tx)", "Декстрати, Мента, Манитол, Лимонена киселина, Захар, Вода")
+    ok(gb and gb['kind'] == 'food', 'v2.21: Bulgarian food / sweet names are typed Food (%s)' % gb)
     gf = pg.evaluate("(tx) => LC.guessKind(tx)", "Zucker, Weizenmehl, Palmfett, Kakaopulver, Emulgator Sojalecithin, Salz, Backtriebmittel Natriumcarbonate, Aroma, Magermilchpulver")
     ok(gf and gf['kind'] == 'food', 'v2.20.3: a food list stays Food (%s)' % gf)
     ok(pg.is_visible('#secondPhoto') and 'round bottle' in pg.inner_text('#secondPhoto'), 'v2.16: "Add 2nd photo (round bottle)" next to "Another photo"')
@@ -1078,6 +1082,13 @@ with sync_playwright() as p:
     ok(rd['thumbs'] == 2 and rd['now'] == 1 and rd['cam'] and rd['x'] == 'none' and rd['again'] == 'none' and rd['chk'] == 'none' and rd['checkBottom'] <= rd['vh'] and rd['bar'] and rd['crop'] == 'none', 'v2.19: progress bar shows, the big picture is hidden, no jumping; v2.18.3: while several photos are read, the small pictures stay on the same screen (the one being read is marked, no ✕) (%s)' % rd)
     pg.wait_for_selector('#result:not([hidden]) #answer', timeout=120000)
     ok(pg.is_hidden('#photoCam') and not pg.evaluate("document.getElementById('labelPanel').classList.contains('reading')"), 'v2.18.3: after reading the small pictures are gone and the result shows')
+    pg.wait_for_selector('#result:not([hidden]) #repBtn', timeout=20000)
+    rp = pg.evaluate("async () => { const d = await LC.buildReport(true); const n = await LC.buildReport(false); return { v: d.version, kind: d.kind, verdict: !!d.verdict, frames: d.frames.length, f0: Object.keys(d.frames[0] || {}).sort().join(','), photos: (d.photos || []).length, noPhotos: !('photos' in n), text: d.text.length, rows: d.rows.length, bytes: JSON.stringify(d).length } }")
+    ok(rp['v'].startswith('v2.') and rp['frames'] == 2 and rp['photos'] == 2 and rp['noPhotos'] and rp['text'] > 20 and rp['rows'] >= 1 and 'conf' in rp['f0'] and 'read' in rp['f0'], 'v2.21: the report has version, type, verdict, text of both photos (frames), the photos (and none when switched off) (%s)' % rp)
+    with pg.expect_download(timeout=15000) as dl:
+        pg.click('#repBtn')
+    ok(dl.value.suggested_filename.startswith('label-check-report-') and dl.value.suggested_filename.endswith('.json'), 'v2.21: "Report this result" makes one .json file (%s)' % dl.value.suggested_filename)
+    ok(pg.is_visible('#repPhotos'), 'v2.21: the "include photos" switch is next to the button')
     cctx.close(); bcam.close()
 
     # A real update: serve a copy of the app, change its sw.js (as a push does), ask the browser to check.
@@ -1097,16 +1108,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v34'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v35'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v34' not in keys: break
+        if 'label-check-v35' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v34' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v35' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
     b.close()

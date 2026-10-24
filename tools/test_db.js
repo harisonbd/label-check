@@ -173,6 +173,11 @@ const ok = (cond, msg) => { if (!cond) { fails++; console.log('  FAIL: ' + msg);
   ok(LCDB.search('Bienenwachs', 5).some(h => h.id === 'e901') && LCDB.search('пчелен восък', 5).some(h => h.id === 'e901'), '"Bienenwachs" and "пчелен восък" find E901 (then BEESWAX)');
   ok(f2c('e999') === '' && f2c('') === '', 'unknown E-number: nothing');
 
+  console.log('\n16 Plain food names in many languages (v2.21, Open Food Facts names file)');
+  ok(info.foodNames > 40000, 'the names file is loaded (' + info.foodNames + ' names)');
+  ok(['Weizenmehl (45 %)', 'Zucker', 'Sonnenblumenöl', 'Магермилчпулвер'.length ? 'Magermilchpulver' : '', 'Манитол', 'Лимонена киселина', 'Мента'].every(s => LCDB.knownFood(s)), 'German and Bulgarian food names are known');
+  ok(['Pantuene', 'Zzyzx', 'ab', ''].every(s => !LCDB.knownFood(s)), 'misreads, nonsense and tiny pieces are not known');
+
   console.log(fails ? `\n${fails} FAILED` : '\nALL PASSED');
   process.exit(fails ? 1 : 0);
 })();
