@@ -339,12 +339,13 @@
         else if (sug && sug.inci) {
           const k = asIngredient(sug.inci);
           const cand = k ? cosRow(k, use, household, null) : null;
-          if (cand && cand.group !== 'red' && cand.group !== 'orange') {    // (a) no warning: the app corrects it
+          const near = sug.d <= (sug.from.replace(/[^\p{L}]/gu, '').length >= 12 ? 2 : 1);   // v2.21.1: only a small spelling fix is done alone; a bigger one is a question
+          if (cand && cand.group !== 'red' && cand.group !== 'orange' && near) {    // (a) no warning, small fix: the app corrects it
             cand.auto = { from: sug.from, to: sug.inci };
             cand.sub = cosmeticSub(cand);
             return cand;
           }
-          if (cand) {                                                        // (b) a warning: never decided alone
+          if (cand) {                                                        // (b) a warning, or a big fix: never decided alone
             row.ask = { from: sug.from, to: sug.inci, group: cand.group, level: cand.level, why: cand.why, src: cand.src };
             row.group = 'orange';
             row.label = niceName(sug.inci) + '?';
@@ -2744,6 +2745,33 @@
     }).join(', ');
   }
 
+  // v2.21.1: sentence words (any text line that is no ingredient) and blocks that hold known names with noise around them.
+  const SENTENCE_WORD = /(^|\s)(das|der|die|und|mit|für|von|zur|bei|ist|einer|eines|wird|werden|nicht|auf|the|and|with|for|is|are|this|which|dem|den|des|или|и|за|на|със|не)(\s|$)/iu;
+  const KEEP_LINE = /contain|trace|spur|enth[äa]lt|kann|allerg|gluten|съдържа|следи|алерг|nuts?\b|milk|egg|soy|wheat|nüsse|milch|ei\b|\bmay\b/iu;
+  function repairNames(text) {
+    if (!DBINFO || !text) return text;
+    const head = (String(text).match(/^\s*(ingredients?|ingr[eé]dients?|inci|zutaten|inhaltsstoffe|bestandteile|съставки|състав|composition|összetevők|složení|zloženie|sestavine)\s*[:：]\s*/i) || [''])[0];     // the heading ("Ingredients:") stays as it is
+    const segs = LCDB.splitIngredients(text), out = [], seenFix = new Set(segs.filter(g => nameKnown(g)).map(g => g.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')));
+    for (const seg of segs) {
+      if (!/\p{L}{3}/u.test(seg) || nameKnown(seg)) { out.push(seg); continue; }
+      if (SENTENCE_WORD.test(seg) && !KEEP_LINE.test(seg)) continue;        // a line of running text, not a name (never an allergen / traces line)
+      let parts = null;
+      try { parts = LCDB.findInside(seg); } catch (e) { parts = null; }
+      if (!parts) { out.push(seg); continue; }
+      for (const p of parts) {
+        if (p.rest) { out.push(p.rest); continue; }
+        const k = p.to.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+        if (seenFix.has(k)) continue;
+        seenFix.add(k); out.push(p.to);
+      }
+    }
+    // A piece of a name that is already in the list ("YL GLYCOL" next to "Caprylyl Glycol") is no name of its own
+    const kk = n => n.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+    const done = out.filter(n => nameKnown(n)).map(kk);
+    const res = out.filter(n => nameKnown(n) || kk(n).length < 5 || !done.some(d => d.length > kk(n).length && d.includes(kk(n))));
+    if (res.length === segs.length && res.every((n, i) => n === segs[i])) return text;    // nothing to repair: the text stays exactly as read
+    return head + res.join(', ');
+  }
   function cleanOcr(text) {
     let s = String(text || '').replace(/[­]/g, '').replace(/(\p{L})-\s*\n\s*(\p{Ll})/gu, '$1$2');
     // Lists with dots between the names ("AQUA · GLYCERIN"): the reader turns the dots into - : » ° and so on.
@@ -2805,7 +2833,7 @@
       }
       if (auto) { store.set('ocrLast', used); if (used !== 'bul') store.set('ocrLastLatin', used); }
       const fromList = listFromPieces(tsvPieces(r.tsv));
-      let text = cleanOcr(fromList || r.text);
+      let text = repairNames(cleanOcr(fromList || r.text));
       // The list was found when the read text has its heading (in the read box, or as "Zutaten:" in the text)
       lastRead = { photo: true, list: !!fromList || new RegExp(HEAD_RE.source, 'iu').test(r.text), conf: Math.round(r.conf) };
       const frame = { lang: used, switched, conf: Math.round(r.conf), list: lastRead.list, boxed: !!fromList, read: String(r.text || '').slice(0, 3000), clean: text.slice(0, 3000) };
@@ -3498,7 +3526,7 @@
 
   // Small test hook (used only by automated checks).
   window.LC = { analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
-    buildReport, getRep: () => rep, cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, nameIdent, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
+    buildReport, getRep: () => rep, repairNames, cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, nameIdent, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
 
   init();
 })();

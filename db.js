@@ -353,12 +353,7 @@
     return prev[b.length];
   }
   const OCR_DIGIT = { 0: 'o', 1: 'i', 5: 's', 8: 'b' };   // the reader sees O as 0, I as 1 ("150PROPYL" = ISOPROPYL)
-  function suggestCosmetic(seg, all) {
-    if (!cosIndex) return null;
-    // The name before a bracket, without marks like * or °
-    const from = String(seg || '').replace(/\s*[\[(].*$/, '').replace(/[\s*°¹²³†‡.:]+$/, '').replace(/^[\s*°.:\-–]+/, '');
-    const k = key(from);
-    if (k.length < 6 || /[а-я]/.test(k) || cosIndex.has(k)) return null;
+  function ensureFuzzy() {
     if (!fuzzyByLen) {
       fuzzyByLen = new Map();
       const seen = new Set();
@@ -372,6 +367,14 @@
       for (const it of COS.items) add(it[0]);
       for (const a of Object.keys(Object.assign({}, COS.aliases, EXTRA_COS_ALIASES))) add(a);
     }
+  }
+  function suggestCosmetic(seg, all) {
+    if (!cosIndex) return null;
+    // The name before a bracket, without marks like * or °
+    const from = String(seg || '').replace(/\s*[\[(].*$/, '').replace(/[\s*°¹²³†‡.:]+$/, '').replace(/^[\s*°.:\-–]+/, '');
+    const k = key(from);
+    if (k.length < 6 || /[а-я]/.test(k) || cosIndex.has(k)) return null;
+    ensureFuzzy();
     const max = k.length <= 8 ? 1 : Math.max(2, Math.floor(k.length * 0.25));
     const tries = [k];
     const kd = k.replace(/[0158]/g, d => OCR_DIGIT[d]);
@@ -393,6 +396,56 @@
     // all: also the case of two or more equally close names (v2.13: the app asks which one it is)
     if (tie) return all ? { from, tie: true, d: best.d, choices: ties.filter(Boolean).slice(0, 3).map(it => it[0]) } : null;
     return { from, to: best.name, inci: best.it[0], d: best.d };
+  }
+
+
+  // v2.21.1: a block of text that holds one or more known names with a little noise around them ("ALLA SODIUM CETEARYL SULFF MIC ACID").
+  // Returns [{ from, to }] for the names found inside, and "rest" pieces that stay as they are. null when nothing clear is inside.
+  function findInside(seg) {
+    if (!cosIndex) return null;
+    ensureFuzzy();
+    const words = String(seg || '').trim().split(/\s+/).filter(Boolean);
+    if (words.length < 2) return null;
+    const keys = words.map(w => key(w));
+    const used = new Array(words.length).fill(false), found = [];
+    const tryWin = (i, j) => {
+      const k = keys.slice(i, j + 1).join('');
+      if (k.length < 8) return null;
+      if (cosIndex.has(k)) return cosIndex.get(k)[0];                                  // exact
+      const max = k.length >= 15 ? Math.max(2, Math.floor(k.length * 0.18)) : k.length >= 10 ? 1 : 0;
+      let best = null, tie = false;
+      for (let len = k.length - max; len <= k.length + max; len++) {
+        for (const [nk, name] of fuzzyByLen.get(len) || []) {
+          if (max && (nk[0] === k[0] || k.length >= 15)) {
+            const d = lev(k, nk, max);
+            if (d <= max) { const it = cosIndex.get(nk); if (!best || d < best.d) { best = { d, it }; tie = false; } else if (d === best.d && it !== best.it) tie = true; }
+          }
+        }
+      }
+      if (best && !tie && best.it) return best.it[0];
+      if (k.length >= 10) {                                                            // the start or the end of a name is cut off at the edge of the photo
+        const hits = new Set();
+        for (const [len, arr] of fuzzyByLen) if (len > k.length) for (const [nk] of arr) if (nk.endsWith(k) || nk.startsWith(k)) { const it = cosIndex.get(nk); if (it) hits.add(it[0]); }
+        if (hits.size === 1) return [...hits][0];
+      }
+      return null;
+    };
+    for (let len = Math.min(5, words.length); len >= 1; len--) {
+      for (let i = 0; i + len <= words.length; i++) {
+        if (used.slice(i, i + len).some(Boolean)) continue;
+        const to = tryWin(i, i + len - 1);
+        if (to) { for (let x = i; x < i + len; x++) used[x] = true; found.push({ at: i, to, from: words.slice(i, i + len).join(' ') }); }
+      }
+    }
+    if (!found.length) return null;
+    const total = keys.join('').length, got = found.reduce((n, f) => n + f.from.replace(/[^\p{L}\p{N}]/gu, '').length, 0);
+    if (got / Math.max(1, total) < 0.6) return null;
+    found.sort((a, b) => a.at - b.at);
+    const out = []; let w = 0;
+    const rest = (a, b) => { const r = words.slice(a, b).join(' '); if ((r.match(/\p{L}/gu) || []).length >= 5) out.push({ rest: r }); };
+    for (const f of found) { rest(w, f.at); out.push({ from: f.from, to: f.to }); w = f.at + f.from.split(/\s+/).length; }
+    rest(w, words.length);
+    return out;
   }
 
   // ---------- search one ingredient (name, alias or E-number)
@@ -442,6 +495,6 @@
     return out;
   }
 
-  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, suggestCosmetic, checkFood, knownFood, cosAllergens, foodAllergens, search, foodToCosmetic, meta: () => META, SEV };
+  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, suggestCosmetic, findInside, checkFood, knownFood, cosAllergens, foodAllergens, search, foodToCosmetic, meta: () => META, SEV };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.LCDB = api;
 })(typeof window !== 'undefined' ? window : globalThis);
