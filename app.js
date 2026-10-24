@@ -250,7 +250,8 @@
     const noList = !!(p.read && p.read.photo && !p.read.list);
     // v2.15: a photo read is "No warnings" only with proof of a full list: at least 3 names and an end that is not cut off.
     const total = rows.filter(r => r.pos).length;
-    const weak = p.read && p.read.photo && !noList ? weakRead(text, total, p.read.conf) : '';
+    const garbledN = rows.filter(r => r.garbled).length;
+    const weak = (p.read && p.read.photo && !noList ? weakRead(text, total, p.read.conf) : '') || (garbledN >= 2 && garbledN / Math.max(1, total) >= 0.2 ? 'Blur' : '');
     const verdict = counts.red ? 'avoid' : counts.orange ? 'check' : rows.length ? (partial || noList || weak ? 'partial' : 'ok') : 'unknown';
     return {
       verdict, rows, counts, known, unknown, noList, weak,
@@ -421,6 +422,16 @@
 
   const ALLERGEN_TAG = /^en:(gluten|crustaceans|eggs|fish|peanuts|soybeans|milk|nuts|celery|mustard|sesame-seeds|sulphur-dioxide-and-sulphites|lupin|molluscs)$/;
 
+  // A piece of text that cannot be an ingredient name: a word with a digit inside it, an odd mix of cases, or marks like ® | { }.
+  function garbledName(txt) {
+    const s = String(txt || '');
+    if (/[©®™|\\{}<>~^_]/.test(s)) return true;
+    return s.split(/[\s,;]+/).some(w => {
+      const x = w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+      if (x.length < 5 || /^E\d{3,4}[a-z]{0,2}$/i.test(x)) return false;
+      return /\p{L}\d+\p{L}/u.test(x) || (x.length >= 5 && /^\p{Lu}+\p{Ll}\p{Lu}+$/u.test(x));
+    });
+  }
   function analyzeFood(p, text) {
     const { segs, traceFrom } = LCDB.labelSegments(text);   // pieces from traceFrom on are "may contain traces"
     const segN = segs.map(nrm);
@@ -487,6 +498,8 @@
       row.why = why;
       row.group = why ? 'red' : level === 'c' || level === 'u' ? 'orange'
         : level === 'r' || row.allergens.length || (state.vegan && vg.maybe.length) ? 'info' : 'green';
+      // v2.21.2: text that is no ingredient name (letters mixed with digits and marks: "N03A", "CbCTAB", "VH®OPM") is never "nothing found"
+      if (row.group === 'green' && row.pos && garbledName(row.text)) { row.group = 'nodata'; row.garbled = true; }
       row.sub = foodSub(row);
       return row;
     });
@@ -2831,6 +2844,15 @@
           } catch (e) { /* that reader is not on the phone yet and no internet */ }
         }
       }
+      // v2.21.2: a Latin read that found no heading may be a Cyrillic label read as look-alike letters (МАГНЕЗИЕВ -> MATHE3MEB, confidence 69).
+      // Read once more with the Bulgarian reader and keep it when it finds a heading (or is clearly surer).
+      const headOf = x => !!listFromPieces(tsvPieces(x.tsv)) || new RegExp(HEAD_RE.source, 'iu').test(x.text);
+      if (auto && used !== 'bul' && !headOf(r)) {
+        try {
+          const rb = await ocrRun(image.slice(), 'bul');
+          if (headOf(rb) || rb.conf > r.conf + 10) { r = rb; used = 'bul'; switched = true; }
+        } catch (e) { /* the Bulgarian reader is not on the phone yet and no internet: keep the Latin text */ }
+      }
       if (auto) { store.set('ocrLast', used); if (used !== 'bul') store.set('ocrLastLatin', used); }
       const fromList = listFromPieces(tsvPieces(r.tsv));
       let text = repairNames(cleanOcr(fromList || r.text));
@@ -3526,7 +3548,7 @@
 
   // Small test hook (used only by automated checks).
   window.LC = { analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
-    buildReport, getRep: () => rep, repairNames, cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, nameIdent, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
+    buildReport, getRep: () => rep, repairNames, garbledName, cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, nameIdent, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
 
   init();
 })();

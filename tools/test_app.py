@@ -479,7 +479,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.21.1' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.21.2' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -949,7 +949,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v36')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v37')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1051,6 +1051,12 @@ with sync_playwright() as p:
     mc = "Ingredients: Sugar, wheat flour, palm oil, salt, flavouring. May contain traces of milk and hazelnuts."
     ok(pg.evaluate("(t) => LC.repairNames(t)", mc) == mc, 'v2.21.1: "May contain traces of ..." is never dropped as a sentence')
     ok(pg.evaluate("(t) => LC.repairNames(t)", "Emulgator: Lecithin, GLYCER PROPYL MYRISTATE, Aqua") == "Emulgator: Lecithin, GLYCER, ISOPROPYL MYRISTATE, Aqua", 'v2.21.1: a name with a colon at the start is not taken as a heading (no doubled word)')
+    gn = pg.evaluate("(l) => l.map(x => LC.garbledName(x))", ["XPAHMTENIHA VH®OPMALLUR M CbCTAB B EAMHMUNA N03A", "MATHE3IMER EUCTTIMUMHAT", "Sugar", "Wheat flour (Wheat, Calcium carbonate)", "E150d", "Vitamin B12", "Soy lecithin (E322)", "H2O2 (hydrogen peroxide)", "NaCl", "Mono- und Diglyceride von Speisefettsäuren"])
+    ok(gn[:2] == [True, True] and not any(gn[2:]), 'v2.21.2: nonsense text is "garbled", normal names (E150d, B12, NaCl, H2O2 ...) are not (%s)' % gn)
+    gv = pg.evaluate("(t) => { const a = LC.analyze({ kind: 'food', ingredientsText: t, read: { photo: true, list: true, conf: 80 } }); return { v: a.verdict, n: a.counts.nodata, g: a.counts.green } }", "Ingredients: XPAHMTENIHA VH®OPMALLUR N03A, MATHE3IMER EUCTTIMUMHAT 14%, MATHE3MEB BUCTTIMUMHAT NOCTABALL, Sugar, Salt")
+    ok(gv['n'] == 3 and gv['g'] == 2 and gv['v'] == 'partial', 'v2.21.2: food: 3 nonsense rows are "No data" (grey), not green; the verdict is "Incomplete" (%s)' % gv)
+    gc = pg.evaluate("(t) => { const a = LC.analyze({ kind: 'food', ingredientsText: t, read: { photo: true, list: true, conf: 80 } }); return { v: a.verdict, n: a.counts.nodata } }", "Ingredients: Sugar, Wheat flour, Palm oil, Glucose syrup, Emulsifier: Soya lecithin, Colour: E150d, Vitamin B12, Salt")
+    ok(gc['n'] == 0 and gc['v'] == 'ok', 'v2.21.2: a clean food list is not changed by the nonsense rule (%s)' % gc)
     good = "Aqua, Glycerin, Panthenol, Cetyl Alcohol, Glyceryl Stearate, Dicaprylyl Ether, Isopropyl Myristate, Allantoin, Helianthus Annuus Hybrid Oil, Sodium Cetearyl Sulfate, Caprylyl Glycol, Caprylhydroxamic Acid, Citric Acid, Sodium Hydroxide"
     ok(pg.evaluate("(t) => LC.repairNames(t)", good) == good, 'v2.21.1: a clean list is not changed')
     fl = "Zucker, Weizenmehl, Palmfett, Kakaopulver, Salz, Magermilchpulver, Emulgator Sojalecithin, Aroma"
@@ -1128,16 +1134,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v36'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v37'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v36' not in keys: break
+        if 'label-check-v37' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v36' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v37' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
     b.close()
