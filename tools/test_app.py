@@ -48,6 +48,15 @@ def fake_api(route):
     else:
         route.fulfill(status=200, content_type='application/json', body='{"status":0}')
 
+
+def force_tess(br):
+    """v2.23: the old tests were written for the Tesseract reader; they keep using it. Paddle has its own tests at the end."""
+    orig = br.new_context
+    def nc(*a, **k):
+        c = orig(*a, **k); c.add_init_script("try { localStorage.setItem('lc.ocrEngine', '\"tess\"'); } catch (e) {}"); return c
+    br.new_context = nc
+    return br
+
 def new_page(browser, base, locale, dark=False, width=390):
     ctx = browser.new_context(viewport={'width': width, 'height': 844}, device_scale_factor=2, locale=locale,
                               color_scheme='dark' if dark else 'light', service_workers='block')
@@ -118,7 +127,7 @@ def card_fits(pg):
 srv = serve()
 base = 'http://127.0.0.1:%d/index.html' % srv.server_address[1]
 with sync_playwright() as p:
-    b = p.chromium.launch()
+    b = force_tess(p.chromium.launch())
 
     print('English, cosmetic label')
     ctx, pg = new_page(b, base, 'en-GB')
@@ -347,7 +356,7 @@ with sync_playwright() as p:
     b.close()
 
     print('v2.4: camera frame (fake camera)')
-    bc = p.chromium.launch(args=['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'])
+    bc = force_tess(p.chromium.launch(args=['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream']))
     for loc, tip in (('en-GB', 'Scan'), ('bg-BG', 'Сканирай'), ('de-AT', 'Scannen')):
         ctx = bc.new_context(viewport={'width': 360, 'height': 740}, locale=loc, service_workers='block', permissions=['camera'])
         ctx.add_init_script("window.BarcodeDetector = class { static async getSupportedFormats() { return ['ean_13']; } async detect() { return []; } };")
@@ -415,7 +424,7 @@ with sync_playwright() as p:
         pg.click('#ocrRead')
         pg.wait_for_function("() => { const s = document.getElementById('ocrStatus'); return !s.hidden && !s.classList.contains('busy'); }", timeout=90000)
 
-    b = p.chromium.launch()
+    b = force_tess(p.chromium.launch())
     ctx, pg = new_page(b, base, 'en-GB')
     pg.click('#cardLabel')
     ok(pg.inner_text('#labelTitle') == 'Read a label' and not pg.is_visible('#ocrArea') and not pg.eval_on_selector('#claudeBox', 'd => d.open'), 'panel: title "Read a label", no photo box yet, Claude part folded')
@@ -479,7 +488,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.22' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.23' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -949,7 +958,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v39')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v40')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1097,7 +1106,7 @@ with sync_playwright() as p:
     ctx.close()
 
     # ---------- v2.17: in-app camera, sweep, "Your photos" ----------
-    bcam = p.chromium.launch(args=['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'])
+    bcam = force_tess(p.chromium.launch(args=['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream']))
     cctx = bcam.new_context(viewport={'width': 390, 'height': 844}, locale='en-GB', permissions=['camera'])
     pg = cctx.new_page(); pg.on('pageerror', lambda e: errors.append(str(e)))
     pg.goto(base); pg.evaluate('LC.dbReady')
@@ -1145,6 +1154,42 @@ with sync_playwright() as p:
     ok(pg.is_visible('#repPhotos'), 'v2.21: the "include photos" switch is next to the button')
     cctx.close(); bcam.close()
 
+
+    # ---- v2.23: the new reader (PaddleOCR) ----
+    print('v2.23: PaddleOCR reader')
+    bp = p.chromium.launch()
+    ctx, pg = new_page(bp, base, 'en-GB')
+    ok(pg.evaluate("localStorage.getItem('lc.ocrEngine')") is None, 'v2.23: the new reader is the default (nothing saved)')
+    pg.click('#cardLabel'); pg.set_input_files('#photoPick', photo); pg.wait_for_selector('#ocrArea:not([hidden])')
+    ok(pg.eval_on_selector_all('#ocrEngine option', 'o => o.map(x => x.value)') == ['paddle', 'tess'] and pg.input_value('#ocrEngine') == 'paddle', 'v2.23: Settings choice "Reader": New (Paddle) / Old (Tesseract)')
+    ctx.close()
+    ctx, pg = new_page(bp, base, 'en-GB')
+    pg.click('#cardLabel')
+    read_photo(pg)
+    txt = pg.input_value('#labelText').lower()
+    ok(txt.startswith('ingredients:') and all(w in txt for w in ('sugar', 'wheat flour', 'palm oil', 'lecithin', 'tartrazine', 'milk')), 'v2.23: Paddle reads the box and starts at "Ingredients:" (%s)' % txt[:80])
+    ok('crunchy' not in txt and 'nutrition' not in txt, 'v2.23: Paddle: text outside the box is not read')
+    pg.wait_for_selector('#result:not([hidden]) #answer')
+    ok('Tartrazine' in pg.text_content('#result') or 'E102' in pg.text_content('#result'), 'v2.23: Paddle: the answer shows (tartrazine found)')
+    res = pg.evaluate("performance.getEntriesByType('resource').map(e => e.name)")
+    ok(any('/ocr-paddle/paddle-worker.js' in x for x in res) and not any('/ocr/' in x for x in res), 'v2.23: the Paddle worker was used, no Tesseract file was loaded')
+    ok(pg.evaluate("LC.getRep().frames[0].engine") == 'paddle', 'v2.23: the report says which reader was used')
+    ctx.close()
+    ctx, pg = new_page(bp, base, 'bg-BG')
+    pg.click('#cardLabel')
+    read_photo(pg, lang='auto', file=photo_bg, box=(0.02, 0.44, 0.98, 0.62))
+    txt = pg.input_value('#labelText').lower()
+    ok('съставки' in txt and 'захар' in txt and 'лецитин' in txt, 'v2.23: Paddle reads a Cyrillic label by itself (no wrong-alphabet read) (%s)' % txt[:80])
+    ctx.close()
+    ctx, pg = new_page(bp, base, 'en-GB')
+    ctx.route('**/ocr-paddle/**', lambda r: r.abort())
+    pg.click('#cardLabel')
+    read_photo(pg)
+    txt = pg.input_value('#labelText').lower()
+    ok('tartrazine' in txt and pg.evaluate("LC.getRep().frames[0].engine") == 'tess', 'v2.23: Paddle files missing (offline, first use): the old reader takes over (%s)' % txt[:60])
+    ctx.close()
+    bp.close()
+
     # A real update: serve a copy of the app, change its sw.js (as a push does), ask the browser to check.
     import shutil, tempfile
     tmp = tempfile.mkdtemp()
@@ -1162,16 +1207,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v39'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v40'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v39' not in keys: break
+        if 'label-check-v40' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v39' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v40' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
     b.close()

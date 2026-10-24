@@ -15,7 +15,7 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>Label Check <span class="ver">v2.22</span></h1>
+    <h1>Label Check <span class="ver">v2.23</span></h1>
     <button class="iconbtn topsearch" id="topSearch" type="button" data-t-aria="card.search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg></button>
     <div class="langsw" id="langSwitch" role="group" aria-label="Language">
       <button type="button" data-lang="en" lang="en" aria-pressed="false">EN</button>
@@ -250,6 +250,12 @@
       <p class="minor setnote" id="vibNote" data-t="set.vibNote">1 short = no warnings · 2 = check · 3 = avoid. Android only.</p>
       <div class="offl" id="offline">
         <strong data-t="off.title">Label reader without internet</strong>
+        <div class="ocrlang">
+          <label for="ocrEngine" data-t="ocr.engine">Reader</label>
+          <select id="ocrEngine" class="ocrsel">
+            <option value="paddle" data-t="ocr.engPaddle">New (Paddle)</option><option value="tess" data-t="ocr.engTess">Old (Tesseract)</option>
+          </select>
+        </div>
         <span class="minor" id="offState"></span>
         <button class="btn btn-ghost" id="offGet" type="button"></button>
       </div>

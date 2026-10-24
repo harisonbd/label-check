@@ -2633,17 +2633,18 @@
     const langs = ocrChoice() === 'auto' ? [OCR_ALL.includes(latin) && latin !== 'bul' ? latin : 'deu', 'bul'] : [ocrChoice()];
     let pieces = [], list = null;
     for (const lang of langs) {
-      try { pieces = tsvPieces((await ocrRun(png.slice(), lang, { layout: true })).tsv); } catch (e) { pieces = []; }
+      let rr = null;
+      try { rr = await ocrRun(png.slice(), lang, { layout: true }); pieces = tsvPieces(rr.tsv); } catch (e) { pieces = []; }
       if (file !== ocrFile) return null;
       list = listPieces(pieces);
-      if (list) break;
+      if (list || (rr && rr.engine === 'paddle')) break;          // Paddle already chose the alphabet itself
     }
     // v2.16: no heading at 1200 px (small print): read the photo once more, bigger
     if (!list) {
       try {
         const big = await photoPng(bmp, 2000, false);
         if (file !== ocrFile) { if (bmp.close) bmp.close(); return null; }
-        const p2 = tsvPieces((await ocrRun(big.png.slice(), langs[0], { layout: true })).tsv), l2 = listPieces(p2);
+        const p2 = tsvPieces((await ocrRun(big.png.slice(), langs[0], { layout: true, maxside: 2000 })).tsv), l2 = listPieces(p2);
         if (l2) { pieces = p2; list = l2; W = big.W; H = big.H; }
       } catch (e) { /* keep: not found */ }
       if (file !== ocrFile) { if (bmp.close) bmp.close(); return null; }
@@ -2734,27 +2735,50 @@
     return new Uint8Array(await blob.arrayBuffer());
   }
 
-  function ocrRun(image, lang, opts) {
-    opts = opts || {};
-    if (!ocrWorker) {
-      ocrWorker = new Worker('ocr/ocr-worker-2.js');
-      ocrWorker.onmessage = e => {
-        const m = e.data, w = ocrWait[m.id];
-        if (!w) return;
-        if (m.step) { w.step(m.step); return; }
+  const r_lang = (r, lang) => (r && r.lang) || lang;
+  // v2.23: the main reader is PaddleOCR (ocr-paddle/); the Tesseract reader (ocr/) is the fallback and a Settings choice.
+  let paddleWorker = null, paddleDead = false;
+  const paddleOK = () => store.get('ocrEngine', 'paddle') !== 'tess' && !paddleDead && typeof OffscreenCanvas !== 'undefined' && typeof WebAssembly === 'object';
+  function workerRun(kind, image, lang, opts) {
+    const url = kind === 'paddle' ? 'ocr-paddle/paddle-worker.js' : 'ocr/ocr-worker-2.js';
+    let w = kind === 'paddle' ? paddleWorker : ocrWorker;
+    if (!w) {
+      w = new Worker(url);
+      w.onmessage = e => {
+        const m = e.data, q = ocrWait[m.id];
+        if (!q) return;
+        if (m.step) { q.step(m.step); return; }
         delete ocrWait[m.id];
-        m.error ? w.reject(new Error(m.error)) : w.resolve(m);
+        m.error ? q.reject(new Error(m.error)) : q.resolve(m);
       };
-      ocrWorker.onerror = e => {
-        Object.keys(ocrWait).forEach(id => { ocrWait[id].reject(new Error(e.message || 'worker')); delete ocrWait[id]; });
-        ocrWorker = null;
+      w.onerror = e => {
+        Object.keys(ocrWait).forEach(id => { if (ocrWait[id].kind === kind) { ocrWait[id].reject(new Error(e.message || 'worker')); delete ocrWait[id]; } });
+        if (kind === 'paddle') paddleWorker = null; else ocrWorker = null;
       };
+      if (kind === 'paddle') paddleWorker = w; else ocrWorker = w;
     }
     const id = ++ocrSeq;
     return new Promise((resolve, reject) => {
-      ocrWait[id] = { resolve, reject, step: s => ocrStatus(t(s === 'load' ? 'ocr.loading' : opts.layout ? 'ocr.finding' : 'ocr.reading'), 'busy') };
-      ocrWorker.postMessage({ id, image, lang, psm: opts.psm, layout: !!opts.layout }, [image.buffer]);
+      ocrWait[id] = { kind, resolve, reject, step: s => ocrStatus(t(s === 'load' ? 'ocr.loading' : opts.layout ? 'ocr.finding' : 'ocr.reading'), 'busy') };
+      w.postMessage({ id, image, lang, psm: opts.psm, layout: !!opts.layout, maxside: opts.maxside }, [image.buffer]);
     });
+  }
+  async function ocrRun(image, lang, opts) {
+    opts = opts || {};
+    if (paddleOK()) {
+      try {
+        const m = await workerRun('paddle', image.slice(), lang, opts);
+        m.engine = 'paddle';
+        if (m.script === 'cyr') m.lang = 'bul'; else if (lang === 'bul') m.lang = store.get('ocrLastLatin', LANG === 'en' ? 'eng' : 'deu'); else m.lang = lang;
+        return m;
+      } catch (e) {
+        paddleDead = true;                       // files missing (no internet at first use) or too little memory: Tesseract from now on
+        if (paddleWorker) { paddleWorker.terminate(); paddleWorker = null; }
+      }
+    }
+    const m = await workerRun('tess', image, lang, opts);
+    m.engine = 'tess'; m.lang = lang;
+    return m;
   }
 
   // Ingredient headings in the languages seen on EU labels, by language. Two headings with the same language
@@ -2855,10 +2879,10 @@
       const lastLatin = store.get('ocrLastLatin', LANG === 'en' ? 'eng' : 'deu');
       let lang = auto ? store.get('ocrLast', OCR_LANGS[LANG] || 'eng') : pick;
       if (!OCR_ALL.includes(lang)) lang = 'eng';
-      let r = await ocrRun(image.slice(), lang), used = lang, switched = false;
+      let r = await ocrRun(image.slice(), lang), used = r_lang(r, lang), switched = false;
       // Low confidence: probably the wrong alphabet (a Latin label read as BG, or the reverse).
       // Read once more with the other alphabet and keep the better text.
-      if (r.conf < OCR_LOW) {
+      if (r.engine !== 'paddle' && r.conf < OCR_LOW) {
         const other = lang === 'bul' ? (OCR_ALL.includes(lastLatin) ? lastLatin : 'deu') : 'bul';
         try {
           const r2 = await ocrRun(image.slice(), other);
@@ -2866,7 +2890,7 @@
         } catch (e) { /* other language not on the phone yet and no internet: keep the first text */ }
       }
       // Auto, Latin letters: the heading word ("Zutaten:", "Összetevők:") tells the language. Read once more with it.
-      if (auto && used !== 'bul') {
+      if (auto && used !== 'bul' && r.engine !== 'paddle') {
         const h = headingLang(r.text);
         if (h && h !== used && h !== 'bul') {
           try {
@@ -2878,7 +2902,7 @@
       // v2.21.2: a Latin read that found no heading may be a Cyrillic label read as look-alike letters (МАГНЕЗИЕВ -> MATHE3MEB, confidence 69).
       // Read once more with the Bulgarian reader and keep it when it finds a heading (or is clearly surer).
       const headOf = x => !!listFromPieces(tsvPieces(x.tsv)) || new RegExp(HEAD_RE.source, 'iu').test(x.text);
-      if (auto && used !== 'bul' && !headOf(r)) {
+      if (auto && used !== 'bul' && r.engine !== 'paddle' && !headOf(r)) {
         try {
           const rb = await ocrRun(image.slice(), 'bul');
           if (headOf(rb) || rb.conf > r.conf + 10) { r = rb; used = 'bul'; switched = true; }
@@ -2889,7 +2913,7 @@
       let text = repairNames(cleanOcr(fromList || r.text));
       // The list was found when the read text has its heading (in the read box, or as "Zutaten:" in the text)
       lastRead = { photo: true, list: !!fromList || new RegExp(HEAD_RE.source, 'iu').test(r.text), conf: Math.round(r.conf) };
-      const frame = { lang: used, switched, conf: Math.round(r.conf), list: lastRead.list, boxed: !!fromList, read: String(r.text || '').slice(0, 3000), clean: text.slice(0, 3000) };
+      const frame = { engine: r.engine, lang: used, switched, conf: Math.round(r.conf), list: lastRead.list, boxed: !!fromList, read: String(r.text || '').slice(0, 3000), clean: text.slice(0, 3000) };
       if (collect) {                                                    // v2.17: one of several photos: keep the text, check later
         collect.push({ text, conf: r.conf, list: lastRead.list, fr: frame });
         return;
@@ -3440,6 +3464,8 @@
     $('photoPick').addEventListener('change', onPhoto);
     $('ocrRead').addEventListener('click', () => (partsList.length && camUiOn() ? readParts() : onOcrRead()));
     $('ocrLang').addEventListener('change', e => store.set('ocrPick', e.target.value));
+    $('ocrEngine').value = store.get('ocrEngine', 'paddle') === 'tess' ? 'tess' : 'paddle';
+    $('ocrEngine').addEventListener('change', e => { store.set('ocrEngine', e.target.value); if (e.target.value === 'paddle') paddleDead = false; });
     document.querySelectorAll('input[name="kind"]').forEach(i => i.addEventListener('change', () => { kindTouched = true; $('kindNote').hidden = true; renderFixes(); }));
     $('labelText').addEventListener('input', () => {
       lastRead = null; prevPart = null; rep = null;   // you typed or pasted: it is your text now
@@ -3514,10 +3540,12 @@
   // ---------- Label reader without internet (all 7 languages on the phone) ----------
   const OCR_MB = { eng: 2.0, deu: 0.9, bul: 0.8, hun: 2.4, ces: 1.7, slk: 1.9, slv: 1.2 };
   const hasSimd = () => { try { return WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11])); } catch (e) { return false; } };
+  const PADDLE_FILES = ['paddle-worker.js', 'ort.wasm.min.js', 'ort-wasm-simd-threaded.mjs', 'ort-wasm-simd-threaded.wasm', 'det.onnx', 'rec-latin.onnx', 'rec-eslav.onnx', 'dict-latin.txt', 'dict-eslav.txt'].map(f => 'ocr-paddle/' + f);
+  const PADDLE_MB = { 'ort-wasm-simd-threaded.wasm': 11.2, 'det.onnx': 2.4, 'rec-latin.onnx': 7.9, 'rec-eslav.onnx': 7.9, 'ort.wasm.min.js': 0.05 };
   const ocrCore = () => { const c = hasSimd() ? 'tesseract-core-simd-lstm' : 'tesseract-core-lstm'; return ['ocr/ocr-worker-2.js', 'ocr/' + c + '.js', 'ocr/' + c + '.wasm']; };
   async function offlineMissing() {
     if (!('caches' in window)) return null;
-    const files = ocrCore().concat(OCR_ALL.map(l => 'ocr/lang/' + l + '.traineddata.gz')), missing = [];
+    const files = ocrCore().concat(OCR_ALL.map(l => 'ocr/lang/' + l + '.traineddata.gz'), PADDLE_FILES), missing = [];
     for (const f of files) if (!(await caches.match(f))) missing.push(f);
     return missing;
   }
@@ -3531,7 +3559,7 @@
     const have = OCR_ALL.filter(l => !missing.includes('ocr/lang/' + l + '.traineddata.gz'));
     st.textContent = have.length === OCR_ALL.length && missing.length === 0 ? t('off.all')
       : t('off.have', { list: have.length ? have.map(l => OCR_NAMES[l]).join(', ') : t('off.none'), n: have.length, of: OCR_ALL.length });
-    const mb = missing.reduce((s, f) => s + (OCR_MB[(f.match(/lang\/(\w+)\./) || [])[1]] || (f.endsWith('.wasm') ? 2.9 : 0.1)), 0);
+    const mb = missing.reduce((s, f) => s + (PADDLE_MB[f.split('/').pop()] || OCR_MB[(f.match(/lang\/(\w+)\./) || [])[1]] || (f.endsWith('.wasm') ? 2.9 : 0.1)), 0);
     btn.hidden = missing.length === 0;
     btn.disabled = false;
     btn.textContent = t('off.get', { mb: Math.max(1, Math.round(mb)) });

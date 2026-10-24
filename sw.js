@@ -1,7 +1,7 @@
 /* Label Check — service worker.
    Keeps the app files and the ingredient database on the phone so the app opens without internet.
    When you change any app file or the database, raise the version number below. */
-const VERSION = 'label-check-v39';
+const VERSION = 'label-check-v40';
 const SHARE = 'lc-share';   // a photo shared to the app waits here until the page picks it up
 const FILES = [
   './',
@@ -34,7 +34,7 @@ self.addEventListener('activate', event => {
     for (const k of keys) {
       const old = await caches.open(k);
       for (const req of await old.keys()) {
-        if (new URL(req.url).pathname.includes('/ocr/')) await now.put(req, await old.match(req));
+        if (new URL(req.url).pathname.includes('/ocr/') || new URL(req.url).pathname.includes('/ocr-paddle/')) await now.put(req, await old.match(req));
       }
       await caches.delete(k);
     }
@@ -64,7 +64,7 @@ self.addEventListener('fetch', event => {
     return;
   }
   if (req.method !== 'GET' || url.origin !== self.location.origin) return;
-  const isData = url.pathname.includes('/data/') || url.pathname.includes('/ocr/');
+  const isData = url.pathname.includes('/data/') || url.pathname.includes('/ocr/') || url.pathname.includes('/ocr-paddle/');
   event.respondWith(
     caches.open(VERSION).then(async cache => {
       const cached = await cache.match(req, { ignoreSearch: true });

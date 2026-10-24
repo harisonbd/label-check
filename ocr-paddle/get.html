@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Paddle files downloader</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:720px;margin:24px auto;padding:0 16px;background:#0f1115;color:#e8eaf0}
+button{font:600 16px system-ui;padding:10px 16px;border-radius:12px;border:0;background:#8aa4ff;color:#0f1115;cursor:pointer}
+li{margin:10px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.s{color:#98a1b3;font-size:14px}.ok{color:#5fd39a}.bad{color:#ff8a8a}
+</style></head><body>
+<h1>Paddle files</h1>
+<p>Press <b>Download all</b>. The browser may ask to allow many downloads: press Allow. The files go to your Downloads folder. Then move all 8 files into <code>D:\Claude\label-check\ocr-paddle\</code>.</p>
+<p><button id="all">Download all</button></p>
+<ul id="list"></ul>
+<script>
+const H='https://huggingface.co/monkt/paddleocr-onnx/resolve/main/', O='https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/';
+const FILES=[
+ [H+'detection/v3/det.onnx','det.onnx',2430000],
+ [H+'languages/latin/rec.onnx','rec-latin.onnx',7860000],
+ [H+'languages/latin/dict.txt','dict-latin.txt',1],
+ [H+'languages/eslav/rec.onnx','rec-eslav.onnx',7870000],
+ [H+'languages/eslav/dict.txt','dict-eslav.txt',1],
+ [O+'ort.wasm.min.js','ort.wasm.min.js',49026],
+ [O+'ort-wasm-simd-threaded.mjs','ort-wasm-simd-threaded.mjs',24618],
+ [O+'ort-wasm-simd-threaded.wasm','ort-wasm-simd-threaded.wasm',11246032]];
+const ul=document.getElementById('list');
+async function get(f,st){
+  st.textContent='downloading...';st.className='s';
+  try{
+    const r=await fetch(f[0]);if(!r.ok)throw new Error('HTTP '+r.status);
+    const b=await r.blob();
+    const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=f[1];document.body.append(a);a.click();a.remove();
+    st.textContent='saved '+f[1]+' ('+b.size+' bytes)';st.className='ok';
+  }catch(e){st.textContent='FAILED: '+e.message;st.className='bad';}
+}
+const sts=[];
+FILES.forEach(f=>{const li=document.createElement('li');const b=document.createElement('button');b.textContent=f[1];const s=document.createElement('span');s.className='s';s.textContent='ready';li.append(b,s);ul.append(li);b.onclick=()=>get(f,s);sts.push(s);});
+document.getElementById('all').onclick=async()=>{for(let i=0;i<FILES.length;i++){await get(FILES[i],sts[i]);await new Promise(r=>setTimeout(r,400));}};
+</script></body></html>
