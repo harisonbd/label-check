@@ -910,8 +910,11 @@ details.textfold[open] > summary { margin-bottom: 6px; }
 .repopt { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9rem; color: var(--muted, #9aa3b2); }
 .repopt input { width: 18px; height: 18px; }
 
-.tick .tickrow { margin-top: 10px; }
-.tick .tickfrom { margin: 0 0 6px; }
-.tick .tickbtns { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.tick .tickbtns .btn { min-height: 44px; }
 .caphint { margin: 4px 2px 0; }
+.tickA { margin: 10px 0 0; background: var(--card); border: 1px solid var(--line); border-left: 5px solid #ffb454; border-radius: 16px; padding: 12px 14px; }
+.tickA .tickhead { font-weight: 700; font-size: 1.05rem; margin: 0 0 6px; color: #ffd199; }
+.tickA .tickrow { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.tickA .tickfrom { flex: 1 1 100px; min-width: 100px; color: var(--muted, #9aa3b2); overflow-wrap: anywhere; }
+.tickA .tickarrow { color: var(--muted, #9aa3b2); }
+.tickA .tickbtns { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tickA .tickbtns .btn { min-height: 44px; padding: 0 14px; width: auto; }

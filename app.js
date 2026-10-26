@@ -865,6 +865,7 @@
     const grey = a.verdict === 'partial' || a.verdict === 'unknown';
     r.replaceChildren(...[
       answerCard(p, a),
+      (p.kind === 'cosmetic' || p.kind === 'household') && known ? tickCard(a) : null,   // v2.26: right under the answer
       // v2.14: two doors – more info / photo again – and the next product
       el('div', { class: 'doors' },
         known ? el('button', {
@@ -884,7 +885,6 @@
       p.source === 'label' ? el('div', { class: 'repbox' },
         el('button', { class: 'btn btn-ghost', id: 'repBtn', type: 'button', text: t('btn.report'), onclick: reportResult }),
         el('label', { class: 'repopt' }, el('input', { type: 'checkbox', id: 'repPhotos', checked: store.get('repPhotos', true) !== false, onchange: e => store.set('repPhotos', e.target.checked) }), ' ' + t('rep.photos'))) : null,
-      (p.kind === 'cosmetic' || p.kind === 'household') && known ? tickCard(a) : null,
       p.kind === 'cosmetic' && known && needsUse(p, a) ? useBar(p) : null,
       el('div', { id: 'details', class: 'details', hidden: known ? !state.detailsOpen : null }, ...[
         known ? detailsTop(p, a) : null,
@@ -1760,14 +1760,14 @@
       if (items.length >= 4) break;
     }
     if (!items.length) return null;
-    return el('div', { class: 'd-card teach tick', id: 'tickCard' },
-      el('h3', { text: t('tick.title') }),
-      el('p', { class: 'minor', text: t('tick.line') }),
+    return el('div', { class: 'tickA', id: 'tickCard' },
+      el('div', { class: 'tickhead', id: 'tickHead', text: items.length === 1 ? t('tick.title1') : t('tick.titleN', { n: items.length }) }),
       ...items.map((it, i) => el('div', { class: 'tickrow', id: 'tick' + i },
-        el('p', { class: 'tickfrom' }, el('em', { text: cleanSeg(it.r.text) })),
+        el('span', { class: 'tickfrom' }, el('em', { text: cleanSeg(it.r.text) })),
+        el('span', { class: 'tickarrow', 'aria-hidden': 'true', text: '→' }),
         el('div', { class: 'tickbtns' },
-          ...it.ch.map((n, k) => el('button', { class: 'btn btn-ghost', type: 'button', id: 'tick' + i + 'c' + k, text: niceName(n), onclick: () => teach(it.r.text, n) })),
-          el('button', { class: 'linkbtn', type: 'button', id: 'tick' + i + 'x', text: t('tick.none'), onclick: () => openPicker(it.r) })))));
+          ...it.ch.map((n, k) => el('button', { class: 'btn ' + (k === 0 ? 'btn-primary' : 'btn-ghost'), type: 'button', id: 'tick' + i + 'c' + k, text: niceName(n), onclick: () => teach(it.r.text, n) })),
+          el('button', { class: 'btn btn-ghost', type: 'button', id: 'tick' + i + 'x', text: t('tick.other'), onclick: () => openPicker(it.r) })))));
   }
 
   // ---------- Teach the app (v2.12): "GLYCERN is Glycerin", saved on this phone for all products ----------
