@@ -884,7 +884,7 @@
       p.source === 'label' ? el('div', { class: 'repbox' },
         el('button', { class: 'btn btn-ghost', id: 'repBtn', type: 'button', text: t('btn.report'), onclick: reportResult }),
         el('label', { class: 'repopt' }, el('input', { type: 'checkbox', id: 'repPhotos', checked: store.get('repPhotos', true) !== false, onchange: e => store.set('repPhotos', e.target.checked) }), ' ' + t('rep.photos'))) : null,
-      p.kind === 'cosmetic' && known ? tickCard(a) : null,
+      (p.kind === 'cosmetic' || p.kind === 'household') && known ? tickCard(a) : null,
       p.kind === 'cosmetic' && known && needsUse(p, a) ? useBar(p) : null,
       el('div', { id: 'details', class: 'details', hidden: known ? !state.detailsOpen : null }, ...[
         known ? detailsTop(p, a) : null,
@@ -2831,6 +2831,8 @@
 
   // v2.21.1: sentence words (any text line that is no ingredient) and blocks that hold known names with noise around them.
   const SENTENCE_WORD = /(^|\s)(das|der|die|und|mit|für|von|zur|bei|ist|einer|eines|wird|werden|nicht|auf|the|and|with|for|is|are|this|which|dem|den|des|или|и|за|на|със|не)(\s|$)/iu;
+  const CONTACT_LINE = /www\.|https?:|@|\btel\.?\s*[:\d+(]|\b[A-Z]{1,2}-\d{4,5}\b|\bUFI\b|\bGmbH\b|\b(stra(ß|ss)e|str\.|platz)\s*\d/iu;
+  const TRACE_LINE = /may contain|kann (spuren|enthalten)|spuren von|traces? of|може да съдържа|следи от/iu;
   const KEEP_LINE = /contain|trace|spur|enth[äa]lt|kann|allerg|gluten|съдържа|следи|алерг|nuts?\b|milk|egg|soy|wheat|nüsse|milch|ei\b|\bmay\b/iu;
   function repairNames(text) {
     if (!DBINFO || !text) return text;
@@ -2838,6 +2840,25 @@
     const segs = LCDB.splitIngredients(text), out = [], seenFix = new Set(segs.filter(g => nameKnown(g)).map(g => g.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')));
     for (const seg of segs) {
       if (!/\p{L}{3}/u.test(seg) || nameKnown(seg)) { out.push(seg); continue; }
+      if (CONTACT_LINE.test(seg)) continue;                                 // v2.25: address, phone, web, e-mail: not an ingredient
+      // v2.25: running text with known names inside ("... Gefahr. SODIUM C14-16 OLEFIN SULFONATE. Enthält MENTHA ARVENSIS LEAF OIL ..."):
+      // keep the names, drop the sentences. Not for a "may contain / traces" line: that keeps its words.
+      if (SENTENCE_WORD.test(seg) && !TRACE_LINE.test(seg)) {
+        const nm = LCDB.findNames(seg).filter(n => { const k = n.toLowerCase().replace(/[^\p{L}\p{N}]/gu, ''); if (seenFix.has(k)) return false; seenFix.add(k); return true; });
+        if (nm.length) {
+          // the words of the EU detergent rule stay as their own pieces ("anionische Tenside", "Duftstoffe"): they are not INCI names
+          const nn = nrm(seg), keep = [];
+          for (const [, re] of DET_TERMS) {
+            if (re.source.startsWith('^')) continue;
+            const m = nn.match(new RegExp(re.source, 'u'));
+            if (!m) continue;
+            let e = m.index + m[0].length; while (e < nn.length && /\S/.test(nn[e])) e++;
+            keep.push(nn.slice(m.index, e));
+          }
+          if (/duftstoff/i.test(seg)) keep.push('Duftstoffe');
+          out.push(...keep, ...nm); continue;
+        }
+      }
       if (SENTENCE_WORD.test(seg) && !KEEP_LINE.test(seg)) continue;        // a line of running text, not a name (never an allergen / traces line)
       let parts = null;
       try { parts = LCDB.findInside(seg); } catch (e) { parts = null; }

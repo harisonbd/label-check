@@ -426,6 +426,24 @@
     return [...best.entries()].sort((a, b) => a[1] - b[1] || a[0].length - b[0].length).slice(0, n || 3).map(x => x[0]);
   }
 
+  // v2.25: known names that stand inside running text ("... Gefahr. SODIUM C14-16 OLEFIN SULFONATE. Enthält MENTHA ARVENSIS LEAF OIL. ..."),
+  // exact matches only. Long names (12+ letters) count alone; a regulated allergen (Menthol, Limonene) counts from 6 letters.
+  function findNames(seg) {
+    if (!cosIndex) return [];
+    const words = String(seg || '').split(/\s+/).map(w => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')).filter(Boolean);
+    const keys = words.map(w => key(w)), out = [];
+    for (let i = 0; i < words.length;) {
+      let hit = null;
+      for (let j = Math.min(words.length - 1, i + 5); j >= i && !hit; j--) {
+        const k = keys.slice(i, j + 1).join('');
+        const rec = k.length >= 6 ? cosIndex.get(k) : null;
+        if (rec && (k.length >= 12 || String(rec[3] || '').includes('a'))) hit = { j, name: rec[0] };
+      }
+      if (hit) { if (!out.includes(hit.name)) out.push(hit.name); i = hit.j + 1; } else i++;
+    }
+    return out;
+  }
+
   // v2.21.1: a block of text that holds one or more known names with a little noise around them ("ALLA SODIUM CETEARYL SULFF MIC ACID").
   // Returns [{ from, to }] for the names found inside, and "rest" pieces that stay as they are. null when nothing clear is inside.
   function findInside(seg) {
@@ -522,6 +540,6 @@
     return out;
   }
 
-  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, suggestCosmetic, closest, findInside, checkFood, knownFood, cosAllergens, foodAllergens, search, foodToCosmetic, meta: () => META, SEV };
+  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, suggestCosmetic, closest, findInside, findNames, checkFood, knownFood, cosAllergens, foodAllergens, search, foodToCosmetic, meta: () => META, SEV };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.LCDB = api;
 })(typeof window !== 'undefined' ? window : globalThis);

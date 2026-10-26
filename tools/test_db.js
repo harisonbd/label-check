@@ -178,6 +178,13 @@ const ok = (cond, msg) => { if (!cond) { fails++; console.log('  FAIL: ' + msg);
   ok(['Weizenmehl (45 %)', 'Zucker', 'Sonnenblumenöl', 'Магермилчпулвер'.length ? 'Magermilchpulver' : '', 'Манитол', 'Лимонена киселина', 'Мента'].every(s => LCDB.knownFood(s)), 'German and Bulgarian food names are known');
   ok(['Pantuene', 'Zzyzx', 'ab', ''].every(s => !LCDB.knownFood(s)), 'misreads, nonsense and tiny pieces are not known');
 
+
+  // v2.25: known names inside running text
+  {
+    const fn = LCDB.findNames('Denkmit WC-Duftstein Gefahr. SODIUM C14-16 OLEFIN SULFONATE, SODIUM C10-13 ALKYL BENZENESULFONATE. Enthält MENTHA ARVENSIS LEAF OIL. allergene: Menthol.');
+    ok(fn.length === 4 && fn.includes('SODIUM C14-16 OLEFIN SULFONATE') && fn.includes('MENTHA ARVENSIS LEAF OIL') && fn.includes('MENTHOL'), 'v2.25 findNames: 4 known names found inside a sentence block (' + fn + ')');
+    ok(LCDB.findNames('Nach Gebrauch Hände gründlich waschen. Darf nicht in die Hände von Kindern gelangen.').length === 0, 'v2.25 findNames: a sentence without names gives nothing');
+  }
   console.log(fails ? `\n${fails} FAILED` : '\nALL PASSED');
   process.exit(fails ? 1 : 0);
 })();

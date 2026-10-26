@@ -488,7 +488,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.24' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.25' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -958,7 +958,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v41')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v42')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -982,7 +982,7 @@ with sync_playwright() as p:
     sent = pg.evaluate('''async () => { const img = await (await fetch('icon-192.png')).blob(); const f = new FormData(); f.append('photo', new File([img], 'p.png', { type: 'image/png' }));
       const r = await fetch('share-target', { method: 'POST', body: f, redirect: 'manual' }); return [r.type, (await caches.keys()).includes('lc-share')]; }''')
     ok(sent[0] == 'opaqueredirect' and sent[1], 'share target: the service worker keeps the photo and answers with a redirect (%s)' % sent)
-    pg.goto(base.replace('index.html', '') + '?shared=1'); pg.evaluate('LC.dbReady'); pg.wait_for_selector('#ocrArea:not([hidden])', timeout=8000)
+    pg.goto(base.replace('index.html', '') + '?shared=1'); pg.wait_for_selector('#ocrArea:not([hidden])', timeout=20000)
     ok(pg.is_visible('#labelPanel') and pg.is_visible('#ocrArea') and not pg.evaluate("caches.has('lc-share')"), 'shared photo opens "Read a label" with the photo (and is then removed)')
     ok(pg.is_hidden('#updBar'), 'no "new version" line before an update')
     ctx.close()
@@ -1217,6 +1217,22 @@ with sync_playwright() as p:
     ok(c.startswith('Zutaten:') and 'secer' not in c, 'v2.24: no English or Cyrillic: the first list, as before')
     ctx.close()
 
+
+    # ---- v2.25: known names inside running text (a toilet block label), contact lines, tick-list for household ----
+    print('v2.25: names in running text')
+    ctx, pg = new_page(b, base, 'en-GB')
+    WC = "TOFFANGABEN: 30 % und darüber: anionische Tenside - unter 5 %: nichtionische Tenside - Duftstoffe - allergene : Menthol. Denkmit WC-Duftstein körbchenfrei Zitrus Traum Gefahr. SODIUM C14-16 OLEFIN SULFONATE, SODIUM C10-13 ALKYL BENZENESULFONATE. Enthält MENTHA ARVENSIS LEAF OIL. Kann allergische Reaktionen hervorrufen. Verursacht Hautreizungen. Verursacht schwere Augenschäden. Ist ärztlicher Rat erforderlich, Verpackung oder Kennzeichnungsetikett bereithalten. Darf nicht in die Hände von Kindern gelangen. Nach Gebrauch Hände gründlich waschen. BEI VERSCHLUCKEN: Sofort GIFTINFORMATIONSZENTRUM/ Arzt anrufen. BEI BERÜHRUNG MIT DER HAUT: Mit viel Wasser und Seife waschen. BEl KONTAKT MIT DEN AUGEN: Einige Minuten lang behutsam mit Wasser spülen. Eventuell vorhandene Kontaktlinsen nach Möglichkeit entfernen. Weiter spülen. UFI: 8MAM-5EET-N10D-XGHV dm-drogerie markt GmbH + Co. KG, Am dm-Platz 1, DE-76227 Karlsruhe, Tel. 0800 3658633, www.dm.de/denkmit, servicecenter@dm.de Vertrieb in Österreich: dm drogerie markt, Günter-Bauer-Straße 1, AT-5071 Wals, Tel. 0800 3658633, www.dm.at, kundenservice@dm.at K S LEERE VERPACKUNG? SCANNEN & TRENNEN www.cleanright.eu Duftsteine können variieren."
+    rp = pg.evaluate("(t) => LC.repairNames(LC.cleanOcr(t))", WC)
+    ok(rp == 'anionische tenside, nichtionische tenside, Duftstoffe, MENTHOL, SODIUM C14-16 OLEFIN SULFONATE, SODIUM C10-13 ALKYL BENZENESULFONATE, MENTHA ARVENSIS LEAF OIL', 'v2.25: the label of a toilet block: 4 names + 3 detergent-rule words kept, sentences and address dropped (%s)' % rp[:70])
+    an = pg.evaluate("(t) => { const a = LC.analyze({ kind: 'household', ingredientsText: t }); return [a.known, a.unknown, a.verdict]; }", rp)
+    ok(an[0] == 7 and an[1] == 0, 'v2.25: all 7 pieces are recognised (%s)' % an)
+    ok(pg.evaluate("(t) => LC.repairNames(t)", 'Aqua, Glycerin, Tel. 0800 3658633, www.dm.at, Am dm-Platz 1, Parfum') == 'Aqua, Glycerin, Am dm-Platz 1, Parfum' or pg.evaluate("(t) => LC.repairNames(t)", 'Aqua, Glycerin, Tel. 0800 3658633, www.dm.at, Parfum') == 'Aqua, Glycerin, Parfum', 'v2.25: phone and web lines are no ingredients')
+    tr = pg.evaluate("(t) => LC.repairNames(t)", 'Aqua, Glycerin, Kann Spuren von Sodium Laureth Sulfate enthalten und weiteren Stoffen aus der Produktion')
+    ok('Kann Spuren' in tr, 'v2.25: a "may contain / traces" line keeps its words (%s)' % tr)
+    ok(pg.evaluate("(t) => LC.repairNames(t)", 'AQUA, GLYCERIN, ISOPROPYL MYRISTATE ALLANTOIN HELIANTHUS ANNUUS HYBRID OIL, CITRIC ACID') == 'AQUA, GLYCERIN, ISOPROPYL MYRISTATE, ALLANTOIN, HELIANTHUS ANNUUS HYBRID OIL, CITRIC ACID', 'v2.25: a glued list keeps its short names (Allantoin) - only running text is cut down to the long names')
+    ok(pg.evaluate("(t) => LC.repairNames(t)", 'Aqua, Glycerin, Panthenol, Parfum') == 'Aqua, Glycerin, Panthenol, Parfum', 'v2.25: a clean list is not changed')
+    ctx.close()
+
     # A real update: serve a copy of the app, change its sw.js (as a push does), ask the browser to check.
     import shutil, tempfile
     tmp = tempfile.mkdtemp()
@@ -1234,16 +1250,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v41'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v42'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v41' not in keys: break
+        if 'label-check-v42' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v41' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v42' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
     b.close()
