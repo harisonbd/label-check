@@ -2274,11 +2274,14 @@
     startSweep();
   }
 
-  // Sweep: every 0.4 s a small copy of the video is scored for sharpness (variance of the Laplacian); in each 1.6 s window the
-  // sharpest frame is kept. They become "Your photos" (at most 8).
-  function sharpness(v) {
+  // Sweep (v2.27): every 0.4 s a small copy of the video is scored for sharpness (variance of the Laplacian) and as a tiny grey
+  // picture. A "view" is one place on the bottle: while the picture stays almost the same, only the sharpest frame is kept. When the
+  // view moves on (you turn the bottle), that frame is saved and a new view starts. Standing still = 1 photo, not 4. Blurry frames from
+  // fast turning (much less sharp than the best frame so far) are dropped. They become "Your photos" (at most 8).
+  const SWEEP_MOVE = 18, SWEEP_BLUR = 0.35;
+  function sweepFrame(v) {
     const W = 240, H = Math.max(2, Math.round(240 * v.videoHeight / v.videoWidth));
-    const cv = sharpness.cv || (sharpness.cv = document.createElement('canvas')); cv.width = W; cv.height = H;
+    const cv = sweepFrame.cv || (sweepFrame.cv = document.createElement('canvas')); cv.width = W; cv.height = H;
     const cx = cv.getContext('2d', { willReadFrequently: true }); cx.drawImage(v, 0, 0, W, H);
     const d = cx.getImageData(0, 0, W, H).data, g = new Float32Array(W * H);
     for (let i = 0, j = 0; i < g.length; i++, j += 4) g[i] = d[j] * 0.299 + d[j + 1] * 0.587 + d[j + 2] * 0.114;
@@ -2287,26 +2290,45 @@
       const k = y * W + x, l = 4 * g[k] - g[k - 1] - g[k + 1] - g[k - W] - g[k + W];
       sum += l; sum2 += l * l; n++;
     }
-    return sum2 / n - (sum / n) * (sum / n);
+    // tiny 24 x 24 grey picture (mean of blocks), minus its mean (so a light change is not a move)
+    const T = 24, th = new Float32Array(T * T);
+    for (let ty = 0; ty < T; ty++) for (let tx = 0; tx < T; tx++) {
+      const x0 = Math.floor(tx * W / T), x1 = Math.max(x0 + 1, Math.floor((tx + 1) * W / T)), y0 = Math.floor(ty * H / T), y1 = Math.max(y0 + 1, Math.floor((ty + 1) * H / T));
+      let s = 0, c = 0;
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { s += g[y * W + x]; c++; }
+      th[ty * T + tx] = s / c;
+    }
+    let m = 0; for (const x of th) m += x; m /= th.length;
+    for (let i = 0; i < th.length; i++) th[i] -= m;
+    return { sc: sum2 / n - (sum / n) * (sum / n), th };
   }
+  const thumbDiff = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]); return s / a.length; };
   function startSweep() {
     if (partsList.length >= MAX_PARTS) { toast(t('parts.max', { n: MAX_PARTS })); return; }
     const v = $('camVideo');
-    sweep = { best: null, tick: 0 };
+    sweep = { best: null, tick: 0, maxSc: 0, busy: false };
     $('shutter').classList.add('stop');
     renderParts();
     sweep.timer = setInterval(async () => {
-      if (!sweep || v.readyState < 2) return;
-      sweep.tick++;
+      if (!sweep || sweep.busy || v.readyState < 2) return;
+      sweep.busy = true;
+      const sw = sweep;
       try {
-        const sc = sharpness(v);
-        if (!sweep.best || sc > sweep.best.sc) {
+        sw.tick++;
+        const f = sweepFrame(v);
+        sw.maxSc = Math.max(sw.maxSc, f.sc);
+        const same = sw.best && thumbDiff(f.th, sw.best.th) < SWEEP_MOVE;
+        if (sw.best && !same) await flushSweep();                      // the view moved on: save the sharpest frame of the old view
+        if (sweep !== sw) return;
+        if (!sw.best) {
+          if (f.sc >= sw.maxSc * SWEEP_BLUR) sw.best = { bmp: await createImageBitmap(v), sc: f.sc, th: f.th };   // not a blurry frame
+        } else if (f.sc > sw.best.sc) {
           const bmp = await createImageBitmap(v);
-          if (sweep.best && sweep.best.bmp.close) sweep.best.bmp.close();
-          sweep.best = { bmp, sc };
+          if (sw.best.bmp.close) sw.best.bmp.close();
+          sw.best = { bmp, sc: f.sc, th: sw.best.th };                 // same view, sharper: keep this one (the view stays the first frame)
         }
       } catch (e) { /* skip this frame */ }
-      if (sweep && sweep.tick % 4 === 0) await flushSweep();
+      sw.busy = false;
     }, 400);
   }
   async function flushSweep() {
@@ -2527,7 +2549,7 @@
   const LIST_HEAD = /^(ingredients?|ingr[eé]dients?|zutaten|inhaltsstoffe|bestandteile|sastojci|съставки|състав|inci|skład|składniki|összetevők|osszetevok|složení|slozeni|zloženie|zlozenie|sestavine|ingrediente|ingredienti|ingredientes|ingrediënten|sastav)$/i;
   const isListHead = w => String(w || '').split(/[\/:|,.;]+/).some(p => LIST_HEAD.test(p.trim()));
   const NOT_NAME = /zutaten|ingredient|inhaltsstoff|nährwert|nahrwert|nutrition|energie|energy|brennwert|хранителна|съставки|mindestens|haltbar|verpackung|recycl|hergestellt|made in|www\.|@/i;
-  let cropTouched = false, nameHint = '', findTask = null, lastFind = null;
+  let cropTouched = false, nameHint = '', findTask = null, lastFind = null, foundScript = null;   // v2.27: the alphabet the find step saw (the crop read does not ask again)
 
   // TSV from the reader -> pieces (paragraphs) with their lines, words and box (pixels of the image that was read).
   function tsvPieces(tsv) {
@@ -2650,7 +2672,7 @@
     let pieces = [], list = null;
     for (const lang of langs) {
       let rr = null;
-      try { rr = await ocrRun(png.slice(), lang, { layout: true }); pieces = tsvPieces(rr.tsv); } catch (e) { pieces = []; }
+      try { rr = await ocrRun(png.slice(), lang, { layout: true }); pieces = tsvPieces(rr.tsv); if (rr.script) foundScript = { file, script: rr.script }; } catch (e) { pieces = []; }
       if (file !== ocrFile) return null;
       list = listPieces(pieces);
       if (list || (rr && rr.engine === 'paddle')) break;          // Paddle already chose the alphabet itself
@@ -2756,7 +2778,7 @@
   let paddleWorker = null, paddleDead = false;
   const paddleOK = () => store.get('ocrEngine', 'paddle') !== 'tess' && !paddleDead && typeof OffscreenCanvas !== 'undefined' && typeof WebAssembly === 'object';
   function workerRun(kind, image, lang, opts) {
-    const url = kind === 'paddle' ? 'ocr-paddle/paddle-worker.js' : 'ocr/ocr-worker-2.js';
+    const url = kind === 'paddle' ? 'ocr-paddle/paddle-worker-2.js' : 'ocr/ocr-worker-2.js';
     let w = kind === 'paddle' ? paddleWorker : ocrWorker;
     if (!w) {
       w = new Worker(url);
@@ -2776,7 +2798,7 @@
     const id = ++ocrSeq;
     return new Promise((resolve, reject) => {
       ocrWait[id] = { kind, resolve, reject, step: s => ocrStatus(t(s === 'load' ? 'ocr.loading' : opts.layout ? 'ocr.finding' : 'ocr.reading'), 'busy') };
-      w.postMessage({ id, image, lang, psm: opts.psm, layout: !!opts.layout, maxside: opts.maxside }, [image.buffer]);
+      w.postMessage({ id, image, lang, psm: opts.psm, layout: !!opts.layout, maxside: opts.maxside, script: opts.script }, [image.buffer]);
     });
   }
   async function ocrRun(image, lang, opts) {
@@ -2928,7 +2950,7 @@
       const lastLatin = store.get('ocrLastLatin', LANG === 'en' ? 'eng' : 'deu');
       let lang = auto ? store.get('ocrLast', OCR_LANGS[LANG] || 'eng') : pick;
       if (!OCR_ALL.includes(lang)) lang = 'eng';
-      let r = await ocrRun(image.slice(), lang), used = r_lang(r, lang), switched = false;
+      let r = await ocrRun(image.slice(), lang, foundScript && foundScript.file === ocrFile ? { script: foundScript.script } : undefined), used = r_lang(r, lang), switched = false;
       // Low confidence: probably the wrong alphabet (a Latin label read as BG, or the reverse).
       // Read once more with the other alphabet and keep the better text.
       if (r.engine !== 'paddle' && r.conf < OCR_LOW) {
@@ -3589,7 +3611,7 @@
   // ---------- Label reader without internet (all 7 languages on the phone) ----------
   const OCR_MB = { eng: 2.0, deu: 0.9, bul: 0.8, hun: 2.4, ces: 1.7, slk: 1.9, slv: 1.2 };
   const hasSimd = () => { try { return WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11])); } catch (e) { return false; } };
-  const PADDLE_FILES = ['paddle-worker.js', 'ort.wasm.min.js', 'ort-wasm-simd-threaded.mjs', 'ort-wasm-simd-threaded.wasm', 'det.onnx', 'rec-latin.onnx', 'rec-eslav.onnx', 'dict-latin.txt', 'dict-eslav.txt'].map(f => 'ocr-paddle/' + f);
+  const PADDLE_FILES = ['paddle-worker-2.js', 'ort.wasm.min.js', 'ort-wasm-simd-threaded.mjs', 'ort-wasm-simd-threaded.wasm', 'det.onnx', 'rec-latin.onnx', 'rec-eslav.onnx', 'dict-latin.txt', 'dict-eslav.txt'].map(f => 'ocr-paddle/' + f);
   const PADDLE_MB = { 'ort-wasm-simd-threaded.wasm': 11.2, 'det.onnx': 2.4, 'rec-latin.onnx': 7.9, 'rec-eslav.onnx': 7.9, 'ort.wasm.min.js': 0.05 };
   const ocrCore = () => { const c = hasSimd() ? 'tesseract-core-simd-lstm' : 'tesseract-core-lstm'; return ['ocr/ocr-worker-2.js', 'ocr/' + c + '.js', 'ocr/' + c + '.wasm']; };
   async function offlineMissing() {

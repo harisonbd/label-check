@@ -488,7 +488,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.26' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.27' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -958,7 +958,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v43')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v44')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1128,7 +1128,26 @@ with sync_playwright() as p:
     pg.click('#modeSweep'); pg.click('#shutter'); pg.wait_for_timeout(4200)
     ok('Move slowly' in pg.inner_text('#camHint'), 'v2.17: sweep: "Move slowly over the list · N pictures"')
     pg.click('#shutter'); pg.wait_for_timeout(1200)
-    ok(pg.locator('#thumbs .tn').count() >= 3 and pg.evaluate("!document.getElementById('shutter').classList.contains('stop')"), 'v2.17: sweep adds sharp pictures and stops (%d photos)' % pg.locator('#thumbs .tn').count())
+    ok(pg.locator('#thumbs .tn').count() >= 1 and pg.evaluate("!document.getElementById('shutter').classList.contains('stop')"), 'v2.17: sweep adds a sharp picture and stops (%d photos)' % pg.locator('#thumbs .tn').count())
+    # v2.27: standing still in front of one place = ONE photo (before: one every 1.6 s)
+    import io, tempfile
+    from PIL import Image
+    import numpy as np
+    tmpd = tempfile.mkdtemp(); still = os.path.join(tmpd, 'still.mjpeg')
+    base_im = Image.new('RGB', (640, 360), (40, 40, 40))
+    from PIL import ImageDraw
+    dr = ImageDraw.Draw(base_im)
+    for k in range(14): dr.text((20 + (k % 2) * 300, 20 + k * 22), 'Zutaten: Wasser, Zucker, Fruktose %d' % k, fill=(235, 235, 235))
+    buf = b''
+    for i in range(30):
+        fr = Image.fromarray(np.clip(np.asarray(base_im).astype(float) + np.random.randn(360, 640, 3) * 3, 0, 255).astype('uint8')); bb = io.BytesIO(); fr.save(bb, 'JPEG', quality=85); buf += bb.getvalue()
+    open(still, 'wb').write(buf)
+    bst = force_tess(p.chromium.launch(args=['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--use-file-for-fake-video-capture=' + still]))
+    sctx = bst.new_context(viewport={'width': 390, 'height': 844}, locale='en-GB', permissions=['camera']); sp = sctx.new_page(); sp.on('pageerror', lambda e: errors.append(str(e)))
+    sp.goto(base); sp.evaluate('LC.dbReady'); sp.click('#cardLabel'); sp.click('#takePhoto'); sp.wait_for_selector('#camVideo', state='visible'); sp.wait_for_timeout(800)
+    sp.click('#modeSweep'); sp.click('#shutter'); sp.wait_for_timeout(6000); sp.click('#shutter'); sp.wait_for_timeout(1500)
+    ok(sp.locator('#thumbs .tn').count() == 1, 'v2.27: sweep: holding the phone on one place for 6 s gives 1 photo, not 4 (%d)' % sp.locator('#thumbs .tn').count())
+    bst.close()
     ok(no_side_scroll(pg), 'v2.17: camera screen: no sideways scroll')
     lay = pg.evaluate("""() => { const r = id => document.getElementById(id).getBoundingClientRect(), cv = r('camView'), cb = r('checkBar');
       return { guide: !!document.querySelector('.camguide'), inView: ['shutter','camClose','camModes'].every(i => { const b = r(i); return b.top >= cv.top - 1 && b.bottom <= cv.bottom + 1; }),
@@ -1175,7 +1194,7 @@ with sync_playwright() as p:
     pg.wait_for_selector('#result:not([hidden]) #answer')
     ok('Tartrazine' in pg.text_content('#result') or 'E102' in pg.text_content('#result'), 'v2.23: Paddle: the answer shows (tartrazine found)')
     res = pg.evaluate("performance.getEntriesByType('resource').map(e => e.name)")
-    ok(any('/ocr-paddle/paddle-worker.js' in x for x in res) and not any('/ocr/' in x for x in res), 'v2.23: the Paddle worker was used, no Tesseract file was loaded')
+    ok(any('/ocr-paddle/paddle-worker-2.js' in x for x in res) and not any('/ocr/' in x for x in res), 'v2.23: the Paddle worker was used, no Tesseract file was loaded')
     ok(pg.evaluate("LC.getRep().frames[0].engine") == 'paddle', 'v2.23: the report says which reader was used')
     ctx.close()
     ctx, pg = new_page(bp, base, 'bg-BG')
@@ -1253,16 +1272,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v43'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v44'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v43' not in keys: break
+        if 'label-check-v44' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v43' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v44' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
     b.close()

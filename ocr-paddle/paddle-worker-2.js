@@ -163,7 +163,7 @@ function toResult(pars) {
 let queue = Promise.resolve();
 self.onmessage = e => { queue = queue.then(() => handle(e)); };
 async function handle(e) {
-  const { id, image, lang, layout: isLayout, maxside } = e.data;
+  const { id, image, lang, layout: isLayout, maxside, script } = e.data;
   try {
     self.postMessage({ id, step: 'load' });
     await loadOrt();
@@ -171,15 +171,17 @@ async function handle(e) {
     if (!isLayout) self.postMessage({ id, step: 'read' });
     const t0 = performance.now();
     const bmp = await createImageBitmap(new Blob([image]));
-    const boxes = await detect(bmp, maxside || (isLayout ? 1280 : 2560), 3.4e6);
+    const boxes = await detect(bmp, maxside || (isLayout ? 1280 : 1920), 3.4e6);
+    const tDet = Math.round(performance.now() - t0);
     // Which alphabet? The Latin reader cannot read Cyrillic. Read the 8 widest boxes with the East-Slavic reader (it reads both)
     // and count the letters. 30 % or more Cyrillic = a Cyrillic label.
     let cyr = 0, lat = 0;
-    for (const b of boxes.slice().sort((a, c) => (c.x1 - c.x0) * (c.y1 - c.y0) - (a.x1 - a.x0) * (a.y1 - a.y0)).slice(0, 8)) {
+    if (!script) for (const b of boxes.slice().sort((a, c) => (c.x1 - c.x0) * (c.y1 - c.y0) - (a.x1 - a.x0) * (a.y1 - a.y0)).slice(0, 8)) {
       const s = (await readBox(bmp, b, 'eslav')).text;
       cyr += (s.match(/[\u0400-\u04FF]/g) || []).length; lat += (s.match(/[A-Za-z\u00C0-\u017F]/g) || []).length;
     }
-    const isCyr = cyr + lat > 0 && cyr / (cyr + lat) >= 0.3;
+    const tSamp = Math.round(performance.now() - t0) - tDet;
+    const isCyr = script ? script === 'cyr' : cyr + lat > 0 && cyr / (cyr + lat) >= 0.3;
     const kind = isCyr ? 'eslav' : 'latin';
     await getRec(kind);
     const items = [];
@@ -191,7 +193,7 @@ async function handle(e) {
     const res = toResult(layout(items));
     // Paddle's confidence is 84-95 for good and bad reads alike. Stretch it so the app's old limits (66 = unsure) still mean something.
     const conf = Math.max(0, Math.min(100, Math.round((res.conf - 60) * 2.5)));
-    self.postMessage({ id, text: res.text, conf, rawConf: res.conf, tsv: res.tsv, script: isCyr ? 'cyr' : 'lat', layout: !!isLayout, ms: Math.round(performance.now() - t0), boxes: boxes.length });
+    self.postMessage({ id, text: res.text, conf, rawConf: res.conf, tsv: res.tsv, script: isCyr ? 'cyr' : 'lat', layout: !!isLayout, ms: Math.round(performance.now() - t0), tDet, tSamp, boxes: boxes.length });
   } catch (err) {
     self.postMessage({ id, error: String(err && err.message || err), layout: !!isLayout });
   }
