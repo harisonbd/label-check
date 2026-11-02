@@ -1,6 +1,6 @@
 # Label Check – ingredient database (v2)
 
-Built 2026-10-20 by `tools/build_db.py`. Works offline. Test: `node tools/test_db.js`.
+Built 2026-11-02 by `tools/build_db.py`. Works offline. Test: `node tools/test_db.js`.
 
 ## Files
 
