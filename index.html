@@ -15,7 +15,7 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>Label Check <span class="ver">v2.27</span></h1>
+    <h1>Label Check <span class="ver">v2.28</span></h1>
     <button class="iconbtn topsearch" id="topSearch" type="button" data-t-aria="card.search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg></button>
     <div class="langsw" id="langSwitch" role="group" aria-label="Language">
       <button type="button" data-lang="en" lang="en" aria-pressed="false">EN</button>
@@ -283,6 +283,14 @@
           </label>
         </div>
         <p class="minor" id="bkLast"></p>
+        <h4 class="rules-sub" data-t="prod.title">Share products</h4>
+        <p class="minor" data-t="prod.lead"></p>
+        <div class="row">
+          <button class="btn btn-ghost" id="shareProdBtn" type="button" data-t="prod.share">Share my products</button>
+          <label class="btn btn-ghost filebtn"><span data-t="prod.import">Import products</span>
+            <input type="file" id="prodInput" accept="application/json,.json" hidden>
+          </label>
+        </div>
       </details>
     </section>
 

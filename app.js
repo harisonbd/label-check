@@ -15,7 +15,7 @@
     'nutriscore_grade', 'nova_group', 'last_modified_t', 'nutriments'
   ].join(',');
   const CACHE_DAYS = 7;
-  const MAX_PRODUCTS = 300;
+  const MAX_PRODUCTS = 1000;     // v2.28 (was 300)
   const MAX_HISTORY = 100;
   const PROMPT =
     'Read the ingredient list on this product label.\n' +
@@ -70,6 +70,9 @@
     set(key, value) {
       try { localStorage.setItem('lc.' + key, JSON.stringify(value)); return true; }
       catch (e) { toast(t('toast.saveFail')); return false; }
+    },
+    trySet(key, value) {                       // v2.28: no toast (the caller makes room and tries again)
+      try { localStorage.setItem('lc.' + key, JSON.stringify(value)); return true; } catch (e) { return false; }
     }
   };
 
@@ -673,7 +676,16 @@
         .slice(0, extra)
         .forEach(c => delete state.products[c]);
     }
-    store.set('products', state.products);
+    // v2.28: the phone storage is full before the limit: drop the oldest products (first those from the online lists, then the read ones;
+    // favourites stay) until it fits.
+    let guard = 0;
+    while (!store.trySet('products', state.products) && guard++ < 40) {
+      const drop = Object.keys(state.products).filter(c => c !== p.code && !state.favs.includes(c))
+        .sort((x, y) => ((state.products[x].source === 'label' ? 1 : 0) - (state.products[y].source === 'label' ? 1 : 0)) || (state.products[x].fetchedAt - state.products[y].fetchedAt))
+        .slice(0, 25);
+      if (!drop.length) { store.set('products', state.products); break; }
+      drop.forEach(c => delete state.products[c]);
+    }
   }
 
   function addHistory(p, verdict) {
@@ -3357,6 +3369,54 @@
     toast(t('toast.backupSaved'));
   }
 
+  // v2.28: share only the products you read yourself (barcode + name + ingredient text; no photos, no settings).
+  const SHARE_FIELDS = ['code', 'kind', 'name', 'brand', 'ingredientsText', 'use'];
+  async function shareProducts() {
+    const list = Object.values(state.products).filter(p => p && p.source === 'label' && isBarcode(p.code) && p.ingredientsText).map(p => {
+      const o = {}; for (const k of SHARE_FIELDS) if (p[k]) o[k] = p[k];
+      if (state.names[p.code]) o.name = state.names[p.code];
+      if (p.texts && p.texts[1]) o.extra = p.texts[1];
+      return o;
+    });
+    if (!list.length) { toast(t('toast.noProducts')); return; }
+    const blob = new Blob([JSON.stringify({ app: 'label-check', kind: 'products', version: 1, exportedAt: new Date().toISOString(), products: list }, null, 1)], { type: 'application/json' });
+    const file = new File([blob], 'label-check-products-' + new Date().toISOString().slice(0, 10) + '.json', { type: 'application/json' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: 'Label Check' }); toast(t('toast.prodShared', { n: list.length })); return; }
+      catch (e) { if (e && e.name === 'AbortError') return; }
+    }
+    const a = el('a', { href: URL.createObjectURL(file), download: file.name });
+    document.body.append(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    toast(t('toast.prodShared', { n: list.length }));
+  }
+  const cut = (s, n) => (typeof s === 'string' ? s.trim().slice(0, n) : '');
+  async function importProducts(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    let data;
+    try { data = JSON.parse(await file.text()); } catch (err) { toast(t('toast.notProducts')); return; }
+    if (!data || data.app !== 'label-check' || data.kind !== 'products' || !Array.isArray(data.products)) { toast(t('toast.notProducts')); return; }
+    let added = 0, skipped = 0;
+    for (const o of data.products.slice(0, 2000)) {
+      if (!o || !isBarcode(o.code) || !cut(o.ingredientsText, 8000)) { skipped++; continue; }
+      const mine = state.products[o.code];
+      if (mine && mine.source === 'label' && mine.ingredientsText) { skipped++; continue; }   // yours stays
+      const main = cut(o.ingredientsText, 8000), extra = cut(o.extra, 8000);
+      saveProduct({
+        code: o.code, kind: KINDS.includes(o.kind) ? o.kind : 'food', source: 'label', shared: true,
+        name: cut(o.name, 120), brand: cut(o.brand, 80), image: '', use: cut(o.use, 200) || undefined,
+        ingredientsText: main, texts: [main, extra].filter(Boolean), tags: [], allergens: [], analysis: [],
+        nutriscore: null, nova: null, updated: null, fetchedAt: Date.now(), url: ''
+      });
+      added++;
+    }
+    verdictCache.clear();
+    renderAll();
+    toast(t('toast.prodImported', { n: added, s: skipped }));
+  }
+
   async function importBackup(e) {
     const file = e.target.files && e.target.files[0];
     e.target.value = '';
@@ -3580,6 +3640,8 @@
     try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme); } catch (e) { /* old browser */ }
     $('exportBtn').addEventListener('click', exportBackup);
     $('importInput').addEventListener('change', importBackup);
+    $('shareProdBtn').addEventListener('click', shareProducts);
+    $('prodInput').addEventListener('change', importProducts);
     $('clearHistory').addEventListener('click', () => {
       if (!confirm(t('confirm.clearHist'))) return;
       state.history = [];

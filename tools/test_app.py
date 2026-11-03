@@ -488,7 +488,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.27' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.28' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -958,7 +958,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v44')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v45')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1255,6 +1255,40 @@ with sync_playwright() as p:
     ok(pg.evaluate("(t) => LC.repairNames(t)", 'Aqua, Glycerin, Panthenol, Parfum') == 'Aqua, Glycerin, Panthenol, Parfum', 'v2.25: a clean list is not changed')
     ctx.close()
 
+    # ---- v2.28: share / import products, bigger store ----
+    print('v2.28: share products')
+    ctx.close(); ctx, pg = new_page(b, base, 'en-GB')
+    pg.evaluate("""() => { const s = LC.state.products; s['4005808123456'] = { code: '4005808123456', kind: 'food', source: 'label', name: 'Test Riegel', brand: 'X', image: 'http://x/y.jpg', ingredientsText: 'Zucker, Wasser, Salz', texts: ['Zucker, Wasser, Salz'], tags: [], allergens: [], analysis: [], fetchedAt: 1 };
+      s['label-99'] = { code: 'label-99', kind: 'food', source: 'label', name: 'No barcode', ingredientsText: 'Mehl', texts: ['Mehl'], fetchedAt: 2 };
+      s['5000000000017'] = { code: '5000000000017', kind: 'food', source: 'off', name: 'From the list', ingredientsText: 'Milch', texts: ['Milch'], fetchedAt: 3 };
+      localStorage.setItem('lc.products', JSON.stringify(s)); }""")
+    pg.click('.tabbar button[data-go=list]'); pg.click('#moreFold summary')
+    with pg.expect_download() as dl:
+        pg.click('#shareProdBtn')
+    shared = os.path.join(SHOTS, 'shared-products.json'); dl.value.save_as(shared)
+    sh = json.load(open(shared, encoding='utf-8'))
+    ok(sh.get('kind') == 'products' and [x['code'] for x in sh['products']] == ['4005808123456'] and 'image' not in sh['products'][0] and 'avoid' not in sh, 'v2.28: the products file has only the read product with a barcode: no photo, no settings, no online-list products (%s)' % [x.get('code') for x in sh.get('products', [])])
+    ctx.close(); ctx, pg = new_page(b, base, 'en-GB')
+    ok(pg.evaluate("Object.keys(LC.state.products).length") == 0, 'v2.28: fresh phone has no products')
+    pg.click('.tabbar button[data-go=list]'); pg.click('#moreFold summary')
+    pg.set_input_files('#prodInput', shared); pg.wait_for_timeout(600)
+    got = pg.evaluate("LC.state.products['4005808123456']")
+    ok(got and got['ingredientsText'] == 'Zucker, Wasser, Salz' and got['source'] == 'label' and got['name'] == 'Test Riegel', 'v2.28: import adds the product (%s)' % (got or {}).get('name'))
+    pg.evaluate("LC.state.products['4005808123456'].ingredientsText = 'Mine'")
+    pg.set_input_files('#prodInput', shared); pg.wait_for_timeout(600)
+    ok(pg.evaluate("LC.state.products['4005808123456'].ingredientsText") == 'Mine' and 'skipped' in pg.inner_text('#toast'), 'v2.28: importing again does not overwrite your own copy ("skipped")')
+    bad = os.path.join(SHOTS, 'bad.json'); open(bad, 'w').write('{"app":"label-check","kind":"backup"}')
+    pg.set_input_files('#prodInput', bad); pg.wait_for_timeout(500)
+    ok('not a Label Check products file' in pg.inner_text('#toast'), 'v2.28: a wrong file is refused')
+    # the phone storage is full before the limit: the app makes room instead of losing the new product
+    pg.evaluate("""() => { for (let i = 0; i < 30; i++) LC.state.products['4000000000' + (100 + i)] = { code: '4000000000' + (100 + i), kind: 'food', source: 'off', ingredientsText: 'y'.repeat(2000), texts: [], fetchedAt: i };
+      localStorage.setItem('lc.products', JSON.stringify(LC.state.products));
+      for (const size of [100000, 1000, 10]) { const fill = 'x'.repeat(size); let n = 0; try { for (;;) { localStorage.setItem('lc.fill' + size + '_' + n, fill); n++; } } catch (e) { /* full */ } } }""")
+    fp = os.path.join(SHOTS, 'one.json'); open(fp, 'w').write(json.dumps({'app': 'label-check', 'kind': 'products', 'version': 1, 'products': [{'code': '4005808777777', 'kind': 'food', 'name': 'Newcomer', 'ingredientsText': 'Zucker, Salz ' + 'abc ' * 200}]}))
+    pg.set_input_files('#prodInput', fp); pg.wait_for_timeout(800)
+    r = pg.evaluate("() => ({ mem: !!LC.state.products['4005808777777'], stored: (localStorage.getItem('lc.products') || '').includes('4005808777777'), n: Object.keys(LC.state.products).length })")
+    ok(r['mem'] and r['stored'] and r['n'] < 31, 'v2.28: storage full: the oldest online-list products make room, the new product is saved (%s)' % r)
+    ctx.close()
     # A real update: serve a copy of the app, change its sw.js (as a push does), ask the browser to check.
     import shutil, tempfile
     tmp = tempfile.mkdtemp()
@@ -1272,16 +1306,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v44'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v45'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v44' not in keys: break
+        if 'label-check-v45' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v44' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v45' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
     b.close()
