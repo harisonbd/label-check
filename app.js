@@ -12,7 +12,7 @@
     'image_front_small_url', 'image_small_url',
     'ingredients_text', 'ingredients_text_de', 'ingredients_text_en', 'ingredients_text_bg',
     'ingredients_tags', 'additives_tags', 'allergens_tags', 'ingredients_analysis_tags',
-    'nutriscore_grade', 'nova_group', 'last_modified_t', 'nutriments'
+    'nutriscore_grade', 'nova_group', 'last_modified_t', 'nutriments', 'categories_tags'
   ].join(',');
   const CACHE_DAYS = 7;
   const MAX_PRODUCTS = 1000;     // v2.28 (was 300)
@@ -627,10 +627,17 @@
       nutriscore: /^[a-e]$/.test(p.nutriscore_grade || '') ? p.nutriscore_grade : null,
       nova: p.nova_group || null,
       nut: kind === 'food' ? nutOf(p.nutriments) : null,
+      cats: catsOf(p.categories_tags),
       updated: p.last_modified_t ? p.last_modified_t * 1000 : null,
       fetchedAt: Date.now(),
       url: base + '/product/' + code
     };
+  }
+
+  // v2.29: the product's categories from the database, general -> specific (e.g. spreads > sweet spreads > hazelnut spreads).
+  // Only the English taxonomy tags, at most the 8 most specific. Always a list: [] = "asked, the database has none".
+  function catsOf(tags) {
+    return (Array.isArray(tags) ? tags : []).filter(x => typeof x === 'string' && /^en:[a-z0-9-]+$/.test(x)).slice(-8);
   }
 
   // Fat, saturated fat and protein per 100 g (only when Open Food Facts has them).
@@ -708,7 +715,8 @@
     const cached = state.products[code];
     const own = !forceOnline && !(cached && cached.source === 'label') && ownBy(code);
     if (own) { showProduct(own); return; }
-    const fresh = cached && !forceOnline &&
+    const noCats = cached && (cached.source === 'off' || cached.source === 'obf') && !Array.isArray(cached.cats) && navigator.onLine !== false;
+    const fresh = cached && !forceOnline && !noCats &&
       (cached.source === 'label' || Date.now() - cached.fetchedAt < CACHE_DAYS * 864e5);
     if (fresh) { showProduct(cached); return; }
 
@@ -939,10 +947,23 @@
         el('b', { class: word.length > 12 ? 'long' : null, text: word })),
       frontLine(a)   // v2.14: one short line; the rest is under "Подробности"
     );
-    const alt = v === 'avoid' || v === 'check' ? alternatives(p) : [];
-    if (alt.length) {
-      card.append(el('p', { class: 'qalt' }, el('b', { text: t('qa.instead') + ':' }),
-        alt.map(q => el('button', { class: 'altbtn', type: 'button', text: q.name || t('ph.unnamed'), onclick: () => openSaved(q.code) }))));
+    if (v === 'avoid' || v === 'check') {
+      const line = el('p', { class: 'qalt', id: 'qalt', hidden: true });
+      const fill = list => {
+        line.replaceChildren(el('b', { text: t('qa.instead') + ':' }),
+          ...list.map(q => el('button', { class: 'altbtn', type: 'button', text: altLabel(q),
+            onclick: () => { if (!state.products[q.code] && !ownBy(q.code)) saveProduct(q); openSaved(q.code); } })));
+        line.hidden = !list.length;
+      };
+      const mine = sameCatSaved(p), online = mine.length < 2 && canSuggest(p);
+      if (mine.length || !online) fill(mine.length ? mine : alternatives(p));
+      if (online) {
+        suggestAlternatives(p, mine).then(more => {
+          const list = mine.concat(more).slice(0, 2);
+          fill(list.length ? list : alternatives(p));
+        }).catch(() => { if (!mine.length) fill(alternatives(p)); });
+      }
+      card.append(line);
     }
     // the strip: not when the photo text may not be the list (it would show colours of the wrong text)
     if (v !== 'unknown' && a.rows.length && !a.noList) {
@@ -1141,17 +1162,105 @@
     renderFavs();
   }
 
-  // "Instead": your saved products of the same type with "No warnings" (newest first, at most 2).
-  function alternatives(p) {
+  // "Instead" (v2.29). Order: 1. your saved products of the same CATEGORY with "No warnings" (closest category first);
+  // 2. products of the same category from Open Food Facts / Open Beauty Facts that pass YOUR rules (needs internet);
+  // 3. only when 1 and 2 give nothing: your saved products of the same type (food / cosmetic / household), as before v2.29.
+  // How close two products are: the place (1 = most general) of the most specific category they share. 0 = none.
+  function catScore(p, q) {
+    if (!p.cats || !q.cats) return 0;
+    for (let i = p.cats.length - 1; i >= 0; i--) if (q.cats.includes(p.cats[i])) return i + 1;
+    return 0;
+  }
+  function savedCandidates(p) {
     const out = [], seen = new Set([p.code]);
     for (const code of state.history.map(h => h.code).concat(state.favs)) {
       if (seen.has(code)) continue;
       seen.add(code);
       const q = productBy(code);
       if (!q || !q.name || (q.kind || 'food') !== (p.kind || 'food')) continue;   // v2.15: no unnamed products
-      if (verdictOf(code).verdict !== 'ok') continue;
+      out.push(q);
+    }
+    return out;
+  }
+  // 1. Same category = they share one of the 3 most specific categories of this product.
+  function sameCatSaved(p) {
+    const need = Math.max(1, (p.cats || []).length - 2), out = [];
+    const cand = savedCandidates(p).map(q => ({ q, s: catScore(p, q) })).filter(x => x.s >= need).sort((x, y) => y.s - x.s);   // stable: newest first
+    for (const x of cand) {
+      if (verdictOf(x.q.code).verdict === 'ok') out.push(x.q);
+      if (out.length === 2) break;
+    }
+    return out;
+  }
+  // 3. As before v2.29: saved products of the same type with "No warnings" (newest first, at most 2).
+  function alternatives(p) {
+    const out = [];
+    for (const q of savedCandidates(p)) {
+      if (verdictOf(q.code).verdict !== 'ok') continue;
       out.push(q);
       if (out.length === 2) break;
+    }
+    return out;
+  }
+  // 2. The most scanned products of the same category sold in these countries. ONE search per product (its two most specific
+  // categories, joined with "or"); the answer is kept for this session. Open Food Facts refuses a part of the searches from
+  // people who are not signed in (HTTP 503 "high demand", measured Nov 2026: about 4 of 10), so a refused search is tried
+  // again twice. At most 6 searches a minute (they allow 10), and nothing is asked when you are offline.
+  const ALT_COUNTRIES = 'austria|germany|bulgaria';
+  const ALT_RETRY_MS = [500, 1200], ALT_PER_MIN = 6, ALT_FAIL_WAIT = 60000;
+  const altCache = new Map();   // 'kind:categories' -> { at, list: Promise of products, failed }
+  const altTimes = [];          // when the last searches were sent
+  const sleep = ms => new Promise(res => setTimeout(res, ms));
+  async function altFetch(url) {
+    for (let i = 0; ; i++) {
+      const now = Date.now();
+      while (altTimes.length && now - altTimes[0] > 60000) altTimes.shift();
+      if (altTimes.length >= ALT_PER_MIN) throw new Error('too many searches');
+      altTimes.push(now);
+      try { return await fetchJson(url, 8000); }
+      catch (e) {
+        if (i >= ALT_RETRY_MS.length || navigator.onLine === false || (e && e.name === 'AbortError')) throw e;
+        await sleep(ALT_RETRY_MS[i]);
+      }
+    }
+  }
+  function altSearch(kind, cats) {
+    const key = kind + ':' + cats.join('|'), old = altCache.get(key);
+    if (old && !(old.failed && Date.now() - old.at > ALT_FAIL_WAIT)) return old.list;
+    const base = kind === 'cosmetic' ? OBF : OFF;
+    const url = base + '/api/v2/search?categories_tags=' + encodeURIComponent(cats.join('|')) + '&countries_tags_en=' + encodeURIComponent(ALT_COUNTRIES) +
+      '&sort_by=unique_scans_n&page_size=24&fields=' + FIELDS;
+    const entry = { at: Date.now(), failed: false };
+    entry.list = altFetch(url)
+      .then(d => (d && Array.isArray(d.products) ? d.products : [])
+        .filter(x => x && isBarcode(String(x.code || '')))
+        .map(x => fromApi(x, kind, base, String(x.code))))
+      .catch(() => { entry.failed = true; return []; });
+    altCache.set(key, entry);
+    return entry.list;
+  }
+  // The name on the "Instead" line. A product from the database that you have not opened yet also shows its brand
+  // ("Salami" alone does not help in the shop).
+  function altLabel(q) {
+    const name = q.name || t('ph.unnamed');
+    if (state.products[q.code] || !q.brand || nameKey({ name }).includes(nameKey({ name: q.brand }))) return name;
+    return q.brand + ' ' + name;
+  }
+  const canSuggest = p => navigator.onLine !== false && !!(p.cats && p.cats.length) && (p.kind === 'food' || p.kind === 'cosmetic' || !p.kind);
+  const nameKey = x => String((x && x.name) || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  const sameName = (x, y) => nameKey(x) === nameKey(y);
+  async function suggestAlternatives(p, have) {
+    const out = [];
+    if (!canSuggest(p)) return out;
+    const hits = (await altSearch(p.kind || 'food', p.cats.slice(-2)))
+      .map(q => ({ q, s: catScore(p, q) })).sort((x, y) => y.s - x.s).map(x => x.q);   // the closest category first; inside it the most scanned first
+    for (const q of hits) {
+      if (q.code === p.code || !q.name || !q.ingredientsText || sameName(q, p)) continue;
+      if (have.concat(out).some(o => o.code === q.code || sameName(o, q))) continue;
+      let v;
+      try { v = analyze(applyName(state.products[q.code] || q)).verdict; } catch (e) { continue; }
+      if (v === 'ok') out.push(q);
+      if (have.length + out.length >= 2) break;
     }
     return out;
   }
@@ -3740,7 +3849,7 @@
 
   // Small test hook (used only by automated checks).
   window.LC = { analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
-    buildReport, tsvPieces, listPieces, getRep: () => rep, repairNames, garbledName, isSupplementText, cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, nameIdent, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart };
+    buildReport, tsvPieces, listPieces, getRep: () => rep, repairNames, garbledName, isSupplementText, cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, nameIdent, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart, sameCatSaved, suggestAlternatives, catScore, altCache, altTimes };
 
   init();
 })();

@@ -3,7 +3,7 @@ Run from the repo root:  python tools/test_app.py
 Needs: pip install playwright && playwright install chromium
 Starts a local web server, fakes the Open Food Facts answer, and checks the main screens.
 Screenshots go to tools/shots/ (not for GitHub)."""
-import json, os, sys, threading, http.server, functools
+import json, os, re, sys, threading, http.server, functools
 from playwright.sync_api import sync_playwright, Page
 
 # v2.15: the text part of "Read a label" sits in a fold. Tests that type text open the fold first, as a person would.
@@ -38,8 +38,41 @@ def serve():
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
 
+# v2.29: products with categories and the search answer ("Instead" from the same category)
+ALT_SEARCHES = []
+ALT_FAIL = {'n': 0}   # the next n searches answer 503, like Open Food Facts under load
+def alt_prod(code, name, text, cats, extra=None):
+    d = {'code': code, 'product_name': name, 'brands': 'Example', 'ingredients_text': text, 'categories_tags': cats}
+    d.update(extra or {}); return d
+SAUSAGE_CATS = ['en:meats', 'en:prepared-meats', 'en:sausages', 'de:wurst', 'en:salami']
+ALT_PRODUCTS = {
+    '9001234500001': alt_prod('9001234500001', 'Salami scharf', 'Schweinefleisch, Speck, Salz, Konservierungsstoff: Natriumnitrit, Gewürze', SAUSAGE_CATS, {'additives_tags': ['en:e250']}),
+    '9001234500002': alt_prod('9001234500002', 'Paprikawurst', 'Schweinefleisch, Paprika, Salz, Konservierungsstoff: E250', SAUSAGE_CATS[:4], {'additives_tags': ['en:e250']}),
+    '9001234500003': alt_prod('9001234500003', 'Bio Geflügelwurst', 'Putenfleisch 92 %, Wasser, Meersalz, Senf, Gewürze', SAUSAGE_CATS[:4]),
+    '9001234500004': alt_prod('9001234500004', 'Leberkäse', '', SAUSAGE_CATS[:4]),
+    '9001234500005': alt_prod('9001234500005', 'Bio Geflügelwurst', 'Putenfleisch 90 %, Wasser, Meersalz, Gewürze', SAUSAGE_CATS[:4]),
+    '9001234500006': alt_prod('9001234500006', 'Putenwurst natur', 'Putenfleisch 95 %, Wasser, Meersalz, Pfeffer', SAUSAGE_CATS[:4]),
+    '9001234500007': alt_prod('9001234500007', 'Kochschinken natur', 'Schweinefleisch 96 %, Wasser, Meersalz', ['en:meats', 'en:prepared-meats', 'en:hams']),
+    '9001234500008': alt_prod('9001234500008', 'Schoko Riegel', 'Zucker, Kakaobutter, Konservierungsstoff: Natriumnitrit', ['en:snacks', 'en:sweet-snacks', 'en:chocolates']),
+}
 def fake_api(route):
     url = route.request.url
+    if '/api/v2/search' in url:
+        from urllib.parse import urlparse, parse_qs
+        q = parse_qs(urlparse(url).query)
+        cat = (q.get('categories_tags') or [''])[0]
+        ALT_SEARCHES.append({'host': urlparse(url).hostname, 'cat': cat, 'countries': (q.get('countries_tags_en') or [''])[0], 'sort': (q.get('sort_by') or [''])[0]})
+        if ALT_FAIL['n'] > 0:
+            ALT_FAIL['n'] -= 1
+            route.fulfill(status=503, content_type='text/html', body='<h1>Page temporarily unavailable</h1>')
+            return
+        hits = [p for p in ALT_PRODUCTS.values() if any(c in p['categories_tags'] for c in cat.split('|'))] if 'openfoodfacts' in url else []
+        route.fulfill(status=200, content_type='application/json', body=json.dumps({'count': len(hits), 'page': 1, 'page_count': len(hits), 'page_size': 24, 'skip': 0, 'products': hits}))
+        return
+    m = re.search(r'/product/(\d+)\.json', url)
+    if 'openfoodfacts' in url and m and m.group(1) in ALT_PRODUCTS:
+        route.fulfill(status=200, content_type='application/json', body=json.dumps({'status': 1, 'product': ALT_PRODUCTS[m.group(1)]}))
+        return
     if 'openfoodfacts' in url and '9001234567890' in url:
         route.fulfill(status=200, content_type='application/json', body=json.dumps({'status': 1, 'product': {
             'product_name': 'Extrawurst', 'brands': 'Example', 'ingredients_text': SAUSAGE,
@@ -488,7 +521,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.28' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.29' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -958,7 +991,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v46')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v47')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1289,10 +1322,78 @@ with sync_playwright() as p:
     r = pg.evaluate("() => ({ mem: !!LC.state.products['4005808777777'], stored: (localStorage.getItem('lc.products') || '').includes('4005808777777'), n: Object.keys(LC.state.products).length })")
     ok(r['mem'] and r['stored'] and r['n'] < 31, 'v2.28: storage full: the oldest online-list products make room, the new product is saved (%s)' % r)
     ctx.close()
+    # ---- v2.29: "Instead" from the same category (your saved products first, then the database) ----
+    print('v2.29: Instead from the same category')
+    ctx, pg = new_page(b, base, 'en-GB')
+    read_label(pg, 'Zutaten: Haferflocken 100 %, Salz, Zimt', 'food'); rename(pg, 'Haferflocken')
+    del ALT_SEARCHES[:]
+    pg.click('.tabbar button[data-go=scan]'); type_code(pg, '9001234500008'); pg.wait_for_selector('#result:not([hidden]) #answer'); pg.wait_for_timeout(700)
+    alts = pg.eval_on_selector_all('#answer .qalt:not([hidden]) .altbtn', 'n => n.map(x => x.textContent)')
+    ok(word(pg) == 'Check' and pg.inner_text('#answer .qalt').startswith('Instead:') and alts == ['Haferflocken'] and len(ALT_SEARCHES) == 1,
+       'v2.29: the database has no other product of this category -> your saved product of the same type, as before (%s, %d searches)' % (alts, len(ALT_SEARCHES)))
+    del ALT_SEARCHES[:]
+    pg.click('.tabbar button[data-go=scan]'); type_code(pg, '9001234500001'); pg.wait_for_selector('#result:not([hidden]) #answer'); pg.wait_for_selector('#qalt:not([hidden])')
+    alts = pg.eval_on_selector_all('#answer .altbtn', 'n => n.map(x => x.textContent)')
+    ok(word(pg) == 'Check' and alts == ['Example Bio Geflügelwurst', 'Example Putenwurst natur'],
+       'v2.29: a salami with nitrite -> two sausages from the database with "No warnings" under YOUR rules, shown with the brand; not the product itself, not the one with E250, not the one without a list, no double name, not the oats (%s)' % alts)
+    ok(card_fits(pg) and no_side_scroll(pg), 'v2.29: the card still fits at 390 px with two database names')
+    ok([s['cat'] for s in ALT_SEARCHES] == ['en:sausages|en:salami'] and ALT_SEARCHES[0]['countries'] == 'austria|germany|bulgaria' and ALT_SEARCHES[0]['sort'] == 'unique_scans_n' and ALT_SEARCHES[0]['host'] == 'world.openfoodfacts.org',
+       'v2.29: ONE search for the two most specific categories; Austria, Germany or Bulgaria; most scanned first (%s)' % ALT_SEARCHES)
+    ok(pg.evaluate("LC.state.products['9001234500003'] === undefined"), 'v2.29: a suggestion is not saved until you open it')
+    open_details(pg); pg.click('.tabbar button[data-go=history]'); pg.click('.tabbar button[data-go=scan]')
+    pg.evaluate("LC.showProduct(LC.state.products['9001234500001'])"); pg.wait_for_selector('#qalt:not([hidden])')
+    ok(len(ALT_SEARCHES) == 1, 'v2.29: showing the product again asks nothing new (%d searches)' % len(ALT_SEARCHES))
+    # Open Food Facts refuses a part of the searches (503): the app tries again, twice at most
+    del ALT_SEARCHES[:]; ALT_FAIL['n'] = 2
+    pg.evaluate("LC.altCache.clear(); LC.showProduct(LC.state.products['9001234500001'])"); pg.wait_for_selector('#qalt:not([hidden])', timeout=6000)
+    alts = pg.eval_on_selector_all('#answer .altbtn', 'n => n.map(x => x.textContent)')
+    ok(len(ALT_SEARCHES) == 3 and alts == ['Example Bio Geflügelwurst', 'Example Putenwurst natur'], 'v2.29: two refused searches (503), the third answer is used (%d searches, %s)' % (len(ALT_SEARCHES), alts))
+    del ALT_SEARCHES[:]; ALT_FAIL['n'] = 5
+    pg.evaluate("LC.altCache.clear(); LC.altTimes.length = 0; LC.showProduct(LC.state.products['9001234500001'])"); pg.wait_for_timeout(3200)
+    alts = pg.eval_on_selector_all('#answer .qalt:not([hidden]) .altbtn', 'n => n.map(x => x.textContent)')
+    ok(len(ALT_SEARCHES) == 3 and alts == ['Haferflocken'], 'v2.29: three refused searches: it stops and shows your saved product, as before (%d searches, %s)' % (len(ALT_SEARCHES), alts))
+    pg.evaluate("LC.showProduct(LC.state.products['9001234500001'])"); pg.wait_for_timeout(600)
+    ok(len(ALT_SEARCHES) == 3, 'v2.29: after a refused search it does not ask again for a minute (%d searches)' % len(ALT_SEARCHES))
+    # never more than 6 searches a minute
+    del ALT_SEARCHES[:]; ALT_FAIL['n'] = 0
+    pg.evaluate("LC.altCache.clear(); LC.altTimes.length = 0; for (let i = 0; i < 6; i++) LC.altTimes.push(Date.now()); LC.showProduct(LC.state.products['9001234500001'])"); pg.wait_for_timeout(700)
+    ok(len(ALT_SEARCHES) == 0, 'v2.29: 6 searches in the last minute: no new search (%d)' % len(ALT_SEARCHES))
+    pg.evaluate("LC.altCache.clear(); LC.altTimes.length = 0; LC.showProduct(LC.state.products['9001234500001'])"); pg.wait_for_selector('#qalt:not([hidden])'); pg.wait_for_timeout(300)
+    del ALT_SEARCHES[:]
+    pg.click('#answer .altbtn'); pg.wait_for_selector('#result:not([hidden]) #answer'); pg.wait_for_timeout(400)
+    ok(pg.inner_text('#nameBtn') == 'Bio Geflügelwurst' and word(pg) == 'No warnings' and pg.evaluate("LC.state.products['9001234500003'].cats.join()") == 'en:meats,en:prepared-meats,en:sausages',
+       'v2.29: a tap opens the suggested product with its own check; its categories are saved (%s)' % pg.inner_text('#nameBtn'))
+    # your saved product of the same category comes first
+    pg.evaluate("LC.showProduct(LC.state.products['9001234500001'])"); pg.wait_for_selector('#qalt:not([hidden])'); pg.wait_for_timeout(300)
+    alts = pg.eval_on_selector_all('#answer .altbtn', 'n => n.map(x => x.textContent)')
+    ok(alts == ['Bio Geflügelwurst', 'Example Putenwurst natur'] and pg.evaluate("LC.sameCatSaved(LC.state.products['9001234500001']).map(q => q.name).join()") == 'Bio Geflügelwurst',
+       'v2.29: your saved sausage is first, the database fills the second place (%s)' % alts)
+    pg.click('.tabbar button[data-go=scan]'); type_code(pg, '9001234500007'); pg.wait_for_selector('#result:not([hidden]) #answer')
+    ok(word(pg) == 'No warnings' and pg.locator('#answer .qalt').count() == 0, 'v2.29: no "Instead" on a product without warnings')
+    pg.evaluate("LC.showProduct(LC.state.products['9001234500001'])"); pg.wait_for_selector('#qalt:not([hidden])'); pg.wait_for_timeout(300)
+    ok(pg.evaluate("LC.sameCatSaved(LC.state.products['9001234500001']).map(q => q.name).join()") == 'Bio Geflügelwurst,Kochschinken natur'
+       and pg.evaluate("LC.catScore(LC.state.products['9001234500001'], LC.state.products['9001234500003'])") == 3 and pg.evaluate("LC.catScore(LC.state.products['9001234500001'], LC.state.products['9001234500007'])") == 2,
+       'v2.29: the closest category first (sausage before ham); the oats are not offered for a salami (%s)' % pg.evaluate("LC.sameCatSaved(LC.state.products['9001234500001']).map(q => q.name).join()"))
+    # your own rule decides: mustard on your list removes the sausage with mustard
+    pg.evaluate("localStorage.setItem('lc.avoid', JSON.stringify([{id:'a1', text:'senf'}])); localStorage.setItem('lc.history', JSON.stringify(LC.state.history.filter(h => h.code === '9001234500001'))); 0"); reload_ready(pg)
+    pg.evaluate("LC.showProduct(LC.state.products['9001234500001'])"); pg.wait_for_selector('#qalt:not([hidden])'); pg.wait_for_timeout(300)
+    mustard_free = pg.evaluate("(async () => (await LC.suggestAlternatives(LC.state.products['9001234500001'], [])).map(q => q.code + ' ' + q.name))()")
+    ok(mustard_free == ['9001234500005 Bio Geflügelwurst', '9001234500006 Putenwurst natur'], 'v2.29: "senf" on your list: the sausage with mustard is not suggested, the one without mustard is (%s)' % mustard_free)
+    # offline: nothing is asked, your saved products only
+    del ALT_SEARCHES[:]
+    ctx.set_offline(True)
+    pg.evaluate("LC.altCache.clear(); LC.showProduct(LC.state.products['9001234500001'])"); pg.wait_for_selector('#result:not([hidden]) #answer'); pg.wait_for_timeout(400)
+    ok(len(ALT_SEARCHES) == 0 and pg.locator('#answer .qalt:not([hidden]) .altbtn').count() == 0, 'v2.29: offline: no search, no line when you have no saved product of this type (%d searches)' % len(ALT_SEARCHES))
+    ctx.set_offline(False)
+    # an old saved product (before v2.29, no categories) is asked again once when you scan it
+    pg.evaluate("(() => { const p = LC.state.products['9001234500001']; delete p.cats; p.name = 'old name'; localStorage.setItem('lc.products', JSON.stringify(LC.state.products)); })()"); reload_ready(pg)
+    type_code(pg, '9001234500001'); pg.wait_for_selector('#result:not([hidden]) #answer'); pg.wait_for_timeout(400)
+    ok(pg.evaluate("Array.isArray(LC.state.products['9001234500001'].cats) && LC.state.products['9001234500001'].name") == 'Salami scharf', 'v2.29: a product saved before v2.29 gets its categories at the next scan')
+    ctx.close()
     # A real update: serve a copy of the app, change its sw.js (as a push does), ask the browser to check.
     import shutil, tempfile
     tmp = tempfile.mkdtemp()
-    for f in ('index.html', 'style.css', 'i18n.js', 'db.js', 'app.js', 'manifest.json', 'sw.js', 'icon-192.png', 'icon-512.png'): shutil.copy(os.path.join(ROOT, f), tmp)
+    for f in ('index.html', 'style.css', 'i18n.js', 'db.js', 'app.js', 'manifest.json', 'sw.js', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'): shutil.copy(os.path.join(ROOT, f), tmp)
     shutil.copytree(os.path.join(ROOT, 'data'), os.path.join(tmp, 'data'))
     class Quiet2(http.server.SimpleHTTPRequestHandler):
         def log_message(self, *args): pass
@@ -1306,16 +1407,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v46'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v47'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v46' not in keys: break
+        if 'label-check-v47' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v46' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v47' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
     b.close()

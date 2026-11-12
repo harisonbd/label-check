@@ -671,7 +671,7 @@ details.claudebox .steps { margin-top: 2px; }
   background: var(--card); font-weight: 650; }
 .qalt b { color: var(--green-ink); }
 .altbtn { min-height: 40px; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; font-weight: 650;
-  text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+  text-decoration: underline; text-underline-offset: 3px; cursor: pointer; text-align: left; }   /* v2.29: a long name wraps, left-aligned */
 .qa .strip { margin-top: 14px; }
 .qdet { width: 100%; min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 16px;
   border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; }
