@@ -1,0 +1,27 @@
+# Code scan on GitHub's computer, like notes and my-city-trips. It only REPORTS (GitHub -> Actions); it never blocks a push.
+# Fixed versions (no "latest"). Semgrep sends no usage data (--metrics=off).
+# Added 12 Nov 2026 for label-check. Vendor libraries and data are left out of the scan.
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 5 * * 1"   # Mondays 05:17 UTC
+  workflow_dispatch:       # "Run workflow" button in GitHub -> Actions
+
+permissions:
+  contents: read
+
+jobs:
+  code:
+    name: Code scan (Semgrep, JavaScript and secret rules)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    container:
+      image: semgrep/semgrep:1.182.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Semgrep
+        run: semgrep scan --config p/javascript --config p/secrets --metrics=off --exclude "*.min.js" --exclude "tesseract-core*" --exclude "ort-wasm*" --exclude data
