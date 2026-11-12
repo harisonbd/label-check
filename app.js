@@ -955,13 +955,11 @@
             onclick: () => { if (!state.products[q.code] && !ownBy(q.code)) saveProduct(q); openSaved(q.code); } })));
         line.hidden = !list.length;
       };
-      const mine = sameCatSaved(p), online = mine.length < 2 && canSuggest(p);
-      if (mine.length || !online) fill(mine.length ? mine : alternatives(p));
-      if (online) {
-        suggestAlternatives(p, mine).then(more => {
-          const list = mine.concat(more).slice(0, 2);
-          fill(list.length ? list : alternatives(p));
-        }).catch(() => { if (!mine.length) fill(alternatives(p)); });
+      if (!(p.cats && p.cats.length)) fill(alternatives(p));            // no category known (label photo, household): as before v2.29
+      else {
+        const mine = sameCatSaved(p);
+        fill(mine);
+        if (mine.length < 2 && canSuggest(p)) suggestAlternatives(p, mine).then(more => fill(mine.concat(more).slice(0, 2))).catch(() => {});
       }
       card.append(line);
     }
@@ -1162,14 +1160,19 @@
     renderFavs();
   }
 
-  // "Instead" (v2.29). Order: 1. your saved products of the same CATEGORY with "No warnings" (closest category first);
-  // 2. products of the same category from Open Food Facts / Open Beauty Facts that pass YOUR rules (needs internet);
-  // 3. only when 1 and 2 give nothing: your saved products of the same type (food / cosmetic / household), as before v2.29.
-  // How close two products are: the place (1 = most general) of the most specific category they share. 0 = none.
+  // "Instead" (v2.29, v2.30). For a product with categories: 1. your saved products of the same CATEGORY with "No warnings"
+  // (closest first); 2. products of the same category from Open Food Facts / Open Beauty Facts that pass YOUR rules (needs
+  // internet). Nothing else: v2.30 no longer shows a product of another category (a salami got "Instead: Nutella").
+  // A product without categories (label photo, household): your saved products of the same type, as before v2.29.
+  // How close q is to p: the share (0..1) of p's categories that q also has. A deeper (more specific) category counts more.
+  // The database lists them by depth, but it also adds broad ones at the end ("sweetened beverages"), so one shared
+  // category is not enough: SAME_CAT is the share that counts as "the same shelf".
+  const SAME_CAT = 0.4;
   function catScore(p, q) {
-    if (!p.cats || !q.cats) return 0;
-    for (let i = p.cats.length - 1; i >= 0; i--) if (q.cats.includes(p.cats[i])) return i + 1;
-    return 0;
+    if (!p.cats || !p.cats.length || !q.cats) return 0;
+    let all = 0, hit = 0;
+    p.cats.forEach((c, i) => { all += i + 1; if (q.cats.includes(c)) hit += i + 1; });
+    return Math.round(100 * hit / all) / 100;
   }
   function savedCandidates(p) {
     const out = [], seen = new Set([p.code]);
@@ -1182,17 +1185,17 @@
     }
     return out;
   }
-  // 1. Same category = they share one of the 3 most specific categories of this product.
+  // 1. Your saved products of the same category, closest first.
   function sameCatSaved(p) {
-    const need = Math.max(1, (p.cats || []).length - 2), out = [];
-    const cand = savedCandidates(p).map(q => ({ q, s: catScore(p, q) })).filter(x => x.s >= need).sort((x, y) => y.s - x.s);   // stable: newest first
+    const out = [];
+    const cand = savedCandidates(p).map(q => ({ q, s: catScore(p, q) })).filter(x => x.s >= SAME_CAT).sort((x, y) => y.s - x.s);   // stable: newest first
     for (const x of cand) {
       if (verdictOf(x.q.code).verdict === 'ok') out.push(x.q);
       if (out.length === 2) break;
     }
     return out;
   }
-  // 3. As before v2.29: saved products of the same type with "No warnings" (newest first, at most 2).
+  // For a product without categories, as before v2.29: saved products of the same type with "No warnings" (newest first, at most 2).
   function alternatives(p) {
     const out = [];
     for (const q of savedCandidates(p)) {
@@ -1202,12 +1205,12 @@
     }
     return out;
   }
-  // 2. The most scanned products of the same category sold in these countries. ONE search per product (its two most specific
+  // 2. The most scanned products of the same category sold in these countries. ONE search per product (its three deepest
   // categories, joined with "or"); the answer is kept for this session. Open Food Facts refuses a part of the searches from
   // people who are not signed in (HTTP 503 "high demand", measured Nov 2026: about 4 of 10), so a refused search is tried
   // again twice. At most 6 searches a minute (they allow 10), and nothing is asked when you are offline.
   const ALT_COUNTRIES = 'austria|germany|bulgaria';
-  const ALT_RETRY_MS = [500, 1200], ALT_PER_MIN = 6, ALT_FAIL_WAIT = 60000;
+  const ALT_RETRY_MS = [800, 2500], ALT_PER_MIN = 6, ALT_FAIL_WAIT = 60000;
   const altCache = new Map();   // 'kind:categories' -> { at, list: Promise of products, failed }
   const altTimes = [];          // when the last searches were sent
   const sleep = ms => new Promise(res => setTimeout(res, ms));
@@ -1229,7 +1232,7 @@
     if (old && !(old.failed && Date.now() - old.at > ALT_FAIL_WAIT)) return old.list;
     const base = kind === 'cosmetic' ? OBF : OFF;
     const url = base + '/api/v2/search?categories_tags=' + encodeURIComponent(cats.join('|')) + '&countries_tags_en=' + encodeURIComponent(ALT_COUNTRIES) +
-      '&sort_by=unique_scans_n&page_size=24&fields=' + FIELDS;
+      '&sort_by=unique_scans_n&page_size=30&fields=' + FIELDS;
     const entry = { at: Date.now(), failed: false };
     entry.list = altFetch(url)
       .then(d => (d && Array.isArray(d.products) ? d.products : [])
@@ -1247,13 +1250,16 @@
     return q.brand + ' ' + name;
   }
   const canSuggest = p => navigator.onLine !== false && !!(p.cats && p.cats.length) && (p.kind === 'food' || p.kind === 'cosmetic' || !p.kind);
-  const nameKey = x => String((x && x.name) || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  // The same product in another pack size is the same name: "Coca Cola Original Taste 1.5L" = "Coca-Cola Original Taste".
+  const nameKey = x => String((x && x.name) || '').toLowerCase()
+    .replace(/\b\d+\s*x\s*(?=\d)/g, ' ').replace(/\b\d+(?:[.,]\d+)?\s*(?:ml|cl|dl|l|g|kg|mg|oz|stk|st|pcs)\b\.?/g, ' ')
+    .replace(/[^\p{L}\p{N}]/gu, '');
   const sameName = (x, y) => nameKey(x) === nameKey(y);
   async function suggestAlternatives(p, have) {
     const out = [];
     if (!canSuggest(p)) return out;
-    const hits = (await altSearch(p.kind || 'food', p.cats.slice(-2)))
-      .map(q => ({ q, s: catScore(p, q) })).sort((x, y) => y.s - x.s).map(x => x.q);   // the closest category first; inside it the most scanned first
+    const hits = (await altSearch(p.kind || 'food', p.cats.slice(-3)))
+      .map(q => ({ q, s: catScore(p, q) })).filter(x => x.s >= SAME_CAT).sort((x, y) => y.s - x.s).map(x => x.q);   // the closest category first; inside it the most scanned first
     for (const q of hits) {
       if (q.code === p.code || !q.name || !q.ingredientsText || sameName(q, p)) continue;
       if (have.concat(out).some(o => o.code === q.code || sameName(o, q))) continue;
