@@ -2983,6 +2983,8 @@
   const CONTACT_LINE = /www\.|https?:|@|\btel\.?\s*[:\d+(]|\b[A-Z]{1,2}-\d{4,5}\b|\bUFI\b|\bGmbH\b|\b(stra(ß|ss)e|str\.|platz)\s*\d/iu;
   const TRACE_LINE = /may contain|kann (spuren|enthalten)|spuren von|traces? of|може да съдържа|следи от/iu;
   const KEEP_LINE = /contain|trace|spur|enth[äa]lt|kann|allerg|gluten|съдържа|следи|алерг|nuts?\b|milk|egg|soy|wheat|nüsse|milch|ei\b|\bmay\b/iu;
+  // v2.32: a piece that names an allergen (any language the data knows: "пшенично нишесте", "Weizenmehl") is never dropped as running text
+  function hasAllergen(seg) { try { return LCDB.checkFood(seg).allergens.length > 0; } catch (e) { return false; } }
   function repairNames(text) {
     if (!DBINFO || !text) return text;
     const head = (String(text).match(/^\s*(ingredients?|ingr[eé]dients?|inci|zutaten|inhaltsstoffe|bestandteile|съставки|състав|composition|összetevők|složení|zloženie|sestavine)\s*[:：]\s*/i) || [''])[0];     // the heading ("Ingredients:") stays as it is
@@ -2992,7 +2994,8 @@
       if (CONTACT_LINE.test(seg)) continue;                                 // v2.25: address, phone, web, e-mail: not an ingredient
       // v2.25: running text with known names inside ("... Gefahr. SODIUM C14-16 OLEFIN SULFONATE. Enthält MENTHA ARVENSIS LEAF OIL ..."):
       // keep the names, drop the sentences. Not for a "may contain / traces" line: that keeps its words.
-      if (SENTENCE_WORD.test(seg) && !TRACE_LINE.test(seg)) {
+      const allergen = hasAllergen(seg);
+      if (SENTENCE_WORD.test(seg) && !TRACE_LINE.test(seg) && !allergen) {
         const nm = LCDB.findNames(seg).filter(n => { const k = n.toLowerCase().replace(/[^\p{L}\p{N}]/gu, ''); if (seenFix.has(k)) return false; seenFix.add(k); return true; });
         if (nm.length) {
           // the words of the EU detergent rule stay as their own pieces ("anionische Tenside", "Duftstoffe"): they are not INCI names
@@ -3008,7 +3011,7 @@
           out.push(...keep, ...nm); continue;
         }
       }
-      if (SENTENCE_WORD.test(seg) && !KEEP_LINE.test(seg)) continue;        // a line of running text, not a name (never an allergen / traces line)
+      if (SENTENCE_WORD.test(seg) && !KEEP_LINE.test(seg) && !allergen) continue;        // a line of running text, not a name (never an allergen / traces line)
       let parts = null;
       try { parts = LCDB.findInside(seg); } catch (e) { parts = null; }
       if (!parts) { out.push(seg); continue; }
@@ -3025,6 +3028,24 @@
     const res = out.filter(n => nameKnown(n) || kk(n).length < 5 || !done.some(d => d.length > kk(n).length && d.includes(kk(n))));
     if (res.length === segs.length && res.every((n, i) => n === segs[i])) return text;    // nothing to repair: the text stays exactly as read
     return head + res.join(', ');
+  }
+  // v2.32 (tablets, 25 Nov): "Всяка таблетка съдържа:" / "Each tablet contains:" only say what follows: they go.
+  const DOSE_HEAD = /(?<!\p{L})(?:(?:всяка|една|1)\s+(?:филмирана\s+|ефервесцентна\s+|дъвчаща\s+)?(?:таблетка|капсула|саше|доза|ампула|дражета?)\s+съдържа|(?:each|one|1|every)\s+(?:film-coated\s+|effervescent\s+|chewable\s+)?(?:tablet|capsule|sachet|dose|softgel|lozenge|ampoule)\s+contains?|(?:1|eine|je|jede)\s+(?:Film|Brause|Kau)?(?:tablette|kapsel|dosis|ampulle)\s+enth(?:ä|a)lt)\s*[:：]\s*/giu;
+  // "… пшенично нишесте и др." / "… etc.": the list ends there, what follows is other text ("Регистрационен No …").
+  // Only outside brackets ("Gewürze (Pfeffer, Senf etc.), Salz" goes on).
+  const LIST_END = /(?<!\p{L})(?:и\s+др|и\s+други|etc|usw|and\s+others|und\s+andere)\s*\./giu;
+  function finishList(s) {
+    const st = (s.match(HEAD_RE) || [''])[0], body = s.slice(s.indexOf(st) + st.length);
+    if (!st) return s;
+    let b = body.replace(DOSE_HEAD, '');
+    // a second heading of the same language inside the list ("Помощни вещества:") starts the next names: a comma
+    b = b.replace(new RegExp('(?:(?<!\\p{L})(?:other|inactive|further|weitere|sonstige|andere|други)\\s+)?' + HEAD_RE.source, 'giu'), ', ').replace(/^\s*,\s*/, '').replace(/\s*,\s*,\s*/g, ', ').replace(/\s+,\s*/g, ', ');
+    for (const m of b.matchAll(LIST_END)) {
+      const before = b.slice(0, m.index);
+      if ((before.match(/[(\[]/g) || []).length > (before.match(/[)\]]/g) || []).length) continue;
+      b = before.replace(/[\s,;]+$/, ''); break;
+    }
+    return s.slice(0, s.indexOf(st) + st.length) + (/\s$/.test(st) ? '' : ' ') + b.trim();
   }
   function cleanOcr(text) {
     let s = String(text || '').replace(/[­]/g, '').replace(/(\p{L})-\s*\n\s*(\p{Ll})/gu, '$1$2');
@@ -3060,7 +3081,8 @@
       const between = s.slice(start, h.index).replace(/[^\p{L}]/gu, '');
       if (between.length >= 15 && headLang(h[1]) !== first) { s = s.slice(0, h.index).trim(); break; }
     }
-    return joined ? s.slice(start).trim() : s;
+    s = finishList(s);
+    return joined ? s.slice(s.match(HEAD_RE)[0].length).trim() : s;
   }
 
   async function onOcrRead() {

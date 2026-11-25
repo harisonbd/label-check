@@ -521,7 +521,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.31' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.32' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -991,7 +991,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v49')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v50')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1429,6 +1429,20 @@ with sync_playwright() as p:
     type_code(pg, '9001234500001'); pg.wait_for_selector('#result:not([hidden]) #answer'); pg.wait_for_timeout(400)
     ok(pg.evaluate("Array.isArray(LC.state.products['9001234500001'].cats) && LC.state.products['9001234500001'].name") == 'Salami scharf', 'v2.29: a product saved before v2.29 gets its categories at the next scan')
     ctx.close()
+    # ---- v2.32: tablets (25 Nov report): the list is cut at "и др.", sub-headings split it, an allergen line is never dropped ----
+    print('v2.32: tablets list')
+    ctx, pg = new_page(b, base, 'en-GB')
+    READ = 'Състав:\nВсяка таблетка съдържа:\nKalium phosphoricum (Kaлиym\nфосфорикум) D6 250 mg\nПомощни вещества:\nлактоза монохидрат,\nпшенично нишесте и др.\nРегистрационен №о.: 20100164\n\nБез лекарско предписание.\nЗа перорална употреба.\nПрочетете листовката преди\nупотреба\n\nДа се сьхранява на място'
+    r = pg.evaluate("(t) => { const c = LC.repairNames(LC.cleanOcr(t)); return { c, segs: LCDB.labelSegments(c).segs, al: LCDB.checkFood(c).allergens.map(a => a.id) }; }", READ)
+    ok(r['segs'] == ['Kalium phosphoricum (Kaлиym фосфорикум) D6 250 mg', 'лактоза монохидрат', 'пшенично нишесте'] and sorted(r['al']) == ['gluten', 'milk'],
+       'v2.32: the tablets read as 3 names (active substance, lactose, wheat starch); milk AND gluten found; "Регистрационен…" not in the list (%s)' % r)
+    r = pg.evaluate("(t) => LC.repairNames(LC.cleanOcr(t))", 'Zutaten: Wasser, Zucker. Hergestellt aus Weizenmehl und Gerste aus der Region, Salz')
+    ok('Weizenmehl und Gerste' in r, 'v2.32: a sentence that names an allergen (Weizenmehl, Gerste) is kept, not dropped as running text (%s)' % r)
+    r = pg.evaluate("(t) => LC.cleanOcr(t)", 'Zutaten: Weizenmehl, Zucker, Gewürze (Pfeffer, Senf etc.), Salz')
+    ok(r == 'Zutaten: Weizenmehl, Zucker, Gewürze (Pfeffer, Senf etc.), Salz', 'v2.32: "etc." inside brackets does not end the list (%s)' % r)
+    r = pg.evaluate("(t) => LC.cleanOcr(t)", 'Ingredients: Each tablet contains: Vitamin C 80 mg. Other ingredients: maltodextrin, magnesium stearate, etc. Store in a dry place.')
+    ok(r == 'Ingredients: Vitamin C 80 mg., maltodextrin, magnesium stearate', 'v2.32: English: "Each tablet contains:" goes, "Other ingredients:" becomes a comma, "etc." ends the list (%s)' % r)
+    ctx.close()
     # A real update: serve a copy of the app, change its sw.js (as a push does), ask the browser to check.
     import shutil, tempfile
     tmp = tempfile.mkdtemp()
@@ -1446,16 +1460,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v49'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v50'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v49' not in keys: break
+        if 'label-check-v50' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v49' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v50' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
     b.close()
