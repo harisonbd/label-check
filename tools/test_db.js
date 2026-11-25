@@ -185,6 +185,24 @@ const ok = (cond, msg) => { if (!cond) { fails++; console.log('  FAIL: ' + msg);
     ok(fn.length === 4 && fn.includes('SODIUM C14-16 OLEFIN SULFONATE') && fn.includes('MENTHA ARVENSIS LEAF OIL') && fn.includes('MENTHOL'), 'v2.25 findNames: 4 known names found inside a sentence block (' + fn + ')');
     ok(LCDB.findNames('Nach Gebrauch Hände gründlich waschen. Darf nicht in die Hände von Kindern gelangen.').length === 0, 'v2.25 findNames: a sentence without names gives nothing');
   }
+  console.log('\n17 v2.35: sulphites, cheese, short food words, suggestions while typing');
+  {
+    const al = (t, lang) => LCDB.checkFood(t, lang || 'bg').allergens.map(a => a.id + (a.trace ? '(trace)' : '')).join(',');
+    ok(['E220', 'E221', 'E222', 'E223', 'E224', 'E226', 'E227', 'E228'].every(e => al(e) === 'sulphur-dioxide-and-sulphites'), 'E220-E228 count as the allergen "sulphur dioxide and sulphites" (Reg. 1333/2008 group E 220-228)');
+    ok(al('агент за обработка на брашна (натриев МЕТАБИСУЛФИТ)') === 'sulphur-dioxide-and-sulphites' && al('Zucker. Kann Spuren von E220 enthalten', 'de') === 'sulphur-dioxide-and-sulphites(trace)', 'by name too; in the traces line it is a trace');
+    ok(al('карамел E150d') === '' && al('E150b') === '', 'sulphite caramels E150b/E150d are not the sulphites allergen');
+    ok(al('СИРЕНЕ на прах 0,1%') === 'milk' && al('кашкавал') === 'milk' && al('сиренец') === '', 'Bulgarian cheese words are milk (crackers label)');
+    ok(['сол', 'мед', 'мая', 'лук', 'Öl', 'oil', 'soľ', 'apă'].every(w => LCDB.knownFood(w)), 'short common food words are known (сол, мед, Öl, oil, soľ, apă)');
+    const sg = (q, k) => LCDB.suggestNames(q, k || 'food', 5, 'bg');
+    ok(sg('пше')[0].name === 'Пшеница' && sg('пше').every(x => /^пш/i.test(x.name)), 'typing "пше" suggests Пшеница first, all start with the letters');
+    ok(sg('e22').map(x => x.e).join() === 'E220,E221,E222,E223,E224', 'typing "e22" suggests E220-E224 with their names');
+    ok(sg('метаб').every(x => x.e) && sg('сол')[0].name === 'Сол', 'additive names keep their E-number; the exact name comes first ("Сол")');
+    ok(sg('glyc', 'cosmetic').some(x => x.name === 'GLYCERIN') && sg('g').length === 0, 'cosmetics: CosIng names; one letter gives nothing');
+    const ro = LCDB.checkFood('Ingrediente: făină de grâu, zahăr, lapte praf, acid citric, metabisulfit de sodiu. Poate conține urme de ouă și soia.', 'en');
+    ok(ro.additives.map(a => a.e).join() === 'E330,E223' && ro.allergens.map(a => a.id + (a.trace ? '(trace)' : '')).sort().join() === 'eggs(trace),gluten,milk,soybeans(trace),sulphur-dioxide-and-sulphites',
+      'Romanian label: E330, E223; wheat, milk, sulphites; eggs and soy as traces (' + ro.allergens.map(a => a.id).join() + ')');
+  }
+
   console.log(fails ? `\n${fails} FAILED` : '\nALL PASSED');
   process.exit(fails ? 1 : 0);
 })();

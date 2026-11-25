@@ -251,7 +251,8 @@
     const counts = { red: 0, orange: 0, info: 0, nodata: 0, green: 0 };
     for (const r of rows) counts[r.group]++;
     // Cosmetics / household: how many names the app knows. With many unknown names "No warnings" would say too much.
-    const listed = rows.filter(r => r.kind === 'cosmetic' && r.pos);
+    const typedFood = !!(p.read && p.read.typed) && p.kind !== 'cosmetic' && p.kind !== 'household';   // v2.35: typed food names count too
+    const listed = rows.filter(r => r.pos && (r.kind === 'cosmetic' || typedFood));
     const unknown = listed.filter(isUnknown).length, known = listed.length - unknown;
     const partial = listed.length >= 3 && known / listed.length < PARTIAL_MIN;
     // v2.13: text read from a photo where the app found no ingredients heading ("Zutaten:", "Съставки:" …) may be the
@@ -389,7 +390,7 @@
   }
 
   // A cosmetic name on the label that is not in our data (fragrance words count as known: the app knows they are fragrance)
-  function isUnknown(r) { return r.kind === 'cosmetic' && !!r.pos && !r.found && !r.fragrance; }
+  function isUnknown(r) { return !!r.typedUnknown || (r.kind === 'cosmetic' && !!r.pos && !r.found && !r.fragrance); }
 
   // ---------- Names you taught the app (v2.12, only on this phone) ----------
   // Key = the name before a bracket, without marks like * or ° (the same cut as the fix suggestions in db.js)
@@ -512,6 +513,8 @@
         : level === 'r' || row.allergens.length || (state.vegan && vg.maybe.length) ? 'info' : 'green';
       // v2.21.2: text that is no ingredient name (letters mixed with digits and marks: "N03A", "CbCTAB", "VH®OPM") is never "nothing found"
       if (row.group === 'green' && row.pos && garbledName(row.text)) { row.group = 'nodata'; row.garbled = true; }
+      // v2.35: a name typed by the person that the data does not know is "no data" (grey), never "nothing found"
+      else if (row.group === 'green' && row.pos && p.read && p.read.typed && !row.additives.length && !row.rules.length && !row.allergens.length && !LCDB.knownFood(row.text)) { row.group = 'nodata'; row.typedUnknown = true; }
       row.sub = foodSub(row);
       return row;
     });
@@ -769,6 +772,7 @@
     tag: 'M3.5 12.5v-8a1 1 0 0 1 1-1h8l8 8-9 9zM8 8h.01',
     pen: 'M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3zM14.5 7.5l2 2',
     ok: 'M5 12.5l4.5 4.5L19 7.5',
+    plus: 'M12 6v12M6 12h12',
     dots: 'M5 12h.01M12 12h.01M19 12h.01',
     scan: 'M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M8 12h8',
     globe: 'M21 12a9 9 0 1 1-18 0a9 9 0 1 1 18 0zM3.5 9h17M3.5 15h17M12 3c-2.5 3-2.5 15 0 18M12 3c2.5 3 2.5 15 0 18',
@@ -791,6 +795,7 @@
     $('result').hidden = true;
     $('labelPanel').hidden = true;
     $('searchPanel').hidden = true;
+    $('typePanel').hidden = true;
     $('status').hidden = true;
   }
 
@@ -812,7 +817,7 @@
 
   function closePanel() {
     const v = history.state && history.state.view;
-    if (v === 'label' || v === 'search') { try { history.back(); return; } catch (e) { /* fall through */ } }
+    if (v === 'label' || v === 'search' || v === 'type') { try { history.back(); return; } catch (e) { /* fall through */ } }
     showScanner();
   }
 
@@ -892,11 +897,11 @@
     const r = $('result');
     const known = a.verdict !== 'unknown';
     const grey = a.verdict === 'partial' || a.verdict === 'unknown';
-    const photo = !!(p.read && p.read.photo);
+    const photo = !!(p.read && p.read.photo), typedP = !!(p.read && p.read.typed);
     // v2.34 (new look, result B): answer, what the app read, "Show all N ingredients", tip (grey), use question, details, and the two buttons at the bottom.
     // Heart, share, 2nd photo, type, "Send to Claude" and "Look up online" are in the ⋯ menu (moreMenu).
-    const again = el('button', { class: 'btn ' + (grey ? 'btn-primary' : 'btn-ghost'), id: 'againBtn', type: 'button', onclick: () => openLabel(p) },
-      el('span', { text: t(p.source === 'label' ? 'btn.again' : 'btn.photoLabel') }));
+    const again = el('button', { class: 'btn ' + (grey ? 'btn-primary' : 'btn-ghost'), id: 'againBtn', type: 'button', onclick: () => (typedP ? openType(p) : openLabel(p)) },
+      el('span', { text: t(typedP ? 'type.edit' : p.source === 'label' ? 'btn.again' : 'btn.photoLabel') }));
     const next = el('button', { class: 'btn ' + (grey ? 'btn-ghost' : 'btn-primary'), id: 'nextBtn', type: 'button', text: t('btn.nextProduct'), onclick: scanNext });
     r.replaceChildren(...[
       answerCard(p, a),
@@ -904,7 +909,7 @@
         class: 'qmore', id: 'detBtn', type: 'button', 'aria-expanded': String(state.detailsOpen), 'aria-controls': 'details',
         onclick: () => toggleDetails(undefined, true)
       }, el('span', { text: a.total ? tn('qa.showAll', a.total) : t('qa.details') }), icon(ICON.chev, 'chev')) : null,
-      known ? readCard(p, a) : null,   // v2.33: "What the app read", right under the answer (was the v2.26 tick card)
+      known && !typedP ? readCard(p, a) : null,   // v2.33: "What the app read", right under the answer (v2.35: not for typed lists)
       grey && photo ? el('div', { class: 'qtip', id: 'capHint' },
         icon(ICON.scan),
         el('p', { text: t('cap.' + (a.weak || (a.unknown ? 'Glare' : 'Few'))) }),
@@ -1144,7 +1149,7 @@
         ' · ', el('button', { class: 'linkbtn inline', type: 'button', id: 'fixTextBtn', text: t('qa.fixText'), onclick: () => fixText(p) })] : null);
   }
   function misreadOf(r) {
-    if (r.fixS === undefined) r.fixS = isUnknown(r) ? LCDB.suggestCosmetic(r.text) : null;
+    if (r.fixS === undefined) r.fixS = isUnknown(r) && r.kind === 'cosmetic' ? LCDB.suggestCosmetic(r.text) : null;
     return r.fixS;
   }
   function showUnknown() {
@@ -1155,6 +1160,7 @@
   }
   // Open the label form with the saved text, so a wrong name can be corrected (with fix suggestions).
   function fixText(p) {
+    if (p && p.read && p.read.typed) { openType(p); return; }
     openLabel(p);
     $('textFold').open = true;
     $('labelText').value = p.ingredientsText || '';
@@ -2367,6 +2373,131 @@
     panel.scrollIntoView({ behavior: 'auto', block: 'start' });
   }
 
+  // ---------- v2.35: Type the ingredients ----------
+  // Two letters -> names the app knows (yours first) -> one tap adds the name; the list is checked at every step, offline.
+  // A name the data does not know is added as typed and shows grey "no data" (never "nothing found").
+  let typeFor = null, typeItems = [], typeKind = 'food', typeQ = '';
+  const TYPE_SUG = 5, TYPE_MIN = 2, TYPE_KEEP = 400;
+  const typedProduct = (items, kind) => ({ code: 'type-preview', kind, source: 'label', read: { typed: true }, ingredientsText: items.join(', '), tags: [], allergens: [], analysis: [] });
+  function typedNames() { const m = store.get('typedNames', {}); return m && typeof m === 'object' ? m : {}; }
+  function rememberTyped(names) {
+    const m = typedNames(), now = Date.now();
+    for (const n of names) { const k = nrm(n); if (!k) continue; const o = m[k] || { n, c: 0 }; o.n = n; o.c++; o.t = now; m[k] = o; }
+    const keys = Object.keys(m);
+    if (keys.length > TYPE_KEEP) keys.sort((a, b) => (m[a].c - m[b].c) || (m[a].t - m[b].t)).slice(0, keys.length - TYPE_KEEP).forEach(k => delete m[k]);
+    store.set('typedNames', m);
+  }
+  function openType(p) {
+    typeFor = p && p.code ? p : null;
+    const base = typeFor ? (productBy(typeFor.code) || typeFor) : null;
+    typeKind = (base && base.kind) || 'food';
+    typeItems = base && base.ingredientsText && base.read && base.read.typed ? LCDB.splitIngredients(base.ingredientsText).map(x => x.trim()).filter(Boolean) : [];
+    typeQ = '';
+    showPanel('typePanel');
+    if (!history.state || history.state.view !== 'type') pushState({ tab: 'scan', view: 'type' });
+    $('typeInput').value = '';
+    renderType();
+    try { $('typeInput').focus({ preventScroll: true }); } catch (e) { /* ignore */ }
+  }
+  // One short line under a typed name: E-number, your list, the allergen, or the colour reason; "no data" for an unknown name.
+  function typeRowWhy(r, skipE) {
+    if (!r) return '';
+    if (r.typedUnknown || isUnknown(r)) return t('g.nodata');
+    const parts = [];
+    if (r.kind === 'food') {
+      if (!skipE) (r.additives || []).forEach(a => parts.push(a.e));
+      if (r.mine) parts.push(t('chip.mine'));
+      const al = (r.allergens || []).map(a => a.name);
+      if (al.length) parts.push(t(r.tickedAllergens && r.tickedAllergens.length ? 'chip.yourAlg' : 'chip.alg') + ': ' + al.join(', '));
+      else if (!r.mine && (r.group === 'red' || r.group === 'orange')) parts.push(chipOf(r));
+    } else {
+      const c = chipOf(r), w = whyOf(r);
+      if (c) parts.push(c);
+      if (w && w !== c) parts.push(w);
+    }
+    return [...new Set(parts.filter(Boolean))].join(' · ');
+  }
+  function renderType() {
+    document.querySelectorAll('#typeKind .seg').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.k === typeKind)));
+    $('typeLead').textContent = typeFor && isBarcode(typeFor.code) ? t('type.leadFor', { code: typeFor.code }) : t('type.lead');
+    const a = typeItems.length ? analyze(typedProduct(typeItems, typeKind)) : null;
+    const v = a ? a.verdict : 'none';
+    const live = $('typeLive');
+    live.className = 'tlive v-' + v;
+    live.replaceChildren(el('span', { class: 'qi' }, icon(QA_ICON[v] || ICON.plus)),
+      el('div', { class: 'tlx' },
+        el('b', { id: 'typeWord', text: a ? t('v.' + v) : t('type.start') }),
+        el('small', { text: a ? tn('type.n', typeItems.length) : t('type.startSub') }),
+        a && a.rows.length ? el('div', { class: 'qchips' }, GROUPS.filter(g => a.counts[g]).map(g => el('span', { class: 'qchip g-' + g },
+          el('i', { 'aria-hidden': 'true' }), el('span', {}, el('b', { text: String(a.counts[g]) }), ' ' + t('legend.' + g))))) : null));
+    $('typeHead').textContent = t('type.list') + (typeItems.length ? ' (' + typeItems.length + ')' : '');
+    $('typeHead').hidden = !typeItems.length;
+    $('typeEmpty').hidden = typeItems.length > 0;
+    const rows = a ? a.rows : [];
+    $('typeList').replaceChildren(...typeItems.map((txt, i) => {
+      const r = rows.find(x => x.pos === i + 1), why = typeRowWhy(r);
+      return el('li', {}, el('div', { class: 'qrow' },
+        el('i', { class: 'dot g-' + (r ? r.group : 'nodata'), 'aria-hidden': 'true' }),
+        el('span', { class: 'qtx' }, el('strong', { text: cap(txt) }), why ? el('small', { text: why }) : null),
+        el('button', { class: 'tx', type: 'button', 'aria-label': t('type.remove', { name: txt }), title: t('type.remove', { name: txt }),
+          onclick: () => { typeItems.splice(i, 1); renderType(); renderTypeSug(); } }, icon(ICON.close))));
+    }));
+  }
+  function typeSuggestions(q) {
+    const nq = nrm(q);
+    if (nq.replace(/ /g, '').length < TYPE_MIN) return [];
+    const match = n => { const k = nrm(n); return k.startsWith(nq) || k.includes(' ' + nq); };
+    const have = new Set(typeItems.map(nrm));
+    const mine = Object.values(typedNames()).filter(o => o && o.n && match(o.n) && !have.has(nrm(o.n))).sort((x, y) => y.c - x.c || y.t - x.t).slice(0, 3).map(o => ({ name: o.n, e: null, mine: true }));
+    const seen = new Set(mine.map(x => nrm(x.name)));
+    const rest = LCDB.suggestNames(q, typeKind, TYPE_SUG + 3, LANG).filter(x => { const k = nrm(x.name); if (seen.has(k) || have.has(k)) return false; seen.add(k); return true; });
+    return mine.concat(rest).slice(0, TYPE_SUG);
+  }
+  function renderTypeSug() {
+    const q = typeQ.trim(), box = $('typeSug');
+    const list = typeSuggestions(q);
+    const exact = list.some(x => nrm(x.name) === nrm(q));
+    const items = list.map((x, i) => {
+      const r = analyze(typedProduct([x.name], typeKind)).rows.find(z => z.pos === 1);
+      const g = r ? r.group : 'nodata', why = x.mine ? t('type.mine') : (g !== 'green' ? typeRowWhy(r, true) : '');
+      const label = (x.e ? x.e + ' · ' : '') + cap(x.name), k = label.toLowerCase().indexOf(q.toLowerCase());
+      const nameEl = k >= 0 ? el('span', { class: 'nm' }, label.slice(0, k), el('mark', { text: label.slice(k, k + q.length) }), label.slice(k + q.length)) : el('span', { class: 'nm', text: label });
+      return el('li', {}, el('button', { type: 'button', class: 'tsrow' + (i === 0 ? ' first' : ''), onclick: () => addTyped(x.name) },
+        el('i', { class: 'dot g-' + g, 'aria-hidden': 'true' }), nameEl, why ? el('small', { text: why }) : null));
+    });
+    if (q.length >= TYPE_MIN && !exact) items.push(el('li', {}, el('button', { type: 'button', class: 'tsrow tsfree', id: 'typeFree', onclick: () => addTyped(q) },
+      el('i', { class: 'dot g-nodata', 'aria-hidden': 'true' }), el('span', { class: 'nm', text: t('type.free', { text: q }) }))));
+    box.replaceChildren(...items);
+    box.hidden = !items.length;
+  }
+  function addTyped(text) {
+    const have = new Set(typeItems.map(nrm));
+    for (const part of String(text).split(/[,;]+/).map(x => x.replace(/\s+/g, ' ').trim()).filter(x => /\p{L}/u.test(x))) {
+      const k = nrm(part);
+      if (!k || have.has(k)) continue;
+      have.add(k); typeItems.push(part);
+    }
+    typeQ = ''; $('typeInput').value = '';
+    renderType(); renderTypeSug();
+    try { $('typeInput').focus({ preventScroll: true }); } catch (e) { /* ignore */ }
+  }
+  function saveTyped() {
+    if (!typeItems.length) { toast(t('toast.typeEmpty')); return; }
+    const code = typeFor && typeFor.code ? typeFor.code : 'label-' + Date.now();
+    const base = productBy(code);
+    const text = typeItems.join(', ');
+    const p = {
+      code, kind: typeKind, kindSet: true, source: 'label',
+      name: (base && base.name) || '', brand: (base && base.brand) || '', image: (base && base.image) || '',
+      ingredientsText: text, read: { typed: true }, texts: [text], tags: [], allergens: [], analysis: [],
+      nutriscore: (base && base.nutriscore) || null, nova: (base && base.nova) || null, updated: null, fetchedAt: Date.now(), url: ''
+    };
+    rememberTyped(typeItems);
+    saveProduct(p);
+    buzzNext = true;
+    showProduct(p);
+  }
+
   // ---------- Find one ingredient (offline) ----------
   let searchTimer = null;
 
@@ -2790,23 +2921,31 @@
   const clusters = [];
   reads.forEach((text, fi) => {
     const seen = new Set();
-    ctx.split(String(text || '').replace(HEAD, '')).forEach((raw, pos) => {
-      let name = raw.replace(HEAD, '').replace(/^[\s:;,.\-–]+|[\s:;,]+$/g, '').trim().replace(/^[^:()\[\]]{1,25}:\s+/, '');
+    let afterTrace = false;   // v2.35: after the "may contain" line only allergen names follow (the rest is other label text)
+    // v2.35: a piece with a sentence end ("оцветител (паприка екстракт). МОЖЕ ДА СЪДЪРЖА ЯЙЦА") keeps the name before it and a
+    // "may contain" line after it; other sentences after it are still dropped (label text such as "Store in a dry place")
+    ctx.split(String(text || '').replace(HEAD, '')).flatMap(raw => { const pp = raw.split(/\.\s+(?=\p{L})/u); return pp.length < 2 ? [raw] : [pp[0], ...pp.slice(1).filter(x => ctx.trace && ctx.trace(x))]; }).forEach((raw, pos) => {
+      let name = raw.replace(HEAD, '').replace(/^[\s:;,.\-–]+|[\s:;,.]+$/g, '').trim().replace(/^[^:()\[\]]{1,25}:\s+/, '');
       const letters = (name.match(/\p{L}/gu) || []).length;
-      if (letters < 5) return;
+      // v2.35: short names (сол, соя, Salz) are kept when the data knows them, they name an allergen, or 2+ photos read them
+      const allergen = ctx.allergen ? ctx.allergen(name) : false, trace = ctx.trace ? ctx.trace(name) : false;
+      if (letters < 3 || (letters < 5 && !/^\p{L}+$/u.test(name))) return;
+      if (afterTrace && !allergen && !trace) return;
+      if (trace) afterTrace = true;
+      const short = letters < 5;
       const open = (name.match(/[(\[]/g) || []).length, close = (name.match(/[)\]]/g) || []).length;
       const words = name.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim().split(/\s+/).length;
       const known = ctx.known(name) && words <= 7 && name.length <= 70 && !/\.\s+\p{L}/u.test(name);   // a long run of text is never "a known name" because one word in it is known
       if (JUNK.test(name) || (!known && words >= 3 && name.split(/\s+/).filter(w => w.replace(/[^\p{L}]/gu, '').length <= 3).length >= words - 1)) return;   // garbage (© @ …, or a string of tiny word pieces) is no name
       const clean = !JUNK.test(name) && (letters / name.replace(/\s/g, '').length >= 0.5 || /\bE\s?\d{3}/.test(name)) && open === close && /^[\p{L}\p{N}(\[]/u.test(name);
-      const sentence = !known && (name.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim().split(/\s+/).length > 7 || /\.\s+\p{L}|drogerie|markt\b|d\.?o\.?o\b|gmbh|parabe|colorant|made in|hergestellt|anwendung|:\s|beilage|beachten|apotheke|arzt\b|use on skin|package leaflet|keep out|außerhalb|reach of/iu.test(name));           // a sentence of the label, not a name
+      const sentence = !known && !allergen && !trace && (name.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim().split(/\s+/).length > 7 || /\.\s+\p{L}|drogerie|markt\b|d\.?o\.?o\b|gmbh|parabe|colorant|made in|hergestellt|anwendung|:\s|beilage|beachten|apotheke|arzt\b|use on skin|package leaflet|keep out|außerhalb|reach of/iu.test(name));           // a sentence of the label, not a name
       const q = known ? 3 : clean && !sentence ? 1 : 0;
       if (q === 0) return;
       const k = name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
       const id = ctx.ident ? ctx.ident(name) : null;                  // the name the data knows it as (also for a little misread name)
       let c = (id && clusters.find(c => c.ids.has(id))) || clusters.find(c => c.keys.some(x => x === k || (ctx.dice(x, k) >= 0.8 && Math.min(x.length, k.length) / Math.max(x.length, k.length) >= 0.9 && x.slice(0, 3) === k.slice(0, 3))));
-      if (!c) { c = { keys: [], ids: new Set(), variants: [], first: fi * 100 + pos }; clusters.push(c); }
-      c.keys.push(k); if (id) c.ids.add(id);
+      if (!c) { c = { keys: [], ids: new Set(), variants: [], first: fi * 100 + pos, short, allergen, frames: new Set() }; clusters.push(c); }
+      c.keys.push(k); if (id) c.ids.add(id); c.frames.add(fi); if (allergen) c.allergen = true; if (!short) c.short = false;
       let v = c.variants.find(v => v.name === name);
       if (!v) { v = { name, q, n: 0, frames: new Set() }; c.variants.push(v); }
       if (!v.frames.has(fi)) { v.frames.add(fi); v.n++; }
@@ -2816,7 +2955,8 @@
   // an unknown piece that sits inside a longer name (a name cut at the edge of a frame) is not a name of its own
   const gramsOf = k => { const m = new Set(); for (let i = 0; i < k.length - 1; i++) m.add(k.slice(i, i + 2)); return m; };
   const kept = clusters.filter(c => {
-    if (c.best.q >= 3 || /\bE\s?\d{3}/.test(c.best.name)) return true;
+    if (c.short && !(c.best.q >= 3 || c.allergen || c.frames.size >= 2)) return false;
+    if (c.best.q >= 3 || c.allergen || /\bE\s?\d{3}/.test(c.best.name)) return true;
     const mine = c.best.name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
     if (mine.length < 8) return true;
     const g = gramsOf(mine);
@@ -2876,7 +3016,7 @@
     for (const x of use) text = text ? joinParts(text, x.text) : x.text;
     if (use.length + (base && base.text ? 1 : 0) > 1) {
       text = dedupeNames(text);                                 // fallback
-      const names = consensusNames((base && base.text ? [base.text] : []).concat(use.map(x => x.text)), { split: tx => LCDB.splitIngredients(tx), known: nameKnown, dice: bigramDice, ident: nameIdent });
+      const names = consensusNames((base && base.text ? [base.text] : []).concat(use.map(x => x.text)), { split: tx => LCDB.splitIngredients(tx), known: nameKnown, dice: bigramDice, ident: nameIdent, allergen: hasAllergen, trace: x => TRACE_LINE.test(x) });
       if (names.length >= 3) text = 'Ingredients: ' + names.join('; ');
       rep.merge = { used: use.length, of: got.length, names, joined: names.length >= 3 };
     }
@@ -3247,20 +3387,22 @@
   // v2.21.1: sentence words (any text line that is no ingredient) and blocks that hold known names with noise around them.
   const SENTENCE_WORD = /(^|\s)(das|der|die|und|mit|für|von|zur|bei|ist|einer|eines|wird|werden|nicht|auf|the|and|with|for|is|are|this|which|dem|den|des|или|и|за|на|със|не)(\s|$)/iu;
   const CONTACT_LINE = /www\.|https?:|@|\btel\.?\s*[:\d+(]|\b[A-Z]{1,2}-\d{4,5}\b|\bUFI\b|\bGmbH\b|\b(stra(ß|ss)e|str\.|platz)\s*\d/iu;
-  const TRACE_LINE = /may contain|kann (spuren|enthalten)|spuren von|traces? of|може да съдържа|следи от/iu;
-  const KEEP_LINE = /contain|trace|spur|enth[äa]lt|kann|allerg|gluten|съдържа|следи|алерг|nuts?\b|milk|egg|soy|wheat|nüsse|milch|ei\b|\bmay\b/iu;
+  const TRACE_LINE = /may contain|kann (spuren|enthalten)|spuren von|traces? of|може да съдържа|следи от|poate con[tțţ]ine|urme de|môže obsahovať/iu;
+  const KEEP_LINE = /contain|trace|spur|enth[äa]lt|kann|allerg|gluten|съдържа|следи|алерг|nuts?\b|milk|egg|soy|wheat|nüsse|milch|ei\b|\bmay\b|con[tțţ]ine|urme/iu;
   // v2.32: a piece that names an allergen (any language the data knows: "пшенично нишесте", "Weizenmehl") is never dropped as running text
   function hasAllergen(seg) { try { return LCDB.checkFood(seg).allergens.length > 0; } catch (e) { return false; } }
+  // v2.35: the same for a piece with a food additive ("агент за обработка на брашна (натриев метабисулфит)")
+  function hasAdditive(seg) { try { return LCDB.checkFood(seg).additives.length > 0; } catch (e) { return false; } }
   function repairNames(text) {
     if (!DBINFO || !text) return text;
-    const head = (String(text).match(/^\s*(ingredients?|ingr[eé]dients?|inci|zutaten|inhaltsstoffe|bestandteile|съставки|състав|composition|összetevők|složení|zloženie|sestavine)\s*[:：]\s*/i) || [''])[0];     // the heading ("Ingredients:") stays as it is
+    const head = (String(text).match(/^\s*(ingredients?|ingr[eé]dients?|inci|zutaten|inhaltsstoffe|bestandteile|съставки|състав|composition|összetevők|složení|zloženie|sestavine|ingrediente)\s*[:：]\s*/i) || [''])[0];     // the heading ("Ingredients:") stays as it is
     const segs = LCDB.splitIngredients(text), out = [], seenFix = new Set(segs.filter(g => nameKnown(g)).map(g => g.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')));
     for (const seg of segs) {
       if (!/\p{L}{3}/u.test(seg) || nameKnown(seg)) { out.push(seg); continue; }
       if (CONTACT_LINE.test(seg)) continue;                                 // v2.25: address, phone, web, e-mail: not an ingredient
       // v2.25: running text with known names inside ("... Gefahr. SODIUM C14-16 OLEFIN SULFONATE. Enthält MENTHA ARVENSIS LEAF OIL ..."):
       // keep the names, drop the sentences. Not for a "may contain / traces" line: that keeps its words.
-      const allergen = hasAllergen(seg);
+      const allergen = hasAllergen(seg) || hasAdditive(seg);
       if (SENTENCE_WORD.test(seg) && !TRACE_LINE.test(seg) && !allergen) {
         const nm = LCDB.findNames(seg).filter(n => { const k = n.toLowerCase().replace(/[^\p{L}\p{N}]/gu, ''); if (seenFix.has(k)) return false; seenFix.add(k); return true; });
         if (nm.length) {
@@ -3757,6 +3899,7 @@
     if (!$('searchPanel').hidden) renderSearch();
     if (!$('labelPanel').hidden) $('labelLead').textContent = labelFor && isBarcode(labelFor.code) ? t('label.leadFor', { code: labelFor.code }) : t('label.lead');
     if (!$('labelPanel').hidden && !$('pickBox').hidden) renderPick();
+    if (!$('typePanel').hidden) renderType();
   }
 
   // ---------- Backup ----------
@@ -3957,6 +4100,9 @@
       if (!st.pick) pickFor = null;
       showPanel('searchPanel');
       renderSearch();
+    } else if (st.view === 'type') {
+      showPanel('typePanel');
+      renderType();
     } else if (st.view === 'label' || st.view === 'cam') {
       showPanel('labelPanel');
       if (st.view === 'label' && camUiOn()) closeCam(true);
@@ -3999,6 +4145,19 @@
     $('offGet').addEventListener('click', getOfflineReaders);
     $('recentAll').addEventListener('click', () => go('history'));
     document.querySelectorAll('[data-back]').forEach(b => b.addEventListener('click', closePanel));
+    // v2.35: Type the ingredients
+    $('typeBtn').addEventListener('click', () => openType(labelFor));
+    document.querySelectorAll('#typeKind .seg').forEach(b => b.addEventListener('click', () => { typeKind = b.dataset.k; renderType(); renderTypeSug(); }));
+    $('typeInput').addEventListener('input', e => { typeQ = e.target.value; if (/[,;]/.test(typeQ)) addTyped(typeQ); else renderTypeSug(); });
+    $('typeInput').addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const q = typeQ.trim(); if (!q) return;
+      const first = typeSuggestions(q)[0];
+      addTyped(first ? first.name : q);
+    });
+    $('typeSave').addEventListener('click', saveTyped);
+    $('typePhoto').addEventListener('click', () => openLabel(typeFor));
     $('searchInput').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(renderSearch, 120); });
     $('manualForm').addEventListener('submit', e => {
       e.preventDefault();

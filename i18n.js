@@ -5,6 +5,12 @@
 
 window.LC_TEXT = {
   en: {
+    // v2.35: Type the ingredients
+    'type.btn': 'Type the ingredients', 'type.edit': 'Change the list', 'type.title': 'Type the ingredients', 'type.lead': 'Type the first letters and pick a name. It is checked at once, without internet.',
+    'type.leadFor': 'For barcode {code}. Type the first letters and pick a name.', 'type.ph': 'Start typing… e.g. sugar', 'type.input': 'Ingredient',
+    'type.free': 'Add “{text}” as typed', 'type.list': 'List', 'type.empty': 'No ingredients yet. Type 2 letters, then tap a name. Commas add several at once.',
+    'type.save': 'Save product', 'type.photo': 'Photo', 'type.remove': 'Remove {name}', 'type.start': 'Add ingredients', 'type.startSub': 'The result shows here.',
+    'type.n.one': '1 ingredient · checked at each step', 'type.n.other': '{n} ingredients · checked at each step', 'type.mine': 'used before', 'toast.typeEmpty': 'Add at least one ingredient.',
     // v2.34: new look (start B, result B, history B, ⋯ menu)
     'start.ask': 'What do you want to check?', 'start.code': 'Barcode', 'start.codeSub': 'Fastest way', 'start.ingr': 'Ingredients', 'start.ingrSub': 'No barcode',
     'qa.showAll.one': 'Show the 1 ingredient', 'qa.showAll.other': 'Show all {n} ingredients',
@@ -356,6 +362,12 @@ window.LC_TEXT = {
   },
 
   de: {
+    // v2.35: Zutaten eintippen
+    'type.btn': 'Zutaten eintippen', 'type.edit': 'Liste ändern', 'type.title': 'Zutaten eintippen', 'type.lead': 'Tippe die ersten Buchstaben und wähle einen Namen. Die Prüfung erfolgt sofort, ohne Internet.',
+    'type.leadFor': 'Für Barcode {code}. Tippe die ersten Buchstaben und wähle einen Namen.', 'type.ph': 'Tippen… z. B. Zucker', 'type.input': 'Zutat',
+    'type.free': '„{text}“ so hinzufügen', 'type.list': 'Liste', 'type.empty': 'Noch keine Zutaten. Tippe 2 Buchstaben und wähle einen Namen. Mit Kommas fügst du mehrere hinzu.',
+    'type.save': 'Produkt speichern', 'type.photo': 'Foto', 'type.remove': '{name} entfernen', 'type.start': 'Zutaten hinzufügen', 'type.startSub': 'Das Ergebnis erscheint hier.',
+    'type.n.one': '1 Zutat · bei jedem Schritt geprüft', 'type.n.other': '{n} Zutaten · bei jedem Schritt geprüft', 'type.mine': 'schon verwendet', 'toast.typeEmpty': 'Füge mindestens eine Zutat hinzu.',
     // v2.34: neues Aussehen (Start B, Ergebnis B, Verlauf B, ⋯ Menü)
     'start.ask': 'Was möchtest du prüfen?', 'start.code': 'Barcode', 'start.codeSub': 'Am schnellsten', 'start.ingr': 'Zutaten', 'start.ingrSub': 'Ohne Barcode',
     'qa.showAll.one': 'Die 1 Zutat zeigen', 'qa.showAll.other': 'Alle {n} Zutaten zeigen',
@@ -707,6 +719,12 @@ window.LC_TEXT = {
   },
 
   bg: {
+    // v2.35: Напиши съставките
+    'type.btn': 'Напиши съставките', 'type.edit': 'Промени списъка', 'type.title': 'Напиши съставките', 'type.lead': 'Пиши първите букви и избери име. Проверката е веднага, без интернет.',
+    'type.leadFor': 'За баркод {code}. Пиши първите букви и избери име.', 'type.ph': 'Започни да пишеш… напр. захар', 'type.input': 'Съставка',
+    'type.free': 'Добави „{text}“ както е написано', 'type.list': 'Списък', 'type.empty': 'Още няма съставки. Напиши 2 букви и избери име. Със запетаи добавяш няколко наведнъж.',
+    'type.save': 'Запази продукта', 'type.photo': 'Снимка', 'type.remove': 'Махни {name}', 'type.start': 'Добави съставки', 'type.startSub': 'Резултатът се показва тук.',
+    'type.n.one': '1 съставка · проверява се при всяко добавяне', 'type.n.other': '{n} съставки · проверява се при всяко добавяне', 'type.mine': 'вече използвано', 'toast.typeEmpty': 'Добави поне една съставка.',
     // v2.34: нов вид (старт B, резултат B, история B, меню ⋯)
     'start.ask': 'Какво искаш да провериш?', 'start.code': 'Баркод', 'start.codeSub': 'Най-бързо', 'start.ingr': 'Съставки', 'start.ingrSub': 'Без баркод',
     'qa.showAll.one': 'Покажи 1 съставка', 'qa.showAll.other': 'Покажи всички {n} съставки',

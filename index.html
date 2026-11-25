@@ -15,7 +15,7 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>Label Check <span class="ver">v2.34</span></h1>
+    <h1>Label Check <span class="ver">v2.35</span></h1>
     <button class="iconbtn topsearch" id="topSearch" type="button" data-t-aria="card.search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg></button>
     <div class="langsw" id="langSwitch" role="group" aria-label="Language">
       <button type="button" data-lang="en" lang="en" aria-pressed="false">EN</button>
@@ -92,6 +92,7 @@
               <input type="file" id="photoPick" accept="image/*" multiple hidden></label>
             <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
           </div>
+          <button class="btn btn-ghost typebtn" id="typeBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7M17 14l3 3-3 3"/></svg><span data-t="type.btn">Type the ingredients</span></button>
           <p class="photonote" id="photoTip"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg><span data-t="label.tip">Tip: take the photo close, with only the ingredient list in it.</span></p>
         </div>
         <p class="againrow" id="againRow" hidden><button class="linkbtn" id="againPhoto" type="button" data-t="lbl.again">Another photo</button> <span class="dot" aria-hidden="true">·</span> <button class="linkbtn" id="secondPhoto" type="button" data-t="lbl.second">Add 2nd photo (round bottle)</button></p>
@@ -172,6 +173,32 @@
         <button class="btn btn-primary wide" id="checkLabel" type="button" data-t="label.check">Check ingredients</button>
         </div>
         </details>
+      </section>
+
+      <!-- v2.35: Type the ingredients (suggestions from the names the app knows, checked at once, offline) -->
+      <section id="typePanel" class="panel" hidden>
+        <button class="iconbtn panel-back" type="button" data-back><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span data-t="d.back">Back</span></button>
+        <h2 data-t="type.title">Type the ingredients</h2>
+        <p class="lead" id="typeLead"></p>
+        <div class="segs typekind" id="typeKind" role="group" data-t-aria="label.kind">
+          <button type="button" class="seg" data-k="food" aria-pressed="true" data-t="kind.food">Food</button>
+          <button type="button" class="seg" data-k="cosmetic" aria-pressed="false" data-t="kind.cosmetic">Cosmetic</button>
+          <button type="button" class="seg" data-k="household" aria-pressed="false" data-t="kind.household">Household</button>
+        </div>
+        <div class="tlive" id="typeLive" aria-live="polite"></div>
+        <div class="tinp">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4-4"/></svg>
+          <label class="sr-only" for="typeInput" data-t="type.input">Ingredient</label>
+          <input id="typeInput" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" enterkeyhint="done" data-t-ph="type.ph">
+        </div>
+        <ul class="tsug" id="typeSug"></ul>
+        <h4 class="thead" id="typeHead"></h4>
+        <ul class="qlist" id="typeList"></ul>
+        <p class="empty" id="typeEmpty" data-t="type.empty"></p>
+        <div class="qbar" id="typeBar">
+          <button class="btn btn-primary" id="typeSave" type="button" data-t="type.save">Save product</button>
+          <button class="btn btn-ghost" id="typePhoto" type="button" data-t="type.photo">Photo</button>
+        </div>
       </section>
 
       <!-- Find one ingredient (offline) -->

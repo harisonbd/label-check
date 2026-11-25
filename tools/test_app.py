@@ -529,7 +529,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.34' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.35' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -1003,7 +1003,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v52')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v53')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1561,16 +1561,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v52'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v53'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v52' not in keys: break
+        if 'label-check-v53' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v52' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v53' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1632,6 +1632,67 @@ with sync_playwright() as p:
     ok(pg.is_visible('#favList') and 'Душ гел' in pg.inner_text('#favList') and pg.is_hidden('#histCount'), '♥ shows the favourites')
     pg.screenshot(path=os.path.join(SHOTS, 'v234-history-bg.png'))
     ctx.close()
+    # ---- v2.35: Type the ingredients, honest grey, merge keeps "may contain" and short names, sulphites ----
+    print('v2.35: type the ingredients')
+    ctx, pg = new_page(b, base, 'bg-BG', dark=True)
+    pg.evaluate("localStorage.setItem('lc.allergens', JSON.stringify({food:['gluten'], cos:[]})); 0"); reload_ready(pg)
+    pg.click('#cardLabel')
+    ok(pg.is_visible('#typeBtn') and pg.inner_text('#typeBtn') == 'Напиши съставките', 'Read a label: button "Напиши съставките"')
+    pg.click('#typeBtn'); pg.wait_for_selector('#typePanel:not([hidden])')
+    ok(pg.inner_text('#typeWord') == 'Добави съставки' and pg.is_visible('#typeEmpty'), 'empty list: "Добави съставки" + help line')
+    pg.fill('#typeInput', 'пше'); pg.wait_for_timeout(150)
+    sug = pg.evaluate("[...document.querySelectorAll('#typeSug .tsrow')].map(b => [b.querySelector('.nm').textContent, b.querySelector('.dot').className])")
+    ok(sug[0][0] == 'Пшеница' and 'g-red' in sug[0][1] and sug[-1][0] == 'Добави „пше“ както е написано', 'typing "пше": Пшеница first with a red dot (your allergen gluten), last row "add as typed" (%s)' % sug[:2])
+    pg.press('#typeInput', 'Enter')
+    ok(pg.locator('#typeList li').count() == 1 and pg.inner_text('#typeWord') == 'Избягвай' and pg.input_value('#typeInput') == '', 'Enter adds the first name; the live result says "Избягвай" at once; the field is empty again')
+    pg.fill('#typeInput', 'e22'); pg.wait_for_timeout(150)
+    ok(pg.inner_text('#typeSug .tsrow >> nth=3').startswith('E223 · Натриев метабисулфит') and 'сулфити' in pg.inner_text('#typeSug .tsrow >> nth=3'), 'typing "e22": E223 shows as the allergen sulphites')
+    pg.click('#typeSug .tsrow >> nth=3')
+    pg.fill('#typeInput', 'захар, сол,'); pg.wait_for_timeout(150)
+    ok(pg.locator('#typeList li').count() == 4, 'a comma adds several names at once (захар, сол)')
+    for w in ('xqzv', 'plorbex', 'trundal'):
+        pg.fill('#typeInput', w); pg.press('#typeInput', 'Enter')
+    rows = pg.evaluate("[...document.querySelectorAll('#typeList li')].map(l => [l.querySelector('strong').textContent, l.querySelector('.dot').className, (l.querySelector('small') || {}).textContent || ''])")
+    ok(rows[4][0] == 'Xqzv' and 'g-nodata' in rows[4][1] and rows[4][2] == 'Няма данни', 'an unknown typed name is grey "Няма данни" (%s)' % rows[4])
+    pg.click('#typeList li:nth-child(1) .tx')
+    ok(pg.locator('#typeList li').count() == 6 and pg.inner_text('#typeWord') == 'Непълен резултат', 'without the red name: 3 of 6 names unknown -> "Непълен резултат", never "Без предупреждения" (%s)' % pg.inner_text('#typeWord'))
+    pg.screenshot(path=os.path.join(SHOTS, 'v235-type-bg.png'), full_page=True)
+    pg.click('#typeSave'); pg.wait_for_selector('#result:not([hidden]) #answer')
+    ok(word(pg) == 'Непълен резултат' and pg.inner_text('#oneLine') == '3 от 6 съставки разпознати' and pg.locator('#readCard').count() == 0 and pg.inner_text('#againBtn') == 'Промени списъка',
+       'saved: grey result "3 of 6", no "What the app read" card, button "Промени списъка" (%s | %s)' % (word(pg), pg.inner_text('#oneLine')))
+    ok(pg.evaluate("LC.state.current.p.read.typed") is True and pg.evaluate("LC.state.current.a.rows.some(r => (r.allergens || []).some(a => a.id === 'sulphur-dioxide-and-sulphites'))"), 'the product is saved as typed; E223 counts as the allergen sulphites')
+    pg.click('#againBtn'); pg.wait_for_selector('#typePanel:not([hidden])')
+    ok(pg.locator('#typeList li').count() == 6, '"Промени списъка" opens the typed list again')
+    pg.go_back(); pg.wait_for_selector('#result:not([hidden]) #answer')
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    pg.click('#cardLabel'); pg.click('#typeBtn'); pg.wait_for_selector('#typePanel:not([hidden])')
+    pg.fill('#typeInput', 'xq'); pg.wait_for_timeout(150)
+    ok(pg.inner_text('#typeSug .tsrow >> nth=0').startswith('Xqzv') and 'вече използвано' in pg.inner_text('#typeSug .tsrow >> nth=0'), 'your own names come first ("вече използвано")')
+    # barcode not found -> type the ingredients, linked to the barcode
+    pg.go_back(); pg.go_back(); pg.wait_for_timeout(300)
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    type_code(pg, '4001234567891'); pg.wait_for_selector('#labelPanel:not([hidden])')
+    pg.click('#typeBtn'); pg.wait_for_selector('#typePanel:not([hidden])')
+    ok('4001234567891' in pg.inner_text('#typeLead'), 'barcode not found: "Напиши съставките" knows the barcode (%s)' % pg.inner_text('#typeLead'))
+    pg.fill('#typeInput', 'сол'); pg.press('#typeInput', 'Enter'); pg.fill('#typeInput', 'захар'); pg.press('#typeInput', 'Enter')
+    pg.click('#typeSave'); pg.wait_for_selector('#result:not([hidden]) #answer')
+    ok(pg.evaluate("LC.state.current.p.code") == '4001234567891' and word(pg) == 'Без предупреждения', 'saved under the barcode; known names -> "Без предупреждения"')
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    type_code(pg, '4001234567891'); pg.wait_for_selector('#result:not([hidden]) #answer')
+    ok(pg.evaluate("LC.state.current.p.read && LC.state.current.p.read.typed") is True, 'the next scan of that barcode opens the typed product at once')
+    ok(no_side_scroll(pg), 'no sideways scroll')
+    # merge of several photos (crackers report): short names, the "may contain" line and allergens stay; label text after it goes
+    ctxm = "{ split: tx => LCDB.splitIngredients(tx), known: LC.nameKnown, dice: LC.bigramDice, ident: LC.nameIdent, allergen: x => LCDB.checkFood(x).allergens.length > 0, trace: x => /може да съдържа|may contain/i.test(x) }"
+    names = pg.evaluate("(r) => LC.consensusNames(r, " + ctxm + ")", ['Съставки: Пшенично брашно, палмово масло, сол, суроватка на прах (от Мляко), СиРеНЕ на прах 0,1%, оцветител (паприка екстракт). МОЖЕ ДА СЪДЪРЖА ЯЙЦА, СОЯ. mestu./ Te ruhet ne vend t',
+                                                                    'Съставки: Пшенично брашно, палмово масло, сол, суроватка на прах (от Мляко), оцветител (паприка екстракт). МОЖЕ ДА СЪДЪРЖА ЯЙЦА, сОЯ.'])
+    ok(all(n in names for n in ('сол', 'СиРеНЕ на прах 0,1%', 'оцветител (паприка екстракт)', 'МОЖЕ ДА СЪДЪРЖА ЯЙЦА', 'СОЯ')) and not any('mestu' in n for n in names), 'merge keeps "сол", "СиРеНЕ на прах", the colour before ". ", the "may contain" line and "СОЯ"; drops the text after it (%s)' % names)
+    names = pg.evaluate("(r) => LC.consensusNames(r, " + ctxm + ")", ['Ingredients: rice, olive oil, rosemary extract]. Packaged in a protective atmosphere: nitrogen. Store in a dry and cool place', 'Ingredients: rice, olive oil, salt'])
+    ok('rice' in names and 'rosemary extract]' in names and not any('Store' in n or 'Packaged' in n for n in names), 'label sentences after a ". " are still dropped (%s)' % names)
+    ctx.close()
+
     for lang, w, dark in (('en-GB', 320, False), ('de-AT', 390, False)):
         ctx, pg = new_page(b, base, lang, dark=dark, width=w)
         read_label(pg, SHOWER, 'cosmetic', 'Shower gel with a long product name')

@@ -249,7 +249,7 @@ TRANS_FAT_TERMS = {'en': ['partially hydrogenated*', 'partly hydrogenated*'],
                    'sk': ['čiastočne hydrogenovan*', 'čiastočne stužen*'],
                    'sl': ['delno hidrogeniran*', 'delno hidrogenirane*']}
 # Label languages for additive and allergen names (the app screens stay EN / DE / BG).
-NAME_LANGS = ('en', 'de', 'bg', 'hu', 'cs', 'sk', 'sl')
+NAME_LANGS = ('en', 'de', 'bg', 'hu', 'cs', 'sk', 'sl', 'ro')   # v2.35: + Romanian (labels in RO)
 
 # ---------------------------------------------------------------- helpers
 def off_blocks(path):

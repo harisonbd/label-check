@@ -1128,3 +1128,39 @@ details.textfold[open] > summary { margin-bottom: 6px; }
 .qbar .btn { min-width: 0; line-height: 1.2; }
 .qbar .btn:last-child { flex: 0 1 auto; padding: 8px 14px; }
 .cchip { min-height: 40px; }
+
+/* ---------- v2.35: Type the ingredients ---------- */
+.typebtn { width: 100%; margin: 10px 0 0; min-height: 52px; justify-content: flex-start; gap: 12px; padding: 0 16px; font-size: 1rem; }
+.typebtn svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.typekind { display: flex; gap: 6px; margin: 10px 0 12px; }
+.typekind .seg { flex: 1; min-height: 44px; border: 0; border-radius: 12px; background: var(--card); color: var(--muted); font: inherit; font-weight: 650; font-size: 0.9rem; cursor: pointer; }
+.typekind .seg[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.tlive { --c: var(--gdot); --ci: var(--muted); display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 18px; background: var(--card); margin-bottom: 12px; }
+.tlive.v-avoid { --c: var(--red); --ci: var(--red-ink); } .tlive.v-check { --c: var(--orange); --ci: var(--orange-ink); } .tlive.v-ok { --c: var(--green); --ci: var(--green-ink); }
+.tlive .qi { width: 54px; height: 54px; flex: none; border-radius: 50%; border: 4px solid var(--c); background: color-mix(in srgb, var(--c) 18%, var(--bg)); display: grid; place-items: center; }
+.tlive .qi svg { width: 26px; height: 26px; fill: none; stroke: var(--ci); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.tlx { flex: 1; min-width: 0; }
+.tlx > b { display: block; font-size: 1.15rem; line-height: 1.2; }
+.tlx > small { display: block; color: var(--muted); font-size: 0.8rem; }
+.tlive .qchips { justify-content: flex-start; gap: 6px; margin: 6px 0 0; }
+.tlive .qchip { min-height: 28px; padding: 0 9px; font-size: 0.76rem; cursor: default; }
+.tinp { display: flex; align-items: center; gap: 8px; height: 54px; padding: 0 12px; border-radius: 14px; background: var(--card); border: 2px solid var(--accent); }
+.tinp svg { width: 20px; height: 20px; flex: none; fill: none; stroke: var(--muted); stroke-width: 1.9; stroke-linecap: round; }
+.tinp input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 0; min-height: 48px; font-size: 16px; outline: none; }
+.tsug { list-style: none; margin: 6px 0 0; padding: 0; background: var(--card); border-radius: 14px; overflow: hidden; }
+.tsug li + li { border-top: 1px solid var(--line); }
+.tsrow { font: inherit; color: var(--ink); width: 100%; min-height: 50px; display: flex; align-items: center; gap: 12px; padding: 8px 14px; border: 0; background: none; text-align: left; cursor: pointer; }
+.tsrow.first, .tsrow:active { background: var(--card2); }
+.tsrow .nm { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.tsrow .nm mark { background: none; color: var(--accent); font-weight: 750; }
+.tsrow small { color: var(--muted); font-size: 0.75rem; text-align: right; max-width: 45%; }
+.tsrow.tsfree .nm { color: var(--muted); }
+:where(.tsrow) .dot { --dc: var(--gdot); }
+.tsrow .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; background: var(--dc); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dc) 30%, transparent); }
+.thead { margin: 16px 0 6px; font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+#typeList { margin-top: 0; }
+#typeList .qrow { cursor: default; }
+#typeList .tx { width: 40px; height: 40px; flex: none; border: 0; border-radius: 10px; background: var(--card2); color: var(--muted); display: grid; place-items: center; cursor: pointer; }
+#typeList .tx svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+:where(#typeList) .dot { --dc: var(--gdot); }
+#typeList .dot { width: 14px; height: 14px; border-radius: 50%; flex: none; background: var(--dc); box-shadow: 0 0 0 4px color-mix(in srgb, var(--dc) 30%, transparent); margin: 0 4px 0 2px; }

@@ -24,7 +24,7 @@
   const ALLERGEN_LABEL = { bg: { milk: 'мляко' } };
   // Names missing in the Open Food Facts data (move into build_db.py later).
   const EXTRA_ALLERGEN_NAMES = {
-    milk: ['краве масло', 'масло от краве мляко'],
+    milk: ['краве масло', 'масло от краве мляко', 'сирене', 'кашкавал', 'извара', 'сметана'],   // v2.35: Bulgarian cheese words (crackers label: "СИРЕНЕ на прах")
     'sesame-seeds': ['сусам', 'сусамово семе', 'сусамови семена'],
     // HU / CS / SK / SL word forms seen on labels that the data lists only in another form
     gluten: ['búzaliszt', 'pšeničná mouka', 'pšeničná múka', 'pšenična moka', 'pšeničný', 'pšeničná', 'pšenična', 'pšenični'],
@@ -62,7 +62,7 @@
     return null;
   }
   // "May contain traces" (v2.9): the part of a label after these words lists traces, not ingredients.
-  const TRACES_RE = /(kann\s+spuren|kann\s+[^.;]{0,40}?spuren|spuren\s+von|may\s+contain|traces\s+of|can\s+contain\s+traces|може\s+да\s+съдържа|следи\s+от|nyomokban|tartalmazhat|může\s+obsahovat|môže\s+obsahovať|lahko\s+vsebuje|sledi)/i;
+  const TRACES_RE = /(kann\s+spuren|kann\s+[^.;]{0,40}?spuren|spuren\s+von|may\s+contain|traces\s+of|can\s+contain\s+traces|може\s+да\s+съдържа|следи\s+от|nyomokban|tartalmazhat|může\s+obsahovat|môže\s+obsahovať|lahko\s+vsebuje|sledi|poate\s+con[tțţ]ine|urme\s+de)/i;   // v2.35: + Romanian
   const additiveNames = (a, lang) => (a.n[lang] || []).concat((EXTRA_ADDITIVE_NAMES[a.e] || {})[lang] || []);
   // Plant fats called "butter" are not milk: "cocoa butter" -> "cocoa" before the allergen check.
   const PLANT_BUTTER = / (cocoa|cacao|shea|mango|kokum|illipe|sal|peanut|almond|cashew|hazelnut|nut|seed) butter(?= )/g;
@@ -125,18 +125,23 @@
     allergenNames.sort((x, y) => y[0].length - x[0].length);
     // v2.21: plain food names in many languages (Open Food Facts, ODbL). Optional: without the file the app works as before.
     try { const nf = await get(base + 'names-food.json'); FOODNAMES = new Set((nf && nf.names) || []); } catch (e) { FOODNAMES = null; }
+    SHORT_FOOD_N = new Set(SHORT_FOOD.map(norm));
+    if (FOODNAMES) for (const w of SHORT_FOOD_N) FOODNAMES.add(w);
     return { version: META.version, cosmetics: COS.items.length, additives: FOOD.additives.length, foodNames: FOODNAMES ? FOODNAMES.size : 0 };
   }
   // Is this label name a plain food ingredient the app knows ("Weizenmehl (45 %)", "Манитол")?
   function knownFood(seg) {
     if (!FOODNAMES) return false;
     const base = norm(String(seg || '').replace(/\([^)]*\)|\[[^\]]*\]/g, ' ').replace(/\d+[.,]?\d*\s*%/g, ' '));
-    return base.length >= 4 && FOODNAMES.has(base);
+    return (base.length >= 4 || SHORT_FOOD_N.has(base)) && FOODNAMES.has(base);
   }
+  // v2.35: common food words shorter than 4 letters (the names file has none): salt, honey, yeast, onion, soy, oil, tea, egg …
+  const SHORT_FOOD = ['сол', 'мед', 'мая', 'лук', 'соя', 'чай', 'öl', 'ei', 'tee', 'oil', 'tea', 'egg', 'soy', 'rye', 'apă', 'ouă', 'unt', 'ou', 'soľ', 'med', 'čaj', 'sůl', 'sol', 'só'];
+  let SHORT_FOOD_N = new Set();
 
   // ---------- label splitting
   function stripLabelWord(text) {
-    return String(text || '').replace(/^\s*(ingredients?|ingr[eé]dients?|inci|zutaten|inhaltsstoffe|bestandteile|hilfsstoffe|excipients?|съставки|състав|помощни вещества|други вещества|composition|összetevők|složení|zloženie|sestavine)\s*[:：]\s*/i, '');
+    return String(text || '').replace(/^\s*(ingredients?|ingr[eé]dients?|inci|zutaten|inhaltsstoffe|bestandteile|hilfsstoffe|excipients?|съставки|състав|помощни вещества|други вещества|composition|összetevők|složení|zloženie|sestavine|ingrediente)\s*[:：]\s*/i, '');
   }
   // Split at , ; • · and new lines that are not inside brackets. A comma between digits (1,3-diol) does not split.
   function splitIngredients(text) {
@@ -312,6 +317,10 @@
       const hit = terms.find(t => termRegex(t).test(segs.join(' ')));
       if (hit) rules.push({ id: r.id, level: r.lv, matched: hit, reasons: reasonsFor(r.refs, '', lang) });
     }
+    // v2.35: sulphur dioxide - sulphites (E 220-228, Regulation (EC) 1333/2008 Annex II Part C(5)(g)) are the EU allergen
+    // "sulphur dioxide and sulphites" (Regulation (EU) 1169/2011 Annex II, point 12). The data had the allergen only for E220 by name.
+    const sulph = alById.get('sulphur-dioxide-and-sulphites');
+    if (sulph) for (const a of additives) if (/^E22[0-8]$/.test(a.e)) addAl(sulph, a.matched, a.pos);
     return { additives, allergens: [...allergens.values()].sort((x, y) => (x.pos || 999) - (y.pos || 999)), rules, traceFrom };
   }
 
@@ -654,6 +663,48 @@
     return [...hits.values()].sort((x, y) => (x.score - y.score) || (x.name.length - y.name.length)).slice(0, limit);
   }
 
+  // ---------- v2.35: suggestions while typing ("Type the ingredients")
+  // Exact name first, then names that start with the letters, then names with a word that starts with them; the alphabet
+  // of the typed letters first, shorter names first. Food: E-numbers, additive names (all label languages in the data) and the
+  // Open Food Facts food names (names-food.json). Cosmetics / household: CosIng names and aliases.
+  // Returns [{ name, e }] (e = "E223" for an additive).
+  function suggestNames(q, kind, limit, lang) {
+    limit = limit || 5;
+    const nq = norm(q), kq = nq.replace(/ /g, '');
+    if (kq.length < 2 || !FOOD) return [];
+    const cyr = /[Ѐ-ӿ]/.test(q), c = [];
+    const sc = t => (t === nq ? 0 : t.startsWith(nq) ? 1 : t.includes(' ' + nq) ? 3 : -1);
+    const alpha = t => (/[Ѐ-ӿ]/.test(t) === cyr ? 0 : 2);
+    if (kind === 'cosmetic' || kind === 'household') {
+      for (const h of search(q, 200)) if (h.kind === 'cosmetic') c.push({ name: h.name, s: h.score + h.name.length / 1000 });
+    } else {
+      const em = kq.match(/^e(\d{0,4}[a-z]?)$/);
+      for (const a of FOOD.additives) {
+        if (em) {
+          if (a.e.startsWith('e' + em[1])) c.push({ name: (a.n[lang] || a.n.en || [a.e])[0], e: a.e.toUpperCase(), s: a.e.length });
+          continue;
+        }
+        let best = null;
+        for (const l of Object.keys(a.n)) for (const nm of a.n[l]) {
+          const x = sc(norm(nm));
+          if (x >= 0 && (!best || x + alpha(nm) < best.s)) best = { name: nm, e: a.e.toUpperCase(), s: x + alpha(nm) + 0.5 };
+        }
+        if (best) c.push(best);
+      }
+      if (!em && FOODNAMES) for (const nm of FOODNAMES) {
+        const x = sc(nm);
+        if (x >= 0) c.push({ name: nm.charAt(0).toUpperCase() + nm.slice(1), s: x + alpha(nm) + nm.length / 1000 });
+      }
+    }
+    const best = new Map();
+    for (const x of c) {
+      const k = norm(x.name), o = best.get(k);
+      if (!o) best.set(k, x);
+      else { if (x.s < o.s) { o.s = x.s; o.name = x.name; } if (x.e && !o.e) o.e = x.e; }
+    }
+    return [...best.values()].sort((a, b) => a.s - b.s).slice(0, limit).map(x => ({ name: x.name, e: x.e || null }));
+  }
+
   // ---------- a food additive -> the cosmetic name with the same English name (E901 "beeswax" -> BEESWAX)
   // Used when you teach the app a name: "Bienenwachs" or "пчелен восък" are additive names, and lead to the cosmetic entry.
   function foodToCosmetic(e) {
@@ -667,6 +718,6 @@
     return out;
   }
 
-  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, suggestCosmetic, closest, wordGuess, guessCosmetic, closestFood, splitGlued, findInside, findNames, checkFood, knownFood, cosAllergens, foodAllergens, search, foodToCosmetic, meta: () => META, SEV };
+  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, suggestCosmetic, closest, wordGuess, guessCosmetic, closestFood, splitGlued, findInside, findNames, checkFood, knownFood, suggestNames, cosAllergens, foodAllergens, search, foodToCosmetic, meta: () => META, SEV };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.LCDB = api;
 })(typeof window !== 'undefined' ? window : globalThis);
