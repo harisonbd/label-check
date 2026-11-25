@@ -126,6 +126,14 @@ def show_details(pg):
     # v2.14: "Подробности" (ⓘ) opens the details under the answer
     if pg.get_attribute('#detBtn', 'aria-expanded') != 'true': pg.click('#detBtn')
 
+def menu_pick(pg, sel):
+    # v2.34: heart, share, type, "Send to Claude", 2nd photo and "Look up online" are in the ⋯ menu
+    if not pg.locator('#moreMenu').count(): pg.click('#moreBtn')
+    pg.wait_for_selector('#moreMenu')
+    pg.click(sel)
+    pg.wait_for_function("!document.getElementById('moreMenu') && !(history.state && history.state.menu)")
+    pg.wait_for_timeout(150)
+
 def see_unknown(pg):
     show_details(pg); pg.click('#unkBtn')
 
@@ -188,12 +196,12 @@ with sync_playwright() as p:
     pg.go_back(); pg.wait_for_timeout(200)
     ok(pg.is_hidden('#detail') and pg.is_visible('#result'), 'Back closes the detail')
     ok(pg.locator('#groups .grp.empty').count() == 0, 'v2.8: empty groups are not shown')
-    pg.click('#favBtn')
+    menu_pick(pg, '#favBtn')
     pg.go_back(); pg.wait_for_timeout(200)
     ok(pg.is_visible('#labelPanel') and pg.is_hidden('#result'), 'Back from a label result shows the label screen')
     pg.go_back(); pg.wait_for_timeout(200)
     ok(pg.is_visible('#scanner') and pg.is_visible('#cardScan') and pg.locator('.startcards .scard').count() == 2, 'Back again shows the start screen with the 2 big buttons (v2.8)')
-    ok(pg.evaluate("[...document.querySelectorAll('.startcards .scard')].every(c => getComputedStyle(c).textAlign === 'center' && getComputedStyle(c).alignItems === 'center')"), 'v2.8: text and icon are centred in both big buttons')
+    ok('Fastest way' in pg.inner_text('#cardScan') and 'No barcode' in pg.inner_text('#cardLabel') and pg.inner_text('.startq') == 'What do you want to check?', 'v2.34: start B: question + 2 tiles with a short line')
     ok(pg.is_hidden('#manualForm') and pg.is_visible('#codeLink') and pg.is_visible('#topSearch'), 'v2.8: barcode numbers behind a link, search icon in the top bar')
     ok(pg.locator('#recentList li').count() == 1 and 'Shower gel' in pg.inner_text('#recent'), 'start screen: Recent shows the product')
     ok('EU lists' in pg.inner_text('#checking'), 'start screen: "Checking" row')
@@ -250,7 +258,7 @@ with sync_playwright() as p:
     pg.click('.tabbar button[data-go=history]')
     pg.click('#histFilter button[data-f=favs]')
     ok('Shower gel' in pg.inner_text('#favList') and pg.is_hidden('#historyList'), 'favourite listed under History -> ♥ Favourites')
-    pg.click('#histFilter button[data-f=all]')
+    pg.click('#histFilter button[data-f=favs]')   # v2.34: one ♥ toggle
     ok(pg.is_visible('#historyList') and pg.is_hidden('#favList'), '"All" shows the history again')
     ctx.close()
 
@@ -363,8 +371,8 @@ with sync_playwright() as p:
     ctx, pg = new_page(b, base, 'de-AT', dark=True, width=360)
     ok(pg.locator('#langSwitch [aria-pressed=true]').count() == 0, 'German: EN | BG switch shows neither')
     ok(no_side_scroll(pg), 'no sideways scroll with the switch at 360 px')
-    ok(pg.evaluate('getComputedStyle(document.documentElement).getPropertyValue("--accent").trim()') == '#7AA2FF', 'dark = Graphite (blue accent, no mint)')
-    ok(pg.get_attribute('#themeColor', 'content').upper() == '#121417', 'phone bar colour = graphite')
+    ok(pg.evaluate('getComputedStyle(document.documentElement).getPropertyValue("--accent").trim()') == '#8AA4FF', 'dark = v2.34 calmer look (blue accent #8AA4FF)')
+    ok(pg.get_attribute('#themeColor', 'content').upper() == '#0F1115', 'phone bar colour = v2.34 calmer dark')
     pg.screenshot(path=os.path.join(SHOTS, 'de-dark-start.png'))
     read_label(pg, SHOWER, 'cosmetic', 'Duschgel')
     ok(word(pg) == 'Meiden' and pg.inner_text('#dtop .qr') == 'Grund: in der EU verboten', 'German verdict and reason')
@@ -521,7 +529,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.33' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.34' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -598,7 +606,7 @@ with sync_playwright() as p:
     ok(pg.inner_text('#nameBtn') == 'Моят колбас', 'your name wins over the Open Food Facts name after a new lookup')
     pg.click('#answer .altbtn'); pg.wait_for_selector('#result:not([hidden]) #answer')
     ok(pg.inner_text('#nameBtn') == 'Овесени ядки', 'tap on the "Вместо това" name opens that product')
-    pg.click('#answer .strip button'); pg.wait_for_timeout(200)
+    show_details(pg); pg.click('#details .strip button'); pg.wait_for_timeout(200)   # v2.34: the strip is at the top of Details
     ok(pg.is_visible('#details') and pg.locator('#groups li.flash').count() == 1, 'strip block opens "Подробности" and jumps to the ingredient')
     # type guess
     pg.click('.tabbar button[data-go=scan]'); pg.click('#cardLabel')
@@ -894,8 +902,8 @@ with sync_playwright() as p:
     read_label(pg, 'Zutaten: Zucker, Palmöl, Natriumnitrit', 'food')
     ok(pg.evaluate('window.__buzz')[-1] == [70, 90, 70, 90, 70], 'vibration: 3 buzzes on "Избягвай"')
     pg.click('.tabbar button[data-go=history]'); pg.wait_for_timeout(300)
-    ok(pg.locator('#historyList li').nth(0).locator('.mstrip i.g-red').count() >= 1 and pg.locator('#historyList li').nth(1).locator('.mstrip i').count() == 3,
-       'History: a mini colour strip under each product (red block for the palm oil product)')
+    ok(pg.locator('#historyList li').nth(0).locator('.dot.g-red').count() == 1 and 'Днес · 1 червена' in pg.inner_text('#historyList li >> nth=0'),
+       'v2.34 History B: red dot and "Днес · 1 червена" (the mini strip is gone) (%s)' % pg.inner_text('#historyList li >> nth=0'))
     n = len(pg.evaluate('window.__buzz')); pg.locator('#historyList li .open').first.click(); pg.wait_for_selector('#result:not([hidden]) #answer')
     ok(len(pg.evaluate('window.__buzz')) == n, 'opening a saved product from History: no vibration')
     pg.screenshot(path=os.path.join(SHOTS, 'v213-history-bg.png'))
@@ -929,14 +937,16 @@ with sync_playwright() as p:
         pg.screenshot(path=os.path.join(SHOTS, 'v212-teach-%s-320.png' % lang))
         ctx.close()
 
-    print('v2.14: simpler card – word + one line + strip; ⓘ Подробности / ↻ Снимай пак; Следващ продукт')
+    print('v2.14 / v2.34: answer = word + count line + chips + red/orange list; "Покажи всички" / Снимай пак; Следващ продукт')
     ctx, pg = new_page(b, base, 'bg-BG', dark=True)
     pg.evaluate("localStorage.setItem('lc.avoid', JSON.stringify([{id:'a1', text:'methylisothiazolinone'}])); 0"); reload_ready(pg)
     read_label(pg, 'AQUA, GLYCERIN, PANTHENOL, CETYL ALCOHOL, ALLANTOIN, CITRIC ACID', 'cosmetic', 'Крем')
-    ok(word(pg) == 'Без предупреждения' and pg.locator('#oneLine').count() == 0 and pg.locator('#answer .qr, #answer #chkLine, #answer #knownLine, #answer #legend, #answer .strip-ends').count() == 0
-       and pg.locator('#answer .strip button').count() == 6, 'green card: only the word and the strip (no line, no chips, no legend)')
-    ok(pg.inner_text('#detBtn') == 'Подробности' and pg.inner_text('#againBtn') == 'Снимай пак' and pg.inner_text('#nextBtn') == 'Следващ продукт'
-       and 'btn-primary' in pg.get_attribute('#nextBtn', 'class') and 'btn-ghost' in pg.get_attribute('#againBtn', 'class'), 'two doors "Подробности" / "Снимай пак", blue "Следващ продукт"')
+    ok(word(pg) == 'Без предупреждения' and pg.inner_text('#oneLine') == 'Проверени са 6 съставки' and pg.locator('#answer .qr, #answer #chkLine, #answer #knownLine, #answer #legend, #answer .strip').count() == 0
+       and pg.inner_text('#qChips') == '6 нищо открито' and pg.locator('#qList').count() == 0, 'v2.34 green: word, "Проверени са 6 съставки", one chip; no strip, no list on the answer')
+    ok(pg.inner_text('#detBtn') == 'Покажи всички 6 съставки' and pg.inner_text('#againBtn') == 'Снимай пак' and pg.inner_text('#nextBtn') == 'Следващ продукт'
+       and 'btn-primary' in pg.get_attribute('#nextBtn', 'class') and 'btn-ghost' in pg.get_attribute('#againBtn', 'class')
+       and pg.evaluate("getComputedStyle(document.getElementById('qBar')).position") == 'sticky', 'v2.34: "Покажи всички 6 съставки"; bottom bar: blue "Следващ продукт" + "Снимай пак"')
+    ok(pg.locator('#details .strip button').count() == 6, 'v2.34: the colour strip is at the top of Details')
     ok(pg.is_hidden('#details') and pg.evaluate("[...document.querySelectorAll('#chkLine b')].length") == 2, 'the "Проверено" chips are in Подробности (closed)')
     pg.click('#detBtn'); pg.wait_for_timeout(300)
     ok(pg.is_visible('#dtop #chkLine') and pg.is_visible('#dtop #legend') and pg.get_attribute('#detBtn', 'aria-expanded') == 'true', 'ⓘ Подробности opens the info: Проверено chips + legend at the top')
@@ -946,8 +956,10 @@ with sync_playwright() as p:
     pg.click('.tabbar button[data-go=scan]')
     if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
     read_label(pg, SHOWER, 'cosmetic', 'Душ гел')
-    ok(word(pg) == 'Избягвай' and pg.inner_text('#oneLine') == 'Methylisothiazolinone, Butylphenyl Methylpropional' and card_fits(pg) and no_side_scroll(pg),
-       'red card: one line with the names only (%s)' % pg.inner_text('#oneLine'))
+    ok(word(pg) == 'Избягвай' and pg.inner_text('#oneLine') == '2 червени съставки' and card_fits(pg) and no_side_scroll(pg),
+       'v2.34 red: count line "2 червени съставки" (%s)' % pg.inner_text('#oneLine'))
+    ok(pg.locator('#qList .dot.g-red').count() == 2 and 'Methylisothiazolinone' in pg.inner_text('#qList') and 'Butylphenyl Methylpropional' in pg.inner_text('#qList'),
+       'v2.34 red: the red names are in the list under the chips')
     ok(pg.inner_text('#dtop .qr') == 'Причина: в твоя списък, забранено в ЕС', 'the reason is in Подробности')
     pg.screenshot(path=os.path.join(SHOTS, 'v214-red-bg.png'))
     pg.click('#againBtn'); pg.wait_for_selector('#labelPanel:not([hidden])')
@@ -957,7 +969,7 @@ with sync_playwright() as p:
     if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
     pg.evaluate("localStorage.setItem('lc.allergens', JSON.stringify({food:['soybeans', 'gluten'], cos:[]})); 0"); reload_ready(pg)
     read_label(pg, 'Zutaten: Hartweizengrieß, Zucker. Kann Spuren von Soja enthalten.', 'food')
-    ok(word(pg) == 'Избягвай' and pg.inner_text('#oneLine') == 'Глутен, Соя (следи)', 'red with traces: "Глутен, Соя (следи)" in one line (%s)' % pg.inner_text('#oneLine'))
+    ok(word(pg) == 'Избягвай' and pg.inner_text('#oneLine') == '2 червени съставки' and '(следи)' in pg.inner_text('#qList'), 'red with traces: the list marks the trace "(следи)" (%s)' % pg.inner_text('#qList'))
     pg.click('.tabbar button[data-go=scan]')
     pg.evaluate("LC.showProduct({code:'t-nolist2', kind:'food', source:'label', ingredientsText:'Brennwert 0 kJ, Salz 0,02 g', texts:['Brennwert 0 kJ, Salz 0,02 g'], read:{photo:true, list:false}, tags:[], allergens:[], analysis:[]})")
     pg.wait_for_selector('#result:not([hidden]) #answer')
@@ -991,7 +1003,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v51')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v52')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1044,9 +1056,19 @@ with sync_playwright() as p:
     ctx, pg = new_page(b, base, 'en-GB')
     read_label(pg, SHOWER, 'cosmetic', 'Shower gel')
     ok('14 read' in pg.inner_text('#endsLine') and pg.inner_text('#endsLine').startswith('#1 ') and 'Methylpropional' in pg.inner_text('#endsLine'), 'v2.15: under the strip: first name, "14 read", last name (%s)' % pg.inner_text('#endsLine').replace('\n', ' | '))
-    ok('Cosmetic' in pg.inner_text('#typeChip') and 'tap if wrong' in pg.inner_text('#typeChip'), 'v2.15: type chip "Cosmetic ▾ tap if wrong" on the card')
-    pg.click('#typeChip'); pg.click('#typeRow .seg:has-text("Food")'); pg.wait_for_selector('#typeChip')
-    ok(pg.evaluate('LC.state.current.p.kind') == 'food' and 'Food' in pg.inner_text('#typeChip'), 'v2.15: choosing another type checks the product again as that type')
+    ok(pg.locator('#typeChip').count() == 0 and pg.inner_text('#answer .qkind') == 'Cosmetic', 'v2.34: you chose the type, so no type line; the type is in the top line')
+    menu_pick(pg, '#moreMenu .seg:has-text("Food")')
+    ok(pg.evaluate('LC.state.current.p.kind') == 'food' and pg.inner_text('#answer .qkind') == 'Food' and pg.evaluate('LC.state.current.p.kindSet') is True,
+       'v2.34: the ⋯ menu changes the type and checks the product again as that type')
+    # v2.34: the type line only when the app guessed the type and is not sure
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    pg.click('#cardLabel'); pg.evaluate("() => { const f = document.getElementById('textFold'); f.hidden = false; f.open = true; }")
+    pg.fill('#labelText', 'Ingredients: Aqua, Glycerin, Sugar, Salt, Citric Acid, Xqzvbt Lomrha'); pg.wait_for_timeout(800)
+    pg.click('#checkLabel'); pg.wait_for_selector('#result:not([hidden]) #answer')
+    ok(pg.is_visible('#typeChip') and 'tap if wrong' in pg.inner_text('#typeChip'), 'v2.34: a guessed, unsure type shows the type line "… ▾ tap if wrong"')
+    pg.click('#typeChip'); pg.click('#typeRow .seg:has-text("Cosmetic")'); pg.wait_for_selector('#answer .qkind')
+    ok(pg.evaluate('LC.state.current.p.kind') == 'cosmetic' and pg.locator('#typeChip').count() == 0, 'v2.34: after choosing, the type line goes away')
     # F1: a photo read with too few names or a cut end is never "No warnings"
     v = pg.evaluate("""() => ({
       few: LC.analyze({ kind: 'cosmetic', ingredientsText: 'Ingredients: Aqua', read: { photo: true, list: true } }).verdict,
@@ -1128,8 +1150,8 @@ with sync_playwright() as p:
        'v2.33: title "What the app read"; the first unclear name is open, its best guess "Glycerin" is the blue button')
     ok(pg.evaluate("() => [...document.querySelectorAll('#readPanel .btn')].every(b => b.getBoundingClientRect().height >= 48) && [...document.querySelectorAll('#readChips button')].every(b => b.getBoundingClientRect().height >= 40)"),
        'v2.33: panel buttons are at least 48 px high, tiles at least 40 px')
-    ok(pg.evaluate("() => !!(document.getElementById('readCard').compareDocumentPosition(document.getElementById('againBtn')) & Node.DOCUMENT_POSITION_FOLLOWING) && document.getElementById('answer').nextElementSibling.id === 'readCard'"),
-       'v2.33: the card sits right under the answer, before the Details / Photo again buttons')
+    ok(pg.evaluate("() => !!(document.getElementById('readCard').compareDocumentPosition(document.getElementById('againBtn')) & Node.DOCUMENT_POSITION_FOLLOWING) && document.getElementById('answer').nextElementSibling.id === 'detBtn' && document.getElementById('detBtn').nextElementSibling.id === 'readCard'"),
+       'v2.33 / v2.34: the card sits under the answer and its "Show all" link, before the bottom buttons')
     pg.click('#readGuess0'); pg.wait_for_timeout(600)
     ok(pg.locator('#readChips .chip.q').count() == 1 and pg.locator('#readChips .chip.fixed').count() == 1 and pg.inner_text('#readGuess0') == 'Lanolin' and 'Glycerin' in pg.inner_text('#readChips .chip.fixed'),
        'v2.33: one tap on the right name teaches it (tile green with a tick); the next unclear name opens (%s)' % pg.inner_text('#readCard').replace('\n', ' | ')[:160])
@@ -1252,13 +1274,14 @@ with sync_playwright() as p:
     ok(rd['thumbs'] == 2 and rd['now'] == 1 and rd['cam'] and rd['x'] == 'none' and rd['again'] == 'none' and rd['chk'] == 'none' and rd['checkBottom'] <= rd['vh'] and rd['bar'] and rd['crop'] == 'none', 'v2.19: progress bar shows, the big picture is hidden, no jumping; v2.18.3: while several photos are read, the small pictures stay on the same screen (the one being read is marked, no ✕) (%s)' % rd)
     pg.wait_for_selector('#result:not([hidden]) #answer', timeout=120000)
     ok(pg.is_hidden('#photoCam') and not pg.evaluate("document.getElementById('labelPanel').classList.contains('reading')"), 'v2.18.3: after reading the small pictures are gone and the result shows')
-    pg.wait_for_selector('#result:not([hidden]) #repBtn', timeout=20000)
+    pg.wait_for_selector('#result:not([hidden]) #moreBtn', timeout=20000)
     rp = pg.evaluate("async () => { const d = await LC.buildReport(true); const n = await LC.buildReport(false); return { v: d.version, kind: d.kind, verdict: !!d.verdict, frames: d.frames.length, f0: Object.keys(d.frames[0] || {}).sort().join(','), photos: (d.photos || []).length, noPhotos: !('photos' in n), text: d.text.length, rows: d.rows.length, bytes: JSON.stringify(d).length } }")
     ok(rp['v'].startswith('v2.') and rp['frames'] == 2 and rp['photos'] == 2 and rp['noPhotos'] and rp['text'] > 20 and rp['rows'] >= 1 and 'conf' in rp['f0'] and 'read' in rp['f0'], 'v2.21: the report has version, type, verdict, text of both photos (frames), the photos (and none when switched off) (%s)' % rp)
+    pg.click('#moreBtn'); pg.wait_for_selector('#moreMenu')
+    ok(pg.is_visible('#repPhotos') and pg.is_visible('#mSecond'), 'v2.21 / v2.34: in the ⋯ menu: "Send to Claude" with the "include photos" switch, and "Add 2nd photo"')
     with pg.expect_download(timeout=15000) as dl:
         pg.click('#repBtn')
     ok(dl.value.suggested_filename.startswith('label-check-for-claude-') and dl.value.suggested_filename.endswith('.txt'), 'v2.22: "Send to Claude" makes one .txt file (%s)' % dl.value.suggested_filename)
-    ok(pg.is_visible('#repPhotos'), 'v2.21: the "include photos" switch is next to the button')
     cctx.close(); bcam.close()
 
 
@@ -1538,18 +1561,88 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v51'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v52'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v51' not in keys: break
+        if 'label-check-v52' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v51' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v52' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
+
+    # ---- v2.34: new look (start B, result B, history B, ⋯ menu, calmer colours) ----
+    print('v2.34: new look')
+    ctx, pg = new_page(b, base, 'bg-BG', dark=True)
+    ok(pg.evaluate("getComputedStyle(document.body).backgroundColor") == 'rgb(15, 17, 21)', 'calmer dark background #0F1115')
+    ok(pg.inner_text('.startq') == 'Какво искаш да провериш?' and 'Баркод' in pg.inner_text('#cardScan') and 'Без баркод' in pg.inner_text('#cardLabel'), 'start B: question + tiles Баркод / Съставки')
+    read_label(pg, 'Zutaten: Haferflocken, Wasser, Salz', 'food', 'Овесена напитка')
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    read_label(pg, SHOWER, 'cosmetic', 'Душ гел')
+    ok(pg.inner_text('#answer .qkind') == 'Козметика' and pg.is_visible('#moreBtn') and pg.locator('#favBtn').count() == 0, 'top line: name · type + ⋯ (heart in the menu)')
+    chips = pg.evaluate("[...document.querySelectorAll('#qChips .qchip')].map(c => c.dataset.g + ':' + c.textContent)")
+    ok(chips == ['red:1 избягвай', 'orange:1 провери', 'info:5 инфо', 'green:7 нищо открито'], 'count chips in colour order (%s)' % chips)
+    dot = pg.evaluate("(() => { const d = document.querySelector('#qList .dot'); const s = getComputedStyle(d); return [d.getBoundingClientRect().width, s.boxShadow.includes('rgba') || s.boxShadow.includes('color')]; })()")
+    ok(dot[0] >= 14 and dot[1], 'user 25 Nov: the dots before the names are bigger, with a ring (%s)' % dot)
+    pg.click('#qChips .qchip[data-g=info]'); pg.wait_for_timeout(300)
+    ok(pg.is_visible('#details') and pg.get_attribute('#groups .grp.g-info .grp-head', 'aria-expanded') == 'true', 'a tap on a chip opens Details at that colour')
+    toggle = pg.get_attribute('#detBtn', 'aria-expanded')
+    pg.click('#detBtn'); pg.evaluate('window.scrollTo(0, 0)')
+    ok(toggle == 'true' and pg.is_hidden('#details'), '"Покажи всички" closes Details again')
+    pg.click('#qList .qrow >> nth=0'); pg.wait_for_selector('#detail:not([hidden])')
+    ok('Butylphenyl' in pg.inner_text('#detail') or 'Methylisothiazolinone' in pg.inner_text('#detail'), 'a tap on a red / orange name opens that ingredient')
+    pg.go_back(); pg.wait_for_selector('#detail', state='hidden')
+    pg.click('#moreBtn'); pg.wait_for_selector('#moreMenu')
+    items = pg.evaluate("[...document.querySelectorAll('#moreMenu .mitem')].map(b => b.id)")
+    ok(items == ['mName', 'favBtn', 'mShare', 'mDetails', 'repBtn'] and pg.locator('#moreMenu .seg').count() == 3, '⋯ menu: rename, ♥, share, details, type, Send to Claude (%s)' % items)
+    pg.go_back(); pg.wait_for_timeout(300)
+    ok(pg.locator('#moreMenu').count() == 0 and pg.is_visible('#result') and pg.inner_text('#nameBtn') == 'Душ гел', 'phone Back closes the menu and stays on the result')
+    pg.click('#moreBtn'); pg.keyboard.press('Escape'); pg.wait_for_timeout(300)
+    ok(pg.locator('#moreMenu').count() == 0 and not (pg.evaluate('history.state') or {}).get('menu'), 'Escape closes the menu (and its Back step)')
+    menu_pick(pg, '#favBtn')
+    ok('Душ гел' in pg.evaluate("JSON.stringify(LC.state.favs.map(c => LC.state.products[c] && LC.state.products[c].name))"), '♥ in the menu adds the favourite')
+    menu_pick(pg, '#mName'); pg.wait_for_selector('#nameInput')
+    pg.fill('#nameInput', 'Душ гел 2'); pg.press('#nameInput', 'Enter'); pg.wait_for_selector('#nameBtn')
+    ok(pg.inner_text('#nameBtn') == 'Душ гел 2', '"Промени името" in the menu renames')
+    bar = pg.evaluate("(() => { const r = document.getElementById('qBar').getBoundingClientRect(); const t = document.querySelector('.tabbar').getBoundingClientRect(); return [Math.round(r.bottom), Math.round(t.top)]; })()")
+    ok(bar[0] <= bar[1] and bar[1] - bar[0] < 30, 'the two buttons sit just above the tab bar (%s)' % bar)
+    pg.screenshot(path=os.path.join(SHOTS, 'v234-red-bg.png'))
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    ok(pg.locator('#recentList li.srow').count() == 2 and pg.inner_text('#recentList li.srow >> nth=0 >> .vv') == 'Избягвай' and 'Днес' in pg.inner_text('#recentList'), 'start: last scans with day and result on the right')
+    ok(pg.evaluate("document.getElementById('recent').compareDocumentPosition(document.getElementById('checking')) & 4") > 0, '"Проверява" sits under the last scans')
+    dc = pg.evaluate("[...document.querySelectorAll('#recentList .vv .dot')].map(d => getComputedStyle(d).backgroundColor)")
+    ok(dc[0] == 'rgb(255, 107, 107)' and dc[1] == 'rgb(95, 211, 154)', 'start rows: the dot has the result colour (red / green), not grey (%s)' % dc)
+    pg.click('.tabbar button[data-go=history]'); pg.wait_for_timeout(300)
+    cnt = pg.evaluate("[...document.querySelectorAll('#histCount .hc')].map(c => c.dataset.v + ':' + c.querySelector('b').textContent)")
+    ok(cnt == ['avoid:1', 'check:0', 'ok:1'], 'history counters (%s)' % cnt)
+    pg.click('#histCount .hc[data-v=avoid]')
+    ok(pg.locator('#historyList li').count() == 1 and 'Душ гел' in pg.inner_text('#historyList') and pg.get_attribute('#histCount .hc[data-v=avoid]', 'aria-pressed') == 'true', 'a tap on a counter shows only that result')
+    pg.click('#histCount .hc[data-v=avoid]')
+    pg.fill('#histSearch', 'овес'); pg.wait_for_timeout(200)
+    ok(pg.locator('#historyList li').count() == 1 and 'Овесена' in pg.inner_text('#historyList'), 'search finds by name')
+    pg.fill('#histSearch', 'zzz'); pg.wait_for_timeout(200)
+    ok(pg.locator('#historyList li').count() == 0 and pg.inner_text('#historyEmpty') == 'Няма съвпадение.', 'search with no match says so')
+    pg.fill('#histSearch', '')
+    pg.click('#histFilter button[data-f=favs]')
+    ok(pg.is_visible('#favList') and 'Душ гел' in pg.inner_text('#favList') and pg.is_hidden('#histCount'), '♥ shows the favourites')
+    pg.screenshot(path=os.path.join(SHOTS, 'v234-history-bg.png'))
+    ctx.close()
+    for lang, w, dark in (('en-GB', 320, False), ('de-AT', 390, False)):
+        ctx, pg = new_page(b, base, lang, dark=dark, width=w)
+        read_label(pg, SHOWER, 'cosmetic', 'Shower gel with a long product name')
+        ok(card_fits(pg) and no_side_scroll(pg) and pg.is_visible('#qBar') and pg.is_visible('#moreBtn'), '%s %d px light: fits, buttons and ⋯ visible' % (lang, w))
+        pg.click('#moreBtn'); pg.wait_for_selector('#moreMenu')
+        ok(pg.evaluate("document.querySelector('#moreMenu .mbox').scrollWidth <= window.innerWidth"), '%s %d px: the menu fits' % (lang, w))
+        pg.screenshot(path=os.path.join(SHOTS, 'v234-menu-%s-%d.png' % (lang[:2], w)))
+        pg.keyboard.press('Escape'); pg.wait_for_timeout(200)
+        pg.click('.tabbar button[data-go=history]'); pg.wait_for_timeout(300)
+        ok(no_side_scroll(pg), '%s %d px: History fits' % (lang, w))
+        ctx.close()
     b.close()
 srv.shutdown()
 

@@ -5,6 +5,15 @@
 
 window.LC_TEXT = {
   en: {
+    // v2.34: new look (start B, result B, history B, ⋯ menu)
+    'start.ask': 'What do you want to check?', 'start.code': 'Barcode', 'start.codeSub': 'Fastest way', 'start.ingr': 'Ingredients', 'start.ingrSub': 'No barcode',
+    'qa.showAll.one': 'Show the 1 ingredient', 'qa.showAll.other': 'Show all {n} ingredients',
+    'qa.redN.one': '1 red ingredient', 'qa.redN.other': '{n} red ingredients', 'qa.orangeN.one': '1 ingredient to check', 'qa.orangeN.other': '{n} ingredients to check',
+    'qa.checkedN.one': '1 ingredient checked', 'qa.checkedN.other': '{n} ingredients checked',
+    'more.title': 'More', 'more.close': 'Close', 'day.today': 'Today', 'day.yesterday': 'Yesterday',
+    'hist.red.one': '1 red', 'hist.red.other': '{n} red', 'hist.orange.one': '1 to check', 'hist.orange.other': '{n} to check', 'hist.partial': 'incomplete',
+    'hist.c.avoid': 'Avoid', 'hist.c.check': 'Check', 'hist.c.ok': 'No warnings', 'hist.countAria': 'Count by result. Tap one to show only that result.',
+    'hist.search': 'Search your scans', 'hist.none': 'No scan matches.',
     'lang.name': 'English',
     'tab.scan': 'Scan', 'tab.favs': 'Favourites', 'tab.list': 'My list', 'tab.history': 'History',
 
@@ -347,6 +356,15 @@ window.LC_TEXT = {
   },
 
   de: {
+    // v2.34: neues Aussehen (Start B, Ergebnis B, Verlauf B, ⋯ Menü)
+    'start.ask': 'Was möchtest du prüfen?', 'start.code': 'Barcode', 'start.codeSub': 'Am schnellsten', 'start.ingr': 'Zutaten', 'start.ingrSub': 'Ohne Barcode',
+    'qa.showAll.one': 'Die 1 Zutat zeigen', 'qa.showAll.other': 'Alle {n} Zutaten zeigen',
+    'qa.redN.one': '1 rote Zutat', 'qa.redN.other': '{n} rote Zutaten', 'qa.orangeN.one': '1 Zutat zum Prüfen', 'qa.orangeN.other': '{n} Zutaten zum Prüfen',
+    'qa.checkedN.one': '1 Zutat geprüft', 'qa.checkedN.other': '{n} Zutaten geprüft',
+    'more.title': 'Mehr', 'more.close': 'Schließen', 'day.today': 'Heute', 'day.yesterday': 'Gestern',
+    'hist.red.one': '1 rot', 'hist.red.other': '{n} rot', 'hist.orange.one': '1 zum Prüfen', 'hist.orange.other': '{n} zum Prüfen', 'hist.partial': 'unvollständig',
+    'hist.c.avoid': 'Meiden', 'hist.c.check': 'Prüfen', 'hist.c.ok': 'Keine Warnungen', 'hist.countAria': 'Anzahl je Ergebnis. Antippen zeigt nur dieses Ergebnis.',
+    'hist.search': 'In deinen Scans suchen', 'hist.none': 'Kein Scan passt.',
     'lang.name': 'Deutsch',
     'tab.scan': 'Scannen', 'tab.favs': 'Favoriten', 'tab.list': 'Meine Liste', 'tab.history': 'Verlauf',
 
@@ -689,6 +707,15 @@ window.LC_TEXT = {
   },
 
   bg: {
+    // v2.34: нов вид (старт B, резултат B, история B, меню ⋯)
+    'start.ask': 'Какво искаш да провериш?', 'start.code': 'Баркод', 'start.codeSub': 'Най-бързо', 'start.ingr': 'Съставки', 'start.ingrSub': 'Без баркод',
+    'qa.showAll.one': 'Покажи 1 съставка', 'qa.showAll.other': 'Покажи всички {n} съставки',
+    'qa.redN.one': '1 червена съставка', 'qa.redN.other': '{n} червени съставки', 'qa.orangeN.one': '1 съставка за проверка', 'qa.orangeN.other': '{n} съставки за проверка',
+    'qa.checkedN.one': 'Проверена е 1 съставка', 'qa.checkedN.other': 'Проверени са {n} съставки',
+    'more.title': 'Още', 'more.close': 'Затвори', 'day.today': 'Днес', 'day.yesterday': 'Вчера',
+    'hist.red.one': '1 червена', 'hist.red.other': '{n} червени', 'hist.orange.one': '1 за проверка', 'hist.orange.other': '{n} за проверка', 'hist.partial': 'непълен',
+    'hist.c.avoid': 'Избягвай', 'hist.c.check': 'Провери', 'hist.c.ok': 'Без предупреждения', 'hist.countAria': 'Брой по резултат. Докосни един, за да видиш само него.',
+    'hist.search': 'Търси в сканираните', 'hist.none': 'Няма съвпадение.',
     'lang.name': 'Български',
     'tab.scan': 'Сканиране', 'tab.favs': 'Любими', 'tab.list': 'Моят списък', 'tab.history': 'История',
 

@@ -768,7 +768,15 @@
     close: 'M6 6l12 12M18 6L6 18',
     tag: 'M3.5 12.5v-8a1 1 0 0 1 1-1h8l8 8-9 9zM8 8h.01',
     pen: 'M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3zM14.5 7.5l2 2',
-    ok: 'M5 12.5l4.5 4.5L19 7.5'
+    ok: 'M5 12.5l4.5 4.5L19 7.5',
+    dots: 'M5 12h.01M12 12h.01M19 12h.01',
+    scan: 'M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M8 12h8',
+    globe: 'M21 12a9 9 0 1 1-18 0a9 9 0 1 1 18 0zM3.5 9h17M3.5 15h17M12 3c-2.5 3-2.5 15 0 18M12 3c2.5 3 2.5 15 0 18',
+    send: 'M4 12l16-8-6 16-2.5-6.5zM11.5 13.5L20 4',
+    code: 'M4 6v12M7 6v12M11 6v12M14 6v12M17 6v12M20 6v12',
+    food: 'M7 3v8a2 2 0 0 0 4 0V3M9 11v10M16 21V3c-2 1.5-3 4-3 7h3',
+    bottle: 'M10 3h4M10.5 3v3.5L8 9v10.5A1.5 1.5 0 0 0 9.5 21h5a1.5 1.5 0 0 0 1.5-1.5V9l-2.5-2.5V3M8 13h8',
+    spray: 'M9 8h6v12a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1zM10 8V5h4v3M14 5h3M17 3v4'
   };
   const link = (href, text) => el('a', { href, target: '_blank', rel: 'noopener', text });
 
@@ -779,6 +787,7 @@
   const smooth = () => (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
 
   function hideAll() {
+    closeMore(true);
     $('result').hidden = true;
     $('labelPanel').hidden = true;
     $('searchPanel').hidden = true;
@@ -883,28 +892,24 @@
     const r = $('result');
     const known = a.verdict !== 'unknown';
     const grey = a.verdict === 'partial' || a.verdict === 'unknown';
+    const photo = !!(p.read && p.read.photo);
+    // v2.34 (new look, result B): answer, what the app read, "Show all N ingredients", tip (grey), use question, details, and the two buttons at the bottom.
+    // Heart, share, 2nd photo, type, "Send to Claude" and "Look up online" are in the ⋯ menu (moreMenu).
+    const again = el('button', { class: 'btn ' + (grey ? 'btn-primary' : 'btn-ghost'), id: 'againBtn', type: 'button', onclick: () => openLabel(p) },
+      el('span', { text: t(p.source === 'label' ? 'btn.again' : 'btn.photoLabel') }));
+    const next = el('button', { class: 'btn ' + (grey ? 'btn-ghost' : 'btn-primary'), id: 'nextBtn', type: 'button', text: t('btn.nextProduct'), onclick: scanNext });
     r.replaceChildren(...[
       answerCard(p, a),
+      known ? el('button', {
+        class: 'qmore', id: 'detBtn', type: 'button', 'aria-expanded': String(state.detailsOpen), 'aria-controls': 'details',
+        onclick: () => toggleDetails(undefined, true)
+      }, el('span', { text: a.total ? tn('qa.showAll', a.total) : t('qa.details') }), icon(ICON.chev, 'chev')) : null,
       known ? readCard(p, a) : null,   // v2.33: "What the app read", right under the answer (was the v2.26 tick card)
-      // v2.14: two doors – more info / photo again – and the next product
-      el('div', { class: 'doors' },
-        known ? el('button', {
-          class: 'btn btn-ghost', id: 'detBtn', type: 'button', 'aria-expanded': String(state.detailsOpen), 'aria-controls': 'details',
-          onclick: () => toggleDetails(undefined, true)
-        }, icon(ICON.info), el('span', { text: t('qa.details') })) : null,
-        el('button', { class: 'btn ' + (grey ? 'btn-primary' : 'btn-ghost'), id: 'againBtn', type: 'button', onclick: () => openLabel(p) },
-          icon(ICON.again), el('span', { text: t(p.source === 'label' ? 'btn.again' : 'btn.photoLabel') }))),
-      el('button', { class: 'btn ' + (grey ? 'btn-ghost' : 'btn-primary') + ' nextwide', id: 'nextBtn', type: 'button', text: t('btn.nextProduct'), onclick: scanNext }),
-      grey && p.read && p.read.photo ? el('p', { class: 'minor caphint', id: 'capHint', text: t('cap.' + (a.weak || (a.unknown ? 'Glare' : 'Few'))) }) : null,
-      grey && a.verdict !== 'unknown' && p.read && p.read.photo ? el('button', { class: 'btn btn-ghost nextwide', id: 'secondBtn', type: 'button', onclick: () => secondPhoto(p) },
-        icon(ICON.again), el('span', { text: t('btn.second') })) : null,
-      p.source === 'label' && isBarcode(p.code)
-        ? el('button', { class: 'btn btn-ghost nextwide', type: 'button', text: t('btn.lookupOnline'), onclick: () => lookup(p.code, true) })
-        : null,
-      // v2.21: one file with what the app read and decided (and the photos), to send to Claude instead of screenshots
-      p.source === 'label' ? el('div', { class: 'repbox' },
-        el('button', { class: 'btn btn-ghost', id: 'repBtn', type: 'button', text: t('btn.report'), onclick: reportResult }),
-        el('label', { class: 'repopt' }, el('input', { type: 'checkbox', id: 'repPhotos', checked: store.get('repPhotos', true) !== false, onchange: e => store.set('repPhotos', e.target.checked) }), ' ' + t('rep.photos'))) : null,
+      grey && photo ? el('div', { class: 'qtip', id: 'capHint' },
+        icon(ICON.scan),
+        el('p', { text: t('cap.' + (a.weak || (a.unknown ? 'Glare' : 'Few'))) }),
+        a.verdict !== 'unknown' ? el('button', { class: 'btn btn-ghost', id: 'secondBtn', type: 'button', onclick: () => secondPhoto(p) },
+          icon(ICON.again), el('span', { text: t('btn.second') })) : null) : null,
       p.kind === 'cosmetic' && known && needsUse(p, a) ? useBar(p) : null,
       el('div', { id: 'details', class: 'details', hidden: known ? !state.detailsOpen : null }, ...[
         known ? detailsTop(p, a) : null,
@@ -917,7 +922,8 @@
               el('p', { class: 'ingredients', text: p.ingredientsText.replace(/^\s*[\p{L} ]{2,20}[:：]\s*/u, '') }))
           : null,
         dbWarn()
-      ].filter(Boolean))
+      ].filter(Boolean)),
+      el('div', { class: 'qbar' + (grey ? ' grey' : ''), id: 'qBar' }, ...(grey ? [again, next] : [next, again]))
     ].filter(Boolean));
     renderGroups();
     r.hidden = false;
@@ -945,8 +951,31 @@
       el('div', { class: 'qw' },
         el('span', { class: 'qi' }, icon(QA_ICON[v])),
         el('b', { class: word.length > 12 ? 'long' : null, text: word })),
-      frontLine(a)   // v2.14: one short line; the rest is under "Подробности"
+      frontLine(a)   // v2.34: one short line under the word (how many red / to check / checked, or what is missing)
     );
+    // v2.34: the colour counts as chips; a tap opens "Details" at that colour
+    if (v !== 'unknown' && a.rows.length) {
+      card.append(el('div', { class: 'qchips', id: 'qChips', role: 'group', 'aria-label': t('strip.aria') },
+        GROUPS.filter(g => a.counts[g]).map(g => el('button', { type: 'button', class: 'qchip g-' + g, 'data-g': g, onclick: () => openGroup(g) },
+          el('i', { 'aria-hidden': 'true' }), el('span', {}, el('b', { text: String(a.counts[g]) }), ' ' + t('legend.' + g))))));
+    }
+    // v2.34: the red and orange names, each with a short "why"; a tap opens the ingredient
+    const hot = a.rows.filter(r => r.group === 'red').concat(a.rows.filter(r => r.group === 'orange'));
+    if (hot.length) {
+      const shown = hot.slice(0, HOT_MAX);
+      card.append(el('ul', { class: 'qlist', id: 'qList' },
+        shown.map(r => {
+          const why = [...new Set([chipOf(r), whyOf(r)].filter(Boolean))].join(' · ');
+          return el('li', {}, el('button', { type: 'button', class: 'qrow', onclick: e => openDetail(r.i, e.currentTarget) },
+            el('i', { class: 'dot g-' + r.group, 'aria-hidden': 'true' }),
+            el('span', { class: 'qtx' },
+              el('strong', { text: r.label + (r.why === 'allergen' && r.traceOnly ? ' (' + t('qa.traceMark') + ')' : '') }),
+              why ? el('small', { text: why }) : null),
+            icon(ICON.chev, 'chev')));
+        }),
+        hot.length > shown.length ? el('li', {}, el('button', { type: 'button', class: 'qrow more', onclick: () => openGroup(hot[shown.length].group),
+          text: t('qa.more', { n: hot.length - shown.length }) })) : null));
+    }
     if (v === 'avoid' || v === 'check') {
       const line = el('p', { class: 'qalt', id: 'qalt', hidden: true });
       const fill = list => {
@@ -963,26 +992,32 @@
       }
       card.append(line);
     }
-    // the strip: not when the photo text may not be the list (it would show colours of the wrong text)
-    if (v !== 'unknown' && a.rows.length && !a.noList) {
-      card.append(el('div', { class: 'strip' + (a.rows.length > 30 ? ' dense' : ''), role: 'group', 'aria-label': t('strip.aria') },
-        a.rows.map(r => el('button', {
-          type: 'button', class: 'g-' + r.group,
-          title: (r.pos ? '#' + r.pos + ' ' : '') + r.label,
-          'aria-label': (r.pos ? '#' + r.pos + ' ' : '') + r.label + ', ' + t('g.' + r.group),
-          onclick: e => { toggleDetails(true); jumpTo(r.i, e.currentTarget); }
-        }))));
-      // v2.15: first name, how many were read, last name – so you do not need to count
-      const named = a.rows.filter(r => r.pos);
-      if (named.length >= 2) {
-        card.append(el('div', { class: 'ends', id: 'endsLine' },
-          el('span', { class: 'e1', text: '#1 ' + shortName(named[0]) }),
-          el('b', { class: 'en', text: t('qa.read', { n: named.length }) }),
-          el('span', { class: 'e2', text: shortName(named[named.length - 1]) + ' #' + named[named.length - 1].pos })));
-      }
-    }
-    if (p.ingredientsText && v !== 'unknown') card.append(typeChip(p));
+    // v2.34: the type line only when the app is not sure about the type (the ⋯ menu can always change it)
+    if (p.ingredientsText && v !== 'unknown' && kindUnsure(p)) card.append(typeChip(p));
     return card;
+  }
+  const HOT_MAX = 6;
+
+  // v2.34: open "Details" at one colour group (chips on the answer, "+N more")
+  function openGroup(g) {
+    toggleDetails(true);
+    state.filter = null;
+    state.open[g] = true;
+    renderGroups();
+    const s = document.querySelector('#groups .grp.g-' + g);
+    if (s) s.scrollIntoView({ behavior: smooth(), block: 'start' });
+  }
+
+  // v2.34: is the type of a label product a guess the app is not sure about?
+  function kindUnsure(p) {
+    if (p.source !== 'label' || !p.ingredientsText || p.kindSet) return false;
+    let g = null;
+    try { g = guessKind(p.ingredientsText); } catch (e) { return true; }
+    if (!g) return true;
+    if (g.kind !== (p.kind || 'food')) return true;
+    if (g.skin || g.kind === 'household') return false;
+    const share = g.of ? g.n / g.of : 0;
+    return g.kind === 'cosmetic' ? share < 0.75 : share > 0.3;
   }
 
   // v2.15: "Food ▾ tap if wrong" on every card – change the type and the product is checked again.
@@ -1001,6 +1036,7 @@
   }
   function setKind(p, k) {
     p.kind = k;
+    p.kindSet = true;   // v2.34: chosen by the person, so the type line is not shown again
     if (k !== 'cosmetic') delete p.use;
     if (state.products[p.code]) saveProduct(p);
     verdictCache.delete(p.code);
@@ -1011,18 +1047,13 @@
     renderFavs();
   }
 
-  // v2.14: the one line on the card. Red / orange: only the names; grey: what to do; green: nothing.
+  // v2.34: the one line under the word. Red / orange: how many (the names are in the list under it); green: how many were checked; grey: what is missing.
   function frontLine(a) {
-    const names = list => {
-      const n = [...new Set(list)];
-      return n.slice(0, 3).join(', ') + (n.length > 3 ? ' ' + t('qa.more', { n: n.length - 3 }) : '');
-    };
     let text = null;
-    if (a.verdict === 'avoid') {
-      const red = a.rows.filter(r => r.group === 'red');
-      text = names(red.map(r => shortName(r) + (r.why === 'allergen' && r.traceOnly ? ' (' + t('qa.traceMark') + ')' : '')));
-    } else if (a.verdict === 'check') text = names(a.rows.filter(r => r.group === 'orange').map(shortName));
-    else if (a.verdict === 'partial') text = t('qa.recheckLine');
+    if (a.verdict === 'avoid') text = tn('qa.redN', a.counts.red);
+    else if (a.verdict === 'check') text = tn('qa.orangeN', a.counts.orange);
+    else if (a.verdict === 'ok') text = a.total ? tn('qa.checkedN', a.total) : null;
+    else if (a.verdict === 'partial') text = a.noList ? t('qa.recheckLine') : a.unknown ? t('qa.known', { n: a.known, of: a.known + a.unknown }) : a.weak ? t('sum.weak' + a.weak, { total: a.total }) : t('qa.recheckLine');
     else if (a.verdict === 'unknown') text = a.summary;
     return text ? el('p', { class: 'qy one', id: 'oneLine', text }) : null;
   }
@@ -1033,7 +1064,27 @@
       ? el('p', { class: 'legend', id: 'legend' }, GROUPS.filter(g => a.counts[g]).map(g =>
           el('span', {}, el('i', { class: 'g-' + g, 'aria-hidden': 'true' }), el('b', { text: String(a.counts[g]) }), ' ' + t('legend.' + g))))
       : null;
-    return el('div', { class: 'dtop', id: 'dtop' }, ...answerLines(a, p), knownLine(p, a), a.supplement ? el('p', { class: 'qk1', id: 'suppNote', text: t('note.supp') }) : null, legend);
+    return el('div', { class: 'dtop', id: 'dtop' }, ...answerLines(a, p), knownLine(p, a), a.supplement ? el('p', { class: 'qk1', id: 'suppNote', text: t('note.supp') }) : null, stripOf(a), legend);
+  }
+
+  // The colour strip (label order; a tap jumps to the ingredient). v2.34: at the top of "Details" (it was on the answer card).
+  // Not when the photo text may not be the list (it would show colours of the wrong text).
+  function stripOf(a) {
+    if (a.verdict === 'unknown' || !a.rows.length || a.noList) return null;
+    const named = a.rows.filter(r => r.pos);
+    return el('div', { class: 'dstrip' },
+      el('div', { class: 'strip' + (a.rows.length > 30 ? ' dense' : ''), role: 'group', 'aria-label': t('strip.aria') },
+        a.rows.map(r => el('button', {
+          type: 'button', class: 'g-' + r.group,
+          title: (r.pos ? '#' + r.pos + ' ' : '') + r.label,
+          'aria-label': (r.pos ? '#' + r.pos + ' ' : '') + r.label + ', ' + t('g.' + r.group),
+          onclick: e => { toggleDetails(true); jumpTo(r.i, e.currentTarget); }
+        }))),
+      // v2.15: first name, how many were read, last name – so you do not need to count
+      named.length >= 2 ? el('div', { class: 'ends', id: 'endsLine' },
+        el('span', { class: 'e1', text: '#1 ' + shortName(named[0]) }),
+        el('b', { class: 'en', text: t('qa.read', { n: named.length }) }),
+        el('span', { class: 'e2', text: shortName(named[named.length - 1]) + ' #' + named[named.length - 1].pos })) : null);
   }
 
   // Red: what and why. Orange: what. Green: what was checked. Never "safe".
@@ -1111,23 +1162,68 @@
     $('labelText').scrollIntoView({ behavior: smooth(), block: 'center' });
   }
 
+  // v2.34: a small line on top: the name (tap = rename) · the type, and the ⋯ menu.
   function nameRow(p) {
-    const isFav = state.favs.includes(p.code), nm = p.name || t('ph.unnamed');
+    const nm = p.name || t('ph.unnamed');
     return el('div', { class: 'qn' },
       p.name
         ? el('button', { class: 'nameedit', type: 'button', id: 'nameBtn', 'aria-label': t('name.edit') + ': ' + nm, onclick: () => editName(p) },
             el('span', { text: nm }), p.nameFrom === 'photo' ? el('small', { class: 'fromphoto', text: t('name.fromPhoto') }) : null, icon(ICON.pen))
         : el('button', { class: 'addname', type: 'button', id: 'nameBtn', 'aria-label': t('name.add'), onclick: () => editName(p) },
             el('span', { text: t('name.add') })),
-      el('div', { class: 'acts' },
-        el('button', {
-          class: 'iconbtn' + (isFav ? ' on' : ''), type: 'button', id: 'favBtn',
-          'aria-pressed': String(isFav), 'aria-label': t(isFav ? 'btn.unfav' : 'btn.fav'), title: t(isFav ? 'btn.unfav' : 'btn.fav'),
-          onclick: () => toggleFav(p)
-        }, icon(ICON.heart)),
-        el('button', { class: 'iconbtn', type: 'button', 'aria-label': t('btn.share'), title: t('btn.share'), onclick: shareResult }, icon(ICON.share))
-      )
-    );
+      el('span', { class: 'qkind', text: t(kindKey(p.kind)) }),
+      el('button', { class: 'iconbtn morebtn', type: 'button', id: 'moreBtn', 'aria-haspopup': 'dialog', 'aria-label': t('more.title'), title: t('more.title'),
+        onclick: () => openMore(p) }, icon(ICON.dots)));
+  }
+
+  // v2.34: the ⋯ menu: everything that is not needed for the decision, one tap away.
+  function openMore(p) {
+    closeMore();
+    const a = state.current && state.current.a;
+    const isFav = state.favs.includes(p.code), label = p.source === 'label', photo = !!(p.read && p.read.photo);
+    const item = (id, ic, text, fn, extra) => el('button', Object.assign({ class: 'mitem', type: 'button', id, onclick: () => closeMore().then(fn) }, extra || {}),
+      icon(ic), el('span', { text }));
+    const k = p.kind || 'food';
+    const sheet = el('div', { class: 'msheet', id: 'moreMenu', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('more.title') },
+      el('div', { class: 'mbox' },
+        el('p', { class: 'mhead', text: p.name || t('ph.unnamed') }),
+        item('mName', ICON.pen, t(p.name ? 'name.edit' : 'name.add'), () => editName(p)),
+        item('favBtn', ICON.heart, t(isFav ? 'btn.unfav' : 'btn.fav'), () => toggleFav(p), { 'aria-pressed': String(isFav), class: 'mitem' + (isFav ? ' on' : '') }),
+        item('mShare', ICON.share, t('btn.share'), shareResult),
+        a && a.verdict !== 'unknown' ? item('mDetails', ICON.info, t('qa.details'), () => toggleDetails(true, true)) : null,
+        label && photo && a && a.verdict !== 'unknown' ? item('mSecond', ICON.again, t('btn.second'), () => secondPhoto(p)) : null,
+        label && isBarcode(p.code) ? item('mOnline', ICON.globe, t('btn.lookupOnline'), () => lookup(p.code, true)) : null,
+        p.ingredientsText ? el('div', { class: 'mkind', role: 'group', 'aria-label': t('label.kind') },
+          el('span', { text: t('label.kind') }),
+          el('div', { class: 'segs typesegs' }, ['food', 'cosmetic', 'household'].map(v => el('button', { type: 'button', class: 'seg', 'aria-pressed': String(v === k),
+            text: t(kindKey(v)), onclick: () => closeMore().then(() => { if (v !== k) setKind(p, v); }) })))) : null,
+        // v2.21: one file with what the app read and decided (and the photos), to send to Claude instead of screenshots
+        label ? el('div', { class: 'repbox' },
+          el('button', { class: 'mitem', id: 'repBtn', type: 'button', onclick: () => closeMore().then(reportResult) }, icon(ICON.send), el('span', { text: t('btn.report') })),
+          el('label', { class: 'repopt' }, el('input', { type: 'checkbox', id: 'repPhotos', checked: store.get('repPhotos', true) !== false, onchange: e => store.set('repPhotos', e.target.checked) }), ' ' + t('rep.photos'))) : null,
+        el('button', { class: 'btn btn-ghost mclose', type: 'button', id: 'moreClose', text: t('more.close'), onclick: () => closeMore() })));
+    sheet.addEventListener('click', e => { if (e.target === sheet) closeMore(); });
+    // phone Back closes the menu (its own history step)
+    try { history.pushState(Object.assign({}, history.state || {}, { menu: 1 }), ''); } catch (e) { /* ignore */ }
+    document.body.append(sheet);
+    document.documentElement.classList.add('noscroll');
+    const first = sheet.querySelector('.mitem');
+    if (first) first.focus();
+  }
+  // Close the menu. Its history step is taken back first, so an action that opens a new screen does not lose its own step.
+  let moreBack = null;
+  function closeMore(fromPop) {
+    const m = $('moreMenu');
+    if (!m) return Promise.resolve();
+    m.remove();
+    document.documentElement.classList.remove('noscroll');
+    const b = $('moreBtn'); if (b) b.focus({ preventScroll: true });
+    if (fromPop || !(history.state && history.state.menu)) return Promise.resolve();
+    return new Promise(res => {
+      moreBack = res;
+      history.back();
+      setTimeout(() => { if (moreBack === res) { moreBack = null; res(); } }, 600);
+    });
   }
 
   // Name a product after the check: tap the name, type, ✓ (or Enter).
@@ -1650,21 +1746,43 @@
     return { verdict: fallback || 'unknown', summary: '' };
   }
 
+  // v2.34: Today / Yesterday / weekday (last 6 days) / date
+  function fmtDay(ms) {
+    if (!ms) return '';
+    const d = new Date(ms), now = new Date();
+    const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const diff = Math.round((day(now) - day(d)) / 864e5);
+    if (diff === 0) return t('day.today');
+    if (diff === 1) return t('day.yesterday');
+    if (diff > 1 && diff < 7) {
+      try { const w = d.toLocaleDateString(LOCALE[LANG], { weekday: 'long' }); return w.charAt(0).toUpperCase() + w.slice(1); } catch (e) { /* date below */ }
+    }
+    return fmtDate(ms);
+  }
+  const KIND_ICON = { food: 'food', cosmetic: 'bottle', household: 'spray' };
+
+  // v2.34: one row for a product. Start: picture square, name, day, verdict on the right. History / favourites: dot, name, "day · 1 red", arrow.
   function productListItem(item, opts) {
+    opts = opts || {};
     const v = verdictOf(item.code, item.verdict);
     const p = productBy(item.code) || item;
-    return el('li', {},
+    const name = p.name || t('ph.unnamed');
+    if (opts.start) {
+      return el('li', { class: 'srow' },
+        el('button', { class: 'open', type: 'button', onclick: () => openSaved(item.code), 'aria-label': name + ', ' + t('v.' + v.verdict) },
+          el('span', { class: 'thumb' }, icon(ICON[KIND_ICON[p.kind] || 'food']), p.image ? el('img', { src: p.image, alt: '', loading: 'lazy', onerror: e => e.target.remove() }) : null),
+          el('span', { class: 'tx' }, el('strong', { text: name }), el('span', { class: 'sub', text: fmtDay(opts.time) })),
+          el('span', { class: 'vv v-' + v.verdict }, el('span', { class: 'dot ' + VERDICT_DOT[v.verdict], 'aria-hidden': 'true' }), el('span', { text: t('v.' + v.verdict) }))));
+    }
+    const g = v.groups || [], nRed = g.filter(x => x === 'red').length, nOr = g.filter(x => x === 'orange').length;
+    const extra = v.verdict === 'avoid' && nRed ? tn('hist.red', nRed) : v.verdict === 'check' && nOr ? tn('hist.orange', nOr)
+      : v.verdict === 'partial' ? t('hist.partial') : v.verdict === 'unknown' ? t('v.unknown') : null;
+    return el('li', { class: 'hrow' },
       el('span', { class: 'dot ' + VERDICT_DOT[v.verdict], 'aria-hidden': 'true' }),
-      el('button', { class: 'open', type: 'button', onclick: () => openSaved(item.code) },
-        el('strong', { text: p.name || t('ph.unnamed') }),
-        el('span', { class: 'sub', text: [p.brand, t('v.' + v.verdict), opts && opts.time ? fmtDate(opts.time) : null].filter(Boolean).join(' · ') }),
-        opts && opts.summary && v.summary ? el('span', { class: 'sub one', text: v.summary }) : null,
-        // v2.13: the colour strip in small, so products can be compared at a glance (History)
-        opts && opts.time && v.groups && v.groups.length ? el('span', { class: 'mstrip' + (v.groups.length > 30 ? ' dense' : ''), 'aria-hidden': 'true' },
-          v.groups.map(g => el('i', { class: 'g-' + g }))) : null
-      ),
-      opts && opts.remove ? opts.remove : null
-    );
+      el('button', { class: 'open', type: 'button', onclick: () => openSaved(item.code), 'aria-label': name + ', ' + t('v.' + v.verdict) },
+        el('strong', { text: name }),
+        el('span', { class: 'sub', text: [opts.time ? fmtDay(opts.time) : p.brand, extra].filter(Boolean).join(' · ') })),
+      opts.remove ? opts.remove : icon(ICON.chev, 'chev'));
   }
 
   function renderFavs() {
@@ -1673,7 +1791,6 @@
     ul.replaceChildren(...list.map(code => {
       const p = state.products[code];
       return productListItem({ code }, {
-        summary: true,
         remove: el('button', {
           class: 'iconbtn', type: 'button', 'aria-label': t('favs.remove', { name: p.name || t('ph.unnamed') }),
           onclick: () => toggleFav(p)
@@ -1683,9 +1800,20 @@
     $('favEmpty').hidden = list.length > 0;
   }
 
+  // v2.34: History B: three counters (tap = only that colour), search by name / brand, one list.
+  const HIST_COUNT = [['avoid', 'g-red'], ['check', 'g-orange'], ['ok', 'g-green']];
   function renderHistory() {
-    $('historyList').replaceChildren(...state.history.map(h => productListItem(h, { time: h.time })));
-    $('historyEmpty').hidden = state.history.length > 0;
+    const vs = state.history.map(h => verdictOf(h.code, h.verdict).verdict);
+    if (state.histV && !vs.includes(state.histV)) state.histV = null;
+    $('histCount').replaceChildren(...HIST_COUNT.map(([v, g]) => el('button', {
+      type: 'button', class: 'hc ' + g, 'data-v': v, 'aria-pressed': String(state.histV === v),
+      onclick: () => { state.histV = state.histV === v ? null : v; renderHistory(); }
+    }, el('b', { text: String(vs.filter(x => x === v).length) }), el('span', { text: t('hist.c.' + v) }))));
+    const q = (state.histQ || '').trim().toLowerCase();
+    const list = state.history.filter((h, i) => (!state.histV || vs[i] === state.histV) && (!q || [productBy(h.code) || h].some(p => ((p.name || '') + ' ' + (p.brand || '')).toLowerCase().includes(q))));
+    $('historyList').replaceChildren(...list.map(h => productListItem(h, { time: h.time })));
+    $('historyEmpty').hidden = list.length > 0;
+    $('historyEmpty').textContent = state.history.length ? t('hist.none') : t('hist.empty');
     $('clearHistory').hidden = state.history.length === 0;
     renderStart();
   }
@@ -1702,7 +1830,7 @@
       ...chips.map(c => el('button', { class: 'cchip', type: 'button', text: c, onclick: () => go('list') })));
     const items = state.history.slice(0, 3);
     $('recent').hidden = !items.length;
-    $('recentList').replaceChildren(...items.map(h => productListItem(h, { summary: true })));
+    $('recentList').replaceChildren(...items.map(h => productListItem(h, { start: true, time: h.time })));
     // Backup note: everything personal lives only on this phone.
     const last = store.get('lastBackup', 0), later = store.get('backupLater', 0), now = Date.now();
     const due = (state.history.length || state.avoid.length || state.favs.length) && now - last > 30 * 864e5 && now - later > 7 * 864e5;
@@ -3349,6 +3477,7 @@
     const p = {
       code,
       kind,
+      kindSet: kindTouched || undefined,   // v2.34: the person chose the type (or kept the type of a known product)
       source: 'label',
       name: (base && base.name) || (ocrFile && nameHint) || '',
       nameFrom: !(base && base.name) && ocrFile && nameHint ? 'photo' : undefined,
@@ -3757,10 +3886,13 @@
   let currentTab = 'scan';
 
   // Favourites are a filter inside History (v2.8). Old links to "favs" open History with the filter on.
-  function setHistFilter(f) {
-    document.querySelectorAll('#histFilter button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.f === f)));
+  // v2.34: the ♥ button switches between all scans and favourites
+  function setHistFilter(f, toggle) {
+    if (toggle && f === 'favs' && $('histFavs').hidden === false) f = 'all';
+    document.querySelectorAll('#histFilter button').forEach(b => b.setAttribute('aria-pressed', String(f === 'favs')));
     $('histAll').hidden = f === 'favs';
     $('histFavs').hidden = f !== 'favs';
+    $('histCount').hidden = f === 'favs';
   }
 
   // The barcode number box opens from a link (it is not needed often).
@@ -3810,6 +3942,8 @@
   }
 
   window.addEventListener('popstate', e => {
+    if (moreBack) { const done = moreBack; moreBack = null; done(); return; }   // v2.34: the ⋯ menu took its step back
+    closeMore(true);
     const st = e.state || { tab: 'scan' };
     if (st.view !== 'code' && !$('manualForm').hidden) hideCodeForm();
     if (!st.detail) hideDetail();
@@ -3860,7 +3994,8 @@
     $('secondPhoto').addEventListener('click', () => secondPhoto(null));
     initCam();
     $('torchBtn').addEventListener('click', toggleTorch);
-    document.querySelectorAll('#histFilter button').forEach(b => b.addEventListener('click', () => setHistFilter(b.dataset.f)));
+    document.querySelectorAll('#histFilter button').forEach(b => b.addEventListener('click', () => setHistFilter(b.dataset.f, true)));
+    $('histSearch').addEventListener('input', e => { state.histQ = e.target.value; renderHistory(); });
     $('offGet').addEventListener('click', getOfflineReaders);
     $('recentAll').addEventListener('click', () => go('history'));
     document.querySelectorAll('[data-back]').forEach(b => b.addEventListener('click', closePanel));
@@ -3928,7 +4063,7 @@
       renderHistory();
     });
     $('detailBack').addEventListener('click', closeDetail);
-    document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('detail').hidden) closeDetail(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('moreMenu')) closeMore(); else if (e.key === 'Escape' && !$('detail').hidden) closeDetail(); });
     document.addEventListener('visibilitychange', () => { if (document.hidden) stopCamera(); });
     try { history.replaceState({ tab: 'scan' }, '', location.pathname + location.search); } catch (e) { /* ignore */ }
 

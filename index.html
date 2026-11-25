@@ -15,7 +15,7 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>Label Check <span class="ver">v2.33</span></h1>
+    <h1>Label Check <span class="ver">v2.34</span></h1>
     <button class="iconbtn topsearch" id="topSearch" type="button" data-t-aria="card.search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg></button>
     <div class="langsw" id="langSwitch" role="group" aria-label="Language">
       <button type="button" data-lang="en" lang="en" aria-pressed="false">EN</button>
@@ -35,14 +35,15 @@
           <p><strong id="bkTitle"></strong> <span data-t="bk.why">Your list, history and saved products are only on this phone.</span></p>
           <div class="row2"><button class="btn btn-primary" id="bkSave" type="button" data-t="bk.save">Save backup</button><button class="linkbtn" id="bkLater" type="button" data-t="bk.later">Later</button></div>
         </div>
+        <p class="startq" data-t="start.ask">What do you want to check?</p>
         <div class="startcards">
           <button class="scard primary" id="cardScan" type="button">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M7 12h10"/></svg>
-            <strong data-t="card.scan">Scan a barcode</strong>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6v12M7 6v12M11 6v12M14 6v12M17 6v12M20 6v12"/></svg>
+            <span><strong data-t="start.code">Barcode</strong><small data-t="start.codeSub">Fastest way</small></span>
           </button>
           <button class="scard" id="cardLabel" type="button">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.5-2h6l1.5 2h2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="13" r="3.5"/></svg>
-            <strong data-t="card.label">Read a label</strong>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M8 9h8M8 12h8M8 15h5"/></svg>
+            <span><strong data-t="start.ingr">Ingredients</strong><small data-t="start.ingrSub">No barcode</small></span>
           </button>
         </div>
 
@@ -68,11 +69,11 @@
           <p class="help" id="codeHelp" data-t="manual.help">8 to 14 digits.</p>
         </form>
 
-        <section class="checking" id="checking"></section>
         <section class="recent" id="recent" hidden>
           <div class="recent-head"><h3 data-t="start.recent">Recent</h3><button class="linkbtn" id="recentAll" type="button" data-t="start.all">All</button></div>
           <ul class="plainlist prodlist" id="recentList"></ul>
         </section>
+        <section class="checking" id="checking"></section>
       </div>
 
       <!-- Result -->
@@ -297,9 +298,16 @@
     <!-- HISTORY TAB -->
     <section class="tab" id="tab-history" data-tab="history" hidden>
       <h2 data-t="hist.title">History</h2>
-      <div class="filt" id="histFilter" role="group">
-        <button type="button" data-f="all" aria-pressed="true" data-t="hist.all">All</button>
-        <button type="button" data-f="favs" aria-pressed="false"><span aria-hidden="true">♥ </span><span data-t="favs.title">Favourites</span></button>
+      <div class="hcount" id="histCount" role="group" data-t-aria="hist.countAria"></div>
+      <div class="hsrow">
+        <div class="hsearch">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4-4"/></svg>
+          <label class="sr-only" for="histSearch" data-t="hist.search">Search your scans</label>
+          <input id="histSearch" type="search" data-t-ph="hist.search" autocomplete="off" enterkeyhint="search">
+        </div>
+        <div class="filt" id="histFilter" role="group">
+          <button type="button" data-f="favs" aria-pressed="false" data-t-aria="favs.title"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/></svg></button>
+        </div>
       </div>
       <div id="histAll">
         <ul class="plainlist prodlist" id="historyList"></ul>
