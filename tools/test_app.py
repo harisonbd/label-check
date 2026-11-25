@@ -521,7 +521,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.30' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.31' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -991,7 +991,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v48')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v49')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1227,7 +1227,7 @@ with sync_playwright() as p:
     pg.wait_for_selector('#result:not([hidden]) #answer')
     ok('Tartrazine' in pg.text_content('#result') or 'E102' in pg.text_content('#result'), 'v2.23: Paddle: the answer shows (tartrazine found)')
     res = pg.evaluate("performance.getEntriesByType('resource').map(e => e.name)")
-    ok(any('/ocr-paddle/paddle-worker-2.js' in x for x in res) and not any('/ocr/' in x for x in res), 'v2.23: the Paddle worker was used, no Tesseract file was loaded')
+    ok(any('/ocr-paddle/paddle-worker-3.js' in x for x in res) and not any('/ocr/' in x for x in res), 'v2.23: the Paddle worker was used, no Tesseract file was loaded')
     ok(pg.evaluate("LC.getRep().frames[0].engine") == 'paddle', 'v2.23: the report says which reader was used')
     ctx.close()
     ctx, pg = new_page(bp, base, 'bg-BG')
@@ -1235,6 +1235,36 @@ with sync_playwright() as p:
     read_photo(pg, lang='auto', file=photo_bg, box=(0.02, 0.44, 0.98, 0.62))
     txt = pg.input_value('#labelText').lower()
     ok('съставки' in txt and 'захар' in txt and 'лецитин' in txt, 'v2.23: Paddle reads a Cyrillic label by itself (no wrong-alphabet read) (%s)' % txt[:80])
+    ctx.close()
+    # ---- v2.31: curved and tilted lines are straightened before reading ----
+    print('v2.31: curved lines')
+    import numpy as np, base64
+    flat = Image.new('RGB', (1400, 520), (250, 248, 240)); dr = ImageDraw.Draw(flat)
+    CURVE = ['Ingredients: Sugar, wheat flour, palm oil, glucose', 'syrup, emulsifier: soya lecithin, colour:', 'tartrazine, salt, flavouring. May contain', 'traces of milk and hazelnuts.']
+    for i, line in enumerate(CURVE): dr.text((60, 60 + i * 100), line, fill=(25, 25, 25), font=font(50))
+    a = np.asarray(flat); H, W = a.shape[:2]
+    shift = (70 * ((np.arange(W) - W / 2) / (W / 2)) ** 2).astype(int)      # like a round bottle: the line ends bend
+    bent = np.full((H + 100, W, 3), (250, 248, 240), np.uint8)
+    for x in range(W): bent[80 - shift[x]:80 - shift[x] + H, x] = a[:, x]
+    curved = os.path.join(SHOTS, 'v231-curved-label.jpg')
+    Image.fromarray(bent).rotate(-4, expand=True, fillcolor=(250, 248, 240)).save(curved, quality=90)
+    WORDS = ['sugar', 'wheat flour', 'palm oil', 'glucose', 'soya lecithin', 'emulsifier', 'tartrazine', 'flavouring', 'milk', 'hazelnuts']
+    ctx, pg = new_page(bp, base, 'en-GB')
+    pg.click('#cardLabel')
+    read_photo(pg, file=curved, box=(0.01, 0.01, 0.99, 0.99))
+    txt = pg.input_value('#labelText').lower()
+    ok(sum(w in txt for w in WORDS) == len(WORDS), 'v2.31: a curved, tilted label: all 10 names read (%d) (%s)' % (sum(w in txt for w in WORDS), txt[:90]))
+    b64 = base64.b64encode(open(curved, 'rb').read()).decode()
+    r = pg.evaluate("""async ([b64]) => { const w = new Worker('ocr-paddle/paddle-worker-3.js'), out = {};
+      for (const straight of [false, true]) {
+        const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+        const m = await new Promise(res => { w.onmessage = e => { if (!e.data.step) res(e.data); }; w.postMessage({ id: straight ? 2 : 1, image: bin, lang: 'eng', straight }, [bin.buffer]); });
+        out[straight ? 'on' : 'off'] = { text: (m.text || '').toLowerCase(), straight: m.straight };
+      }
+      w.terminate(); return out; }""", [b64])
+    on, off = sum(w in r['on']['text'] for w in WORDS), sum(w in r['off']['text'] for w in WORDS)
+    ok(on == len(WORDS) and off <= 6 and r['on']['straight'] >= 4 and r['off']['straight'] == 0,
+       'v2.31: the same label without straightening reads only %d of 10 names; with it %d (%d lines straightened)' % (off, on, r['on']['straight']))
     ctx.close()
     ctx, pg = new_page(bp, base, 'en-GB')
     ctx.route('**/ocr-paddle/**', lambda r: r.abort())
@@ -1416,16 +1446,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v48'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v49'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v48' not in keys: break
+        if 'label-check-v49' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v48' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v49' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
     b.close()

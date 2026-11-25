@@ -2905,7 +2905,7 @@
   let paddleWorker = null, paddleDead = false;
   const paddleOK = () => store.get('ocrEngine', 'paddle') !== 'tess' && !paddleDead && typeof OffscreenCanvas !== 'undefined' && typeof WebAssembly === 'object';
   function workerRun(kind, image, lang, opts) {
-    const url = kind === 'paddle' ? 'ocr-paddle/paddle-worker-2.js' : 'ocr/ocr-worker-2.js';
+    const url = kind === 'paddle' ? 'ocr-paddle/paddle-worker-3.js' : 'ocr/ocr-worker-2.js';
     let w = kind === 'paddle' ? paddleWorker : ocrWorker;
     if (!w) {
       w = new Worker(url);
@@ -3788,7 +3788,7 @@
   // ---------- Label reader without internet (all 7 languages on the phone) ----------
   const OCR_MB = { eng: 2.0, deu: 0.9, bul: 0.8, hun: 2.4, ces: 1.7, slk: 1.9, slv: 1.2 };
   const hasSimd = () => { try { return WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11])); } catch (e) { return false; } };
-  const PADDLE_FILES = ['paddle-worker-2.js', 'ort.wasm.min.js', 'ort-wasm-simd-threaded.mjs', 'ort-wasm-simd-threaded.wasm', 'det.onnx', 'rec-latin.onnx', 'rec-eslav.onnx', 'dict-latin.txt', 'dict-eslav.txt'].map(f => 'ocr-paddle/' + f);
+  const PADDLE_FILES = ['paddle-worker-3.js', 'ort.wasm.min.js', 'ort-wasm-simd-threaded.mjs', 'ort-wasm-simd-threaded.wasm', 'det.onnx', 'rec-latin.onnx', 'rec-eslav.onnx', 'dict-latin.txt', 'dict-eslav.txt'].map(f => 'ocr-paddle/' + f);
   const PADDLE_MB = { 'ort-wasm-simd-threaded.wasm': 11.2, 'det.onnx': 2.4, 'rec-latin.onnx': 7.9, 'rec-eslav.onnx': 7.9, 'ort.wasm.min.js': 0.05 };
   const ocrCore = () => { const c = hasSimd() ? 'tesseract-core-simd-lstm' : 'tesseract-core-lstm'; return ['ocr/ocr-worker-2.js', 'ocr/' + c + '.js', 'ocr/' + c + '.wasm']; };
   async function offlineMissing() {
