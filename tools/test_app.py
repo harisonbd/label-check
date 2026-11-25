@@ -521,7 +521,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.32' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.33' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -991,7 +991,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v50')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v51')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1120,14 +1120,66 @@ with sync_playwright() as p:
     # v2.22: tick-list for names the app cannot match, the capture hint and the closest-name helper
     ok(pg.evaluate("() => LCDB.closest('Glyxerxn', 3)") == ['GLYCERIN'] and pg.evaluate("() => LCDB.closest('Aqua', 3)") == [], 'v2.22: closest() gives the nearest known name, and nothing for a known or very short name')
     read_label(pg, 'Aqua, Glyxerxn, Lanolxxn, Cetyl Alcohol, Panthenol', 'cosmetic')
-    pg.wait_for_selector('#tickCard', timeout=20000)
-    ok(pg.locator('#tickCard .tickrow').count() == 2 and 'Glycerin' in pg.inner_text('#tick0c0') and 'Lanolin' in pg.inner_text('#tick1c0'), 'v2.22: two unsure names, each with its closest name to tap (%s)' % pg.inner_text('#tickCard')[:90])
-    ok(pg.evaluate("() => [...document.querySelectorAll('#tickCard button')].every(b => b.getBoundingClientRect().height >= 40)"), 'v2.22: tick-list buttons are at least 40 px high')
-    ok(pg.inner_text('#tickHead') == '2 names to confirm' and pg.inner_text('#tick0x') == 'Other', 'v2.26: card title "2 names to confirm"; the escape button says "Other" (%s)' % pg.inner_text('#tickHead'))
-    ok(pg.evaluate("() => !!(document.getElementById('tickCard').compareDocumentPosition(document.getElementById('againBtn')) & Node.DOCUMENT_POSITION_FOLLOWING)"), 'v2.26: the card sits right under the answer, before the Details / Photo again buttons')
-    ok(pg.evaluate("() => document.getElementById('tick0c0').classList.contains('btn-primary')"), 'v2.26: the first (best) guess is the blue button')
-    pg.click('#tick0c0'); pg.wait_for_timeout(600)
-    ok(pg.locator('#tickCard .tickrow').count() == 1, 'v2.22: one tap on the right name teaches it; one unsure name is left (%s)' % pg.locator('#tickCard .tickrow').count())
+    pg.wait_for_selector('#readCard', timeout=20000)
+    # v2.33: "What the app read" card (option B) replaces the v2.26 tick card
+    ok(pg.locator('#readChips .chip').count() == 5 and pg.locator('#readChips .chip.q').count() == 2 and pg.inner_text('#readCard .rd-badge') == '2',
+       'v2.33: all 5 names as tiles, 2 orange unclear tiles, badge 2 (%s)' % pg.inner_text('#readCard').replace('\n', ' | ')[:160])
+    ok(pg.inner_text('#readCard .rd-top b') == 'What the app read' and pg.inner_text('#readGuess0') == 'Glycerin' and pg.evaluate("() => document.getElementById('readGuess0').classList.contains('btn-primary')"),
+       'v2.33: title "What the app read"; the first unclear name is open, its best guess "Glycerin" is the blue button')
+    ok(pg.evaluate("() => [...document.querySelectorAll('#readPanel .btn')].every(b => b.getBoundingClientRect().height >= 48) && [...document.querySelectorAll('#readChips button')].every(b => b.getBoundingClientRect().height >= 40)"),
+       'v2.33: panel buttons are at least 48 px high, tiles at least 40 px')
+    ok(pg.evaluate("() => !!(document.getElementById('readCard').compareDocumentPosition(document.getElementById('againBtn')) & Node.DOCUMENT_POSITION_FOLLOWING) && document.getElementById('answer').nextElementSibling.id === 'readCard'"),
+       'v2.33: the card sits right under the answer, before the Details / Photo again buttons')
+    pg.click('#readGuess0'); pg.wait_for_timeout(600)
+    ok(pg.locator('#readChips .chip.q').count() == 1 and pg.locator('#readChips .chip.fixed').count() == 1 and pg.inner_text('#readGuess0') == 'Lanolin' and 'Glycerin' in pg.inner_text('#readChips .chip.fixed'),
+       'v2.33: one tap on the right name teaches it (tile green with a tick); the next unclear name opens (%s)' % pg.inner_text('#readCard').replace('\n', ' | ')[:160])
+    pg.click('#readKeep'); pg.wait_for_timeout(600)
+    ok(pg.locator('#readChips .chip.q').count() == 0 and pg.locator('#readPanel').count() == 0 and pg.locator('#readChips .chip.none').count() == 1 and pg.inner_text('#readCard .rd-badge') == '✓'
+       and 'All unclear names checked' in pg.inner_text('#readCard') and pg.evaluate("LC.state.current.p.readKept.length") == 1,
+       'v2.33: "Keep as read": the tile turns grey, no more unclear names, badge ✓, saved on the product only')
+    pg.click('#readChips .chip.fixed'); pg.wait_for_timeout(600)
+    ok(pg.locator('#readChips .chip.q').count() == 1 and pg.inner_text('#readGuess0') == 'Glycerin', 'v2.33: tapping a fixed tile undoes it (the name is unclear again)')
+    ok(pg.evaluate("() => [LCDB.guessCosmetic('Helianthu us sed oil', 2)[0], LCDB.guessCosmetic('Caprylic/Capri erde', 2)[0], LCDB.guessCosmetic('Glycery ate', 2)[0], LCDB.guessCosmetic('Benzyl alchl', 2)[0], LCDB.guessCosmetic('Aqua', 2).length]")
+       == ['HELIANTHUS ANNUUS SEED OIL', 'CAPRYLIC/CAPRIC TRIGLYCERIDE', 'GLYCERYL STEARATE', 'BENZYL ALCOHOL', 0], 'v2.33: better guesses for broken names (words cut short or lost), the common name first')
+    ctx.close(); ctx, pg = new_page(b, base, 'de-DE')
+    read_label(pg, 'Zutaten: Zuker, Kakaomase, Salz, Weizenmeh', 'food')
+    pg.wait_for_selector('#readCard', timeout=20000)
+    ok(pg.locator('#readChips .chip.q').count() == 2 and pg.inner_text('#readGuess0') == 'Zucker' and pg.locator('#readSearch').count() == 0 and pg.locator('#readChips .chip:not(.q):not(.none)').count() == 2,
+       'v2.33: food: 2 misread names are unclear, guess "Zucker" from the food names; "Weizenmeh" (gluten found) is not unclear; no "Search" for food (%s)' % pg.inner_text('#readCard').replace('\n', ' | ')[:160])
+    pg.click('#readGuess0'); pg.wait_for_timeout(600)
+    ok(pg.evaluate("LC.state.current.p.ingredientsText").startswith('Zutaten: Zucker, Kakaomase') and pg.locator('#readChips .chip.fixed').count() == 1 and pg.inner_text('#readGuess0') == 'Kakaomasse',
+       'v2.33: food: the tap changes the text of this product; the tile is green; the next name opens (%s)' % pg.evaluate("LC.state.current.p.ingredientsText"))
+    pg.click('#readGuess0'); pg.wait_for_timeout(600)
+    ok(pg.evaluate("LC.state.current.p.ingredientsText") == 'Zutaten: Zucker, Kakaomasse, Salz, Weizenmeh' and pg.locator('#readChips .chip.q').count() == 0 and pg.locator('#readChips .chip.fixed').count() == 2,
+       'v2.33: food: both names fixed, no unclear name left (%s)' % pg.evaluate("LC.state.current.p.ingredientsText"))
+    pg.click('#readChips .chip.fixed >> nth=0'); pg.wait_for_timeout(600)
+    ok(pg.evaluate("LC.state.current.p.ingredientsText").startswith('Zutaten: Zuker,') and pg.locator('#readChips .chip.q').count() == 1, 'v2.33: food: tapping a fixed tile puts the read text back')
+    ctx.close(); ctx, pg = new_page(b, base, 'bg-BG')
+    READ = 'Калиум фосфорикум D6\nСъстав:\nВсяка таблетка съдържа:\nKalium phosphoricum (Калиум\nфосфорикум) D6 250 mg\nПомощни вещества:\nлактоза монохидрат,\nпшенично нишесте и др.\nРегистрационен No.: 20100164\nБез лекарско предписание.\nЗа перорална употреба.'
+    main = pg.evaluate("(t) => LC.repairNames(LC.cleanOcr(t))", READ)
+    left = pg.evaluate("([t, m]) => LC.leftOut([{ read: t }], m)", [READ, main])
+    ok(left == ['Регистрационен No.: 20100164 Без лекарско предписание.', 'За перорална употреба.'], 'v2.33: text after the list end is "left out"; list names, headings and the product name are not (%s)' % left)
+    r = pg.evaluate("(t) => { const c = LC.cleanOcr(t); return c; }", 'Състав: лактоза, пшенично нишесте и др Регистрационен номер 123')
+    ok(r == 'Състав: лактоза, пшенично нишесте', 'v2.33: "и др" without the dot still ends the list when a new sentence follows (%s)' % r)
+    read_label(pg, main, 'food')
+    pg.wait_for_selector('#readCard', timeout=20000)
+    pg.evaluate("(l) => { const p = LC.state.current.p; p.readLeft = l; LC.showProduct(p); }", left); pg.wait_for_timeout(500)
+    ok(pg.locator('#readLeft .chip.left').count() == 2 and 'пропуснати: 2' in pg.inner_text('#readCard .rd-legend') and 'Какво прочете приложението' in pg.inner_text('#readCard'),
+       'v2.33: left-out text as grey dashed tiles with +, in Bulgarian (%s)' % pg.inner_text('#readCard').replace('\n', ' | ')[:200])
+    pg.click('#readLeft .chip.left >> nth=1'); pg.wait_for_timeout(600)
+    ok(pg.evaluate("LC.state.current.p.ingredientsText").endswith(', За перорална употреба.') and pg.locator('#readLeft .chip.added').count() == 1, 'v2.33: + adds the text to the list; the tile turns green')
+    pg.click('#readLeft .chip.added'); pg.wait_for_timeout(600)
+    ok('перорална' not in pg.evaluate("LC.state.current.p.ingredientsText") and pg.locator('#readLeft .chip.added').count() == 0, 'v2.33: tapping it again takes it out')
+    ctx.close()
+    for dark, width in ((True, 390), (False, 320)):
+        ctx, pg = new_page(b, base, 'de-DE', dark=dark, width=width)
+        read_label(pg, 'Aqua, Glyxerxn, Lanolxxn, Cetyl Alcohol, Panthenol, Caprylic/Capri erde, Helianthu us sed oil', 'cosmetic')
+        pg.wait_for_selector('#readCard', timeout=20000)
+        ok(no_side_scroll(pg) and pg.inner_text('#readCard .rd-top b') == 'Was die App gelesen hat' and pg.evaluate("() => { const c = document.getElementById('readCard').getBoundingClientRect(); return c.right <= innerWidth + 0.5; }"),
+           'v2.33: %s, %d px wide, German: the card fits, no side scroll' % ('dark' if dark else 'light', width))
+        pg.screenshot(path=os.path.join(SHOTS, 'v233-readcard-%s-%d.png' % ('dark' if dark else 'light', width)), full_page=True)
+        ctx.close()
+    ctx, pg = new_page(b, base, 'en-GB')
     ok(pg.evaluate("() => LC.getRep ? 1 : 0") == 1, 'v2.22: report helper still exported')
     ctx.close(); ctx, pg = new_page(b, base, 'en-GB')
     good = "Aqua, Glycerin, Panthenol, Cetyl Alcohol, Glyceryl Stearate, Dicaprylyl Ether, Isopropyl Myristate, Allantoin, Helianthus Annuus Hybrid Oil, Sodium Cetearyl Sulfate, Caprylyl Glycol, Caprylhydroxamic Acid, Citric Acid, Sodium Hydroxide"
@@ -1227,14 +1279,33 @@ with sync_playwright() as p:
     pg.wait_for_selector('#result:not([hidden]) #answer')
     ok('Tartrazine' in pg.text_content('#result') or 'E102' in pg.text_content('#result'), 'v2.23: Paddle: the answer shows (tartrazine found)')
     res = pg.evaluate("performance.getEntriesByType('resource').map(e => e.name)")
-    ok(any('/ocr-paddle/paddle-worker-3.js' in x for x in res) and not any('/ocr/' in x for x in res), 'v2.23: the Paddle worker was used, no Tesseract file was loaded')
+    ok(any('/ocr-paddle/paddle-worker-4.js' in x for x in res) and not any('/ocr/' in x for x in res), 'v2.23: the Paddle worker was used, no Tesseract file was loaded')
     ok(pg.evaluate("LC.getRep().frames[0].engine") == 'paddle', 'v2.23: the report says which reader was used')
     ctx.close()
     ctx, pg = new_page(bp, base, 'bg-BG')
+    seen = []                                                    # the worker's own requests (not in the page's resource list)
+    ctx.route('**/ocr-paddle/**', lambda r: (seen.append(r.request.url), r.continue_()))
     pg.click('#cardLabel')
     read_photo(pg, lang='auto', file=photo_bg, box=(0.02, 0.44, 0.98, 0.62))
     txt = pg.input_value('#labelText').lower()
     ok('съставки' in txt and 'захар' in txt and 'лецитин' in txt, 'v2.23: Paddle reads a Cyrillic label by itself (no wrong-alphabet read) (%s)' % txt[:80])
+    res = seen
+    ok(any(x.endswith('/ocr-paddle/rec-eslav-5.onnx') for x in res) and any(x.endswith('/ocr-paddle/dict-eslav-5.txt') for x in res) and not any(x.endswith('/rec-eslav.onnx') for x in res),
+       'v2.33: the Cyrillic reader is the new one (rec-eslav-5.onnx + dict-eslav-5.txt)')
+    ctx.close()
+    # v2.33: a Bulgarian label with Latin names in it (like the tablets): no word mixes the two alphabets, "mg" stays "mg"
+    tab = Image.new('RGB', (1300, 560), (246, 247, 250)); dr = ImageDraw.Draw(tab)
+    for i, line in enumerate(['Състав:', 'Всяка таблетка съдържа:', 'Kalium phosphoricum (Калиум', 'фосфорикум) D6 250 mg', 'Помощни вещества:', 'лактоза монохидрат,', 'пшенично нишесте и др.']):
+        dr.text((50, 30 + i * 72), line, fill=(30, 40, 70), font=font(48))
+    photo_tab = os.path.join(SHOTS, 'v233-tablets-bg.jpg'); tab.rotate(-2, expand=True, fillcolor=(246, 247, 250)).save(photo_tab, quality=90)
+    ctx, pg = new_page(bp, base, 'bg-BG')
+    pg.click('#cardLabel')
+    read_photo(pg, lang='auto', file=photo_tab, box=(0.01, 0.01, 0.99, 0.99))
+    txt = pg.input_value('#labelText')
+    import re as _re
+    mixed = [w for w in _re.findall(r'[^\W\d_]+', txt) if _re.search('[а-яА-Я]', w) and _re.search('[a-zA-Z]', w)]
+    ok(not mixed and 'Kalium phosphoricum' in txt and 'Калиум' in txt and '250 mg' in txt and 'пшенично нишесте' in txt,
+       'v2.33: Bulgarian label with Latin names: read without mixed words, "250 mg" kept (mixed: %s) (%s)' % (mixed, txt[:120]))
     ctx.close()
     # ---- v2.31: curved and tilted lines are straightened before reading ----
     print('v2.31: curved lines')
@@ -1255,7 +1326,7 @@ with sync_playwright() as p:
     txt = pg.input_value('#labelText').lower()
     ok(sum(w in txt for w in WORDS) == len(WORDS), 'v2.31: a curved, tilted label: all 10 names read (%d) (%s)' % (sum(w in txt for w in WORDS), txt[:90]))
     b64 = base64.b64encode(open(curved, 'rb').read()).decode()
-    r = pg.evaluate("""async ([b64]) => { const w = new Worker('ocr-paddle/paddle-worker-3.js'), out = {};
+    r = pg.evaluate("""async ([b64]) => { const w = new Worker('ocr-paddle/paddle-worker-4.js'), out = {};
       for (const straight of [false, true]) {
         const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
         const m = await new Promise(res => { w.onmessage = e => { if (!e.data.step) res(e.data); }; w.postMessage({ id: straight ? 2 : 1, image: bin, lang: 'eng', straight }, [bin.buffer]); });
@@ -1442,6 +1513,13 @@ with sync_playwright() as p:
     ok(r == 'Zutaten: Weizenmehl, Zucker, Gewürze (Pfeffer, Senf etc.), Salz', 'v2.32: "etc." inside brackets does not end the list (%s)' % r)
     r = pg.evaluate("(t) => LC.cleanOcr(t)", 'Ingredients: Each tablet contains: Vitamin C 80 mg. Other ingredients: maltodextrin, magnesium stearate, etc. Store in a dry place.')
     ok(r == 'Ingredients: Vitamin C 80 mg., maltodextrin, magnesium stearate', 'v2.32: English: "Each tablet contains:" goes, "Other ingredients:" becomes a comma, "etc." ends the list (%s)' % r)
+    # ---- v2.33: a word with Latin AND Cyrillic letters is a reader mistake; "тд" after a number is "mg" ----
+    print('v2.33: mixed letters')
+    MIX = {'Kaлиym': 'Калиум', 'Eucalyрtus': 'Eucalyptus', 'мaсло': 'масло', 'агeнти': 'агенти', 'тg': 'mg', 'Mentha': 'Mentha', 'захар': 'захар', 'Е330': 'Е330', 'Glycerin': 'Glycerin', 'sрецифичен': 'sрецифичен'}
+    r = pg.evaluate("(ws) => ws.map(w => LC.fixMixed(w))", list(MIX))
+    ok(r == list(MIX.values()), 'v2.33: mixed words take one alphabet; one-alphabet words and unclear ones stay (%s)' % r)
+    r = pg.evaluate("(t) => LC.cleanOcr(t)", 'Съставки: имуноподдържащ комплекс - 90/180 тд, ментово масло - 0,65/1,3 тg, Glycerin 5 мг')
+    ok('90/180 mg' in r and '1,3 mg' in r and '5 мг' in r, 'v2.33: "180 тд" / "1,3 тg" become "mg"; the Bulgarian "мг" stays (%s)' % r)
     ctx.close()
     # A real update: serve a copy of the app, change its sw.js (as a push does), ask the browser to check.
     import shutil, tempfile
@@ -1460,16 +1538,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v50'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v51'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v50' not in keys: break
+        if 'label-check-v51' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v50' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v51' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
     b.close()

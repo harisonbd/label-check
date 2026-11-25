@@ -911,10 +911,32 @@ details.textfold[open] > summary { margin-bottom: 6px; }
 .repopt input { width: 18px; height: 18px; }
 
 .caphint { margin: 4px 2px 0; }
-.tickA { margin: 10px 0 0; background: var(--card); border: 1px solid var(--line); border-left: 5px solid #ffb454; border-radius: 16px; padding: 12px 14px; }
-.tickA .tickhead { font-weight: 700; font-size: 1.05rem; margin: 0 0 6px; color: #ffd199; }
-.tickA .tickrow { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
-.tickA .tickfrom { flex: 1 1 100px; min-width: 100px; color: var(--muted, #9aa3b2); overflow-wrap: anywhere; }
-.tickA .tickarrow { color: var(--muted, #9aa3b2); }
-.tickA .tickbtns { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.tickA .tickbtns .btn { min-height: 44px; padding: 0 14px; width: auto; }
+/* v2.33: "What the app read" card (option B) */
+.readB { --mk: #F2B544; margin: 12px 0 0; background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 14px; display: grid; gap: 10px; }
+.readB.flag { border-color: color-mix(in srgb, var(--mk) 70%, var(--line)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--mk) 35%, transparent) inset; }
+.rd-top { display: flex; align-items: center; gap: 10px; }
+.rd-top b { font-size: 1.12rem; }
+.rd-badge { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--mk); color: #1b1300; font-weight: 800; flex: none; }
+.rd-count { margin-left: auto; color: var(--muted); font-size: .9rem; font-variant-numeric: tabular-nums; }
+.rd-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: .85rem; color: var(--muted); }
+.rd-legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
+.rd-legend .lg-known { --c: var(--green); } .rd-legend .lg-q { --c: var(--mk); } .rd-legend .lg-none { --c: var(--muted); } .rd-legend .lg-left { --c: transparent; } .rd-legend .lg-left::before { border: 1.5px dashed var(--muted); box-sizing: border-box; }
+.rd-lab { margin: 0; color: var(--muted); font-size: .85rem; letter-spacing: .02em; }
+.rd-note { margin: 0; color: var(--muted); font-size: .85rem; }
+.rd-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.readB .chip { --c: var(--green); border: 1px solid color-mix(in srgb, var(--c) 55%, var(--line)); background: color-mix(in srgb, var(--c) 12%, transparent);
+  color: var(--ink); border-radius: 12px; padding: 8px 11px; font: inherit; font-size: .95rem; text-align: left; min-height: 40px; max-width: 100%; overflow-wrap: anywhere; display: inline-block; line-height: 1.35; }
+.readB button.chip { cursor: pointer; }
+.readB .chip.q { --c: var(--mk); font-weight: 700; border-width: 2px; }
+.readB .chip.q::after { content: " ?"; color: var(--mk); white-space: pre; }
+.readB .chip.sel { outline: 3px solid var(--mk); outline-offset: 1px; }
+.readB .chip.fixed::after { content: " ✓"; color: var(--green-ink); white-space: pre; }
+.readB .chip.none { --c: var(--muted); color: var(--muted); background: transparent; }
+.readB .chip-auto { color: var(--muted); font-size: .8em; margin-left: 2px; }
+.readB .chip.left { --c: var(--grey); border-style: dashed; color: var(--muted); }
+.readB .chip.left::before { content: "+ "; color: var(--accent); font-weight: 800; white-space: pre; }
+.readB .chip.left.added { border-style: solid; color: var(--ink); --c: var(--green); }
+.readB .chip.left.added::before { content: "✓ "; color: var(--green-ink); }
+.rd-panel { border-radius: 14px; padding: 12px; background: color-mix(in srgb, var(--mk) 10%, var(--card)); border: 1px solid color-mix(in srgb, var(--mk) 45%, var(--line)); display: grid; gap: 8px; }
+.rd-panel .btn { min-height: 48px; width: 100%; margin: 0; }
+.rd-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }

@@ -885,7 +885,7 @@
     const grey = a.verdict === 'partial' || a.verdict === 'unknown';
     r.replaceChildren(...[
       answerCard(p, a),
-      (p.kind === 'cosmetic' || p.kind === 'household') && known ? tickCard(a) : null,   // v2.26: right under the answer
+      known ? readCard(p, a) : null,   // v2.33: "What the app read", right under the answer (was the v2.26 tick card)
       // v2.14: two doors – more info / photo again – and the next product
       el('div', { class: 'doors' },
         known ? el('button', {
@@ -1877,24 +1877,139 @@
     $('detailBody').replaceChildren(...body.filter(Boolean));
   }
 
-  // v2.22: names the app could not match, with the 3 closest known names. One tap = the right one (saved on this phone, like Teach).
-  function tickCard(a) {
-    const items = [];
-    for (const r of a.rows.filter(isUnknown)) {
-      const no = (taughtFor(r.text) || {}).no;
-      const ch = (r.choices && r.choices.length ? r.choices : LCDB.closest(r.text, 3)).filter(n => n !== no).slice(0, 3);
-      if (ch.length) items.push({ r, ch });
-      if (items.length >= 4) break;
+  // v2.33: "What the app read" (option B, 25 Nov): every name of the list as a tile. Orange "?" = unclear: tap it, then tap
+  // the right name (cosmetics: saved on this phone like Teach; food: the text of this product is changed) or "Keep as read".
+  // Grey dashed = text the app read on the photo but left out of the list: tap + to add it, tap again to take it out.
+  const READ_GUESSES = 2, LEFT_MAX = 6;
+  let readSel = null;                                       // { code, text } of the selected unclear tile
+  const keptKey = r => teachKey(r.text);
+  function isKept(p, r) { return (p.readKept || []).includes(keptKey(r)); }
+  function foodGuesses(r) {
+    if (r.kind !== 'food' || !r.pos || r.additives.length || r.rules.length || r.allergens.length) return null;
+    if (LCDB.knownFood(r.text) || LCDB.knownFood(r.label)) return null;
+    const g = LCDB.closestFood(r.label, READ_GUESSES).map(x => (/^\p{Lu}/u.test(r.label) ? cap(x) : x));
+    return g.length || r.garbled ? g : null;
+  }
+  function readItems(p, a) {
+    return a.rows.filter(r => r.pos).map(r => {
+      const fixed = (p.readFixed || []).find(f => f.to === r.text);
+      if (r.kind === 'food') {
+        const g = fixed || isKept(p, r) ? null : foodGuesses(r);
+        return { r, state: fixed ? 'fixed' : g ? 'q' : r.additives.length || r.rules.length || r.allergens.length || LCDB.knownFood(r.text) || LCDB.knownFood(r.label) ? 'known' : 'none', guesses: g || [], fixed };
+      }
+      if (r.taught && r.taught.to) return { r, state: 'fixed' };
+      if (isUnknown(r)) {
+        if (isKept(p, r)) return { r, state: 'none' };
+        const no = (taughtFor(r.text) || {}).no;
+        const g = (r.choices && r.choices.length ? r.choices : LCDB.guessCosmetic(r.text, READ_GUESSES + 1)).filter(n => n !== no).slice(0, READ_GUESSES);
+        return { r, state: 'q', guesses: g };
+      }
+      return { r, state: r.found || r.fragrance ? 'known' : 'none' };
+    });
+  }
+  function setText(p, text) {
+    const old = p.ingredientsText;
+    p.ingredientsText = text;
+    p.texts = (p.texts || []).map(x => (x === old ? text : x));
+  }
+  function readChanged(p, msg) { saveProduct(p); settingsChanged(); if (msg) toast(msg); }
+  function readFix(p, it, to) {
+    if (it.r.kind !== 'food') { teach(it.r.text, to); return; }
+    const txt = p.ingredientsText || '', i = txt.indexOf(it.r.text);
+    if (i < 0) return;
+    setText(p, txt.slice(0, i) + to + txt.slice(i + it.r.text.length));
+    p.readFixed = (p.readFixed || []).concat({ from: it.r.text, to });
+    readChanged(p, t('toast.taught', { from: cleanSeg(it.r.text), to }));
+  }
+  function readUnfix(p, it) {
+    if (it.r.kind !== 'food') { untaught(it.r.text); return; }
+    const f = it.fixed, txt = p.ingredientsText || '', i = txt.indexOf(f.to);
+    if (i >= 0) setText(p, txt.slice(0, i) + f.from + txt.slice(i + f.to.length));
+    p.readFixed = (p.readFixed || []).filter(x => x !== f);
+    readSel = { code: p.code, text: f.from };
+    readChanged(p);
+  }
+  function readKeep(p, it) {
+    p.readKept = (p.readKept || []).concat(keptKey(it.r));
+    readSel = null;
+    readChanged(p, t('read.keptToast', { name: cleanSeg(it.r.text) }));
+  }
+  function readAdd(p, piece) {
+    const on = (p.readAdded || []).includes(piece), txt = p.ingredientsText || '';
+    if (on) {
+      const i = txt.lastIndexOf(', ' + piece);
+      setText(p, i >= 0 ? txt.slice(0, i) + txt.slice(i + 2 + piece.length) : txt);
+      p.readAdded = p.readAdded.filter(x => x !== piece);
+    } else {
+      setText(p, txt.replace(/[\s.,;]+$/, '') + ', ' + piece);
+      p.readAdded = (p.readAdded || []).concat(piece);
     }
+    readChanged(p, t(on ? 'read.removedToast' : 'read.addedToast', { text: piece.length > 40 ? piece.slice(0, 38) + '…' : piece }));
+  }
+  function readCard(p, a) {
+    const items = readItems(p, a);
     if (!items.length) return null;
-    return el('div', { class: 'tickA', id: 'tickCard' },
-      el('div', { class: 'tickhead', id: 'tickHead', text: items.length === 1 ? t('tick.title1') : t('tick.titleN', { n: items.length }) }),
-      ...items.map((it, i) => el('div', { class: 'tickrow', id: 'tick' + i },
-        el('span', { class: 'tickfrom' }, el('em', { text: cleanSeg(it.r.text) })),
-        el('span', { class: 'tickarrow', 'aria-hidden': 'true', text: '→' }),
-        el('div', { class: 'tickbtns' },
-          ...it.ch.map((n, k) => el('button', { class: 'btn ' + (k === 0 ? 'btn-primary' : 'btn-ghost'), type: 'button', id: 'tick' + i + 'c' + k, text: niceName(n), onclick: () => teach(it.r.text, n) })),
-          el('button', { class: 'btn btn-ghost', type: 'button', id: 'tick' + i + 'x', text: t('tick.other'), onclick: () => openPicker(it.r) })))));
+    const q = items.filter(x => x.state === 'q');
+    const left = (p.readLeft || []).slice(0, LEFT_MAX).concat((p.readAdded || []).filter(x => !(p.readLeft || []).slice(0, LEFT_MAX).includes(x)));
+    if (p.source !== 'label' && !q.length) return null;
+    const n = k => items.filter(x => x.state === k).length;
+    let sel = readSel && readSel.code === p.code ? q.find(x => x.r.text === readSel.text) : null;
+    if (!sel) sel = q.find(x => x.guesses.length) || q[0] || null;
+    readSel = sel ? { code: p.code, text: sel.r.text } : null;
+    const known = n('known') + n('fixed'), none = n('none');
+    const legend = el('div', { class: 'rd-legend' },
+      el('span', { class: 'lg-known', text: t('read.known', { n: known }) }),
+      q.length ? el('span', { class: 'lg-q', text: t('read.unclear', { n: q.length }) }) : null,
+      none ? el('span', { class: 'lg-none', text: t('read.none', { n: none }) }) : null,
+      left.length ? el('span', { class: 'lg-left', text: t('read.left', { n: left.length }) }) : null);
+    const chip = it => {
+      const r = it.r, label = it.state === 'q' || it.state === 'none' ? cleanSeg(r.text) : it.state === 'fixed' && it.fixed ? cleanSeg(it.fixed.to) : (r.label || cleanSeg(r.text));
+      const cls = 'chip' + (it.state === 'q' ? ' q' : it.state === 'fixed' ? ' fixed' : it.state === 'none' ? ' none' : '') + (it === sel ? ' sel' : '');
+      const kids = [label, r.auto ? el('small', { class: 'chip-auto', text: ' ·' + t('read.auto') }) : null];
+      if (it.state === 'q') return el('button', { class: cls, type: 'button', 'aria-pressed': String(it === sel), onclick: () => { readSel = { code: p.code, text: r.text }; renderResult(p); } }, ...kids);
+      if (it.state === 'fixed') return el('button', { class: cls, type: 'button', title: t('read.undoFix'), onclick: () => readUnfix(p, it) }, ...kids);
+      return el('span', { class: cls }, ...kids);
+    };
+    const panel = sel ? el('div', { class: 'rd-panel', id: 'readPanel' },
+      el('p', { class: 'rd-lab', text: t(sel.guesses.length ? 'read.didYou' : 'read.noGuess', { read: cleanSeg(sel.r.text) }) }),
+      ...sel.guesses.map((g, k) => el('button', { class: 'btn ' + (k ? 'btn-ghost' : 'btn-primary'), type: 'button', id: 'readGuess' + k, text: sel.r.kind === 'food' ? g : niceName(g), onclick: () => readFix(p, sel, g) })),
+      el('div', { class: 'rd-two' },
+        sel.r.kind !== 'food' ? el('button', { class: 'btn btn-ghost', type: 'button', id: 'readSearch', text: t('read.search'), onclick: () => openPicker(sel.r) }) : null,
+        el('button', { class: 'btn btn-ghost', type: 'button', id: 'readKeep', text: t('read.keep'), onclick: () => readKeep(p, sel) })))
+      : null;
+    return el('div', { class: 'readB' + (q.length ? ' flag' : ''), id: 'readCard' },
+      el('div', { class: 'rd-top' }, el('span', { class: 'rd-badge', text: q.length ? String(q.length) : '✓' }), el('b', { text: t('read.title') }),
+        el('span', { class: 'rd-count', text: t(items.length === 1 ? 'read.names1' : 'read.namesN', { n: items.length }) })),
+      legend,
+      panel || (n('fixed') || (p.readKept || []).length ? el('p', { class: 'rd-note', text: t('read.allDone') }) : null),
+      el('div', { class: 'rd-chips', id: 'readChips' }, ...items.map(chip)),
+      left.length ? el('p', { class: 'rd-lab', text: t('read.leftLab') }) : null,
+      left.length ? el('div', { class: 'rd-chips', id: 'readLeft' }, ...left.map(piece => el('button', {
+        class: 'chip left' + ((p.readAdded || []).includes(piece) ? ' added' : ''), type: 'button', 'aria-pressed': String((p.readAdded || []).includes(piece)), onclick: () => readAdd(p, piece) }, piece))) : null);
+  }
+  // v2.33: text the app read on the photos but did not take into the list: sentences after the list, pieces dropped as
+  // running text. Not: text before the heading (product name), numbers, other-language lists (long pieces).
+  function leftOut(frames, main) {
+    const words = x => nrm(x).split(' ').filter(w => w.replace(/[0-9]/g, '').length >= 3);
+    const have = new Set(words(main)), out = [];
+    const strip = x => x.replace(new RegExp(HEAD_RE.source, 'giu'), ' ').replace(DOSE_HEAD, ' ').replace(LIST_END, ' ');
+    const covered = x => { const w = words(strip(x)); return !w.length || w.filter(v => have.has(v)).length >= 0.6 * w.length; };
+    const add = x => {
+      x = x.replace(/\s+/g, ' ').replace(/^[\s,;:.\-–]+|[\s,;:\-–]+$/g, '').trim();
+      if (x.replace(/[^\p{L}]/gu, '').length < 3 || x.length > 140 || covered(x)) return;
+      if (!out.some(o => nrm(o) === nrm(x))) out.push(x);
+    };
+    for (const f of frames || []) {
+      let s = LCDB.splitGlued(String(f.read || '').replace(/(\p{L})-\s*\n\s*(\p{Ll})/gu, '$1$2').replace(/\s*\n\s*/g, ' '));
+      const h = s.search(new RegExp(HEAD_RE.source, 'iu'));
+      if (h > 0) s = s.slice(h);
+      s = s.replace(LIST_END_NODOT, m => m + '\n');                 // "и др Регистрационен…": the list ends there
+      for (const sent of s.split(/(?<=[.!?])\s+(?=\S)|\s*\n\s*/)) {
+        if (covered(sent)) { for (const piece of sent.split(/[,;]\s*/)) add(piece); }
+        else add(sent);
+      }
+    }
+    return out.slice(0, LEFT_MAX);
   }
 
   // ---------- Teach the app (v2.12): "GLYCERN is Glycerin", saved on this phone for all products ----------
@@ -2905,7 +3020,7 @@
   let paddleWorker = null, paddleDead = false;
   const paddleOK = () => store.get('ocrEngine', 'paddle') !== 'tess' && !paddleDead && typeof OffscreenCanvas !== 'undefined' && typeof WebAssembly === 'object';
   function workerRun(kind, image, lang, opts) {
-    const url = kind === 'paddle' ? 'ocr-paddle/paddle-worker-3.js' : 'ocr/ocr-worker-2.js';
+    const url = kind === 'paddle' ? 'ocr-paddle/paddle-worker-4.js' : 'ocr/ocr-worker-2.js';
     let w = kind === 'paddle' ? paddleWorker : ocrWorker;
     if (!w) {
       w = new Worker(url);
@@ -2928,7 +3043,30 @@
       w.postMessage({ id, image, lang, psm: opts.psm, layout: !!opts.layout, maxside: opts.maxside, script: opts.script }, [image.buffer]);
     });
   }
+  // v2.33: one word with Latin AND Cyrillic letters is a reader mistake ("Kaлиym", "Eucalyрtus", "мaсло"). The letters that
+  // exist in only one alphabet decide (л, ф, ц ... or g, l, s, t ...); the look-alikes (a/а, e/е, p/р, y/у ...) take that alphabet.
+  const L2C = { a: 'а', c: 'с', e: 'е', o: 'о', p: 'р', x: 'х', y: 'у', k: 'к', m: 'м', A: 'А', B: 'В', C: 'С', E: 'Е', H: 'Н', K: 'К', M: 'М', O: 'О', P: 'Р', T: 'Т', X: 'Х', Y: 'У' };
+  const C2L = { 'а': 'a', 'с': 'c', 'е': 'e', 'о': 'o', 'р': 'p', 'х': 'x', 'у': 'y', 'к': 'k', 'т': 'm', 'м': 'm', 'п': 'n', 'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E', 'Н': 'H', 'К': 'K', 'М': 'M', 'О': 'O', 'Р': 'P', 'Т': 'T', 'Х': 'X', 'У': 'Y' };
+  const IS_CYR = /\p{Script=Cyrillic}/u, IS_LAT = /\p{Script=Latin}/u;
+  function fixWord(w) {
+    if (!IS_CYR.test(w) || !IS_LAT.test(w)) return w;
+    let cyr = 0, lat = 0, nc = 0, nl = 0;
+    for (const ch of w) {
+      if (IS_CYR.test(ch)) { nc++; if (!C2L[ch]) cyr++; } else if (IS_LAT.test(ch)) { nl++; if (!L2C[ch]) lat++; }
+    }
+    const to = map => [...w].map(ch => map[ch] || ch).join('');
+    if ((cyr && !lat) || (cyr >= 2 && cyr >= 2 * lat)) return to(L2C);
+    if ((lat && !cyr) || (lat >= 2 && lat >= 2 * cyr)) return to(C2L);
+    if (!cyr && !lat) return nc > nl ? to(L2C) : nl > nc ? to(C2L) : w;
+    return w;
+  }
+  const fixMixed = s => String(s || '').replace(/[\p{L}\p{M}]+/gu, fixWord);
   async function ocrRun(image, lang, opts) {
+    const m = await ocrRead(image, lang, opts);
+    m.text = fixMixed(m.text); if (m.tsv) m.tsv = fixMixed(m.tsv);
+    return m;
+  }
+  async function ocrRead(image, lang, opts) {
     opts = opts || {};
     if (paddleOK()) {
       try {
@@ -3034,13 +3172,14 @@
   // "… пшенично нишесте и др." / "… etc.": the list ends there, what follows is other text ("Регистрационен No …").
   // Only outside brackets ("Gewürze (Pfeffer, Senf etc.), Salz" goes on).
   const LIST_END = /(?<!\p{L})(?:и\s+др|и\s+други|etc|usw|and\s+others|und\s+andere)\s*\./giu;
+  const LIST_END_NODOT = /(?<!\p{L})[иИ]\s+(?:др|ДР)(?=\s+\p{Lu})/gu;   // v2.33: "и др Регистрационен…": the reader lost the dot, a new sentence follows
   function finishList(s) {
     const st = (s.match(HEAD_RE) || [''])[0], body = s.slice(s.indexOf(st) + st.length);
     if (!st) return s;
     let b = body.replace(DOSE_HEAD, '');
     // a second heading of the same language inside the list ("Помощни вещества:") starts the next names: a comma
     b = b.replace(new RegExp('(?:(?<!\\p{L})(?:other|inactive|further|weitere|sonstige|andere|други)\\s+)?' + HEAD_RE.source, 'giu'), ', ').replace(/^\s*,\s*/, '').replace(/\s*,\s*,\s*/g, ', ').replace(/\s+,\s*/g, ', ');
-    for (const m of b.matchAll(LIST_END)) {
+    for (const m of [...b.matchAll(LIST_END), ...b.matchAll(LIST_END_NODOT)].sort((x, y) => x.index - y.index)) {
       const before = b.slice(0, m.index);
       if ((before.match(/[(\[]/g) || []).length > (before.match(/[)\]]/g) || []).length) continue;
       b = before.replace(/[\s,;]+$/, ''); break;
@@ -3049,6 +3188,8 @@
   }
   function cleanOcr(text) {
     let s = String(text || '').replace(/[­]/g, '').replace(/(\p{L})-\s*\n\s*(\p{Ll})/gu, '$1$2');
+    s = s.replace(/(\d\s?)(?:[тm][дg]|мд)(?!\p{L})/gu, '$1mg');   // v2.33: the reader reads "mg" as "тд" / "тg" after a number
+    s = LCDB.splitGlued(s);   // v2.33: "лактозамонохидрат" -> "лактоза монохидрат" (Cyrillic words the reader glued together)
     // Lists with dots between the names ("AQUA · GLYCERIN"): the reader turns the dots into - : » ° and so on.
     // When there are almost no commas but many such marks between words, they become commas (also at line ends).
     const sepMode = (s.match(/,/g) || []).length < 3 && (s.match(new RegExp('\\s' + SEP + '\\s', 'g')) || []).length >= 3;
@@ -3215,6 +3356,7 @@
       image: (base && base.image) || '',
       ingredientsText: main,
       read: ocrFile && lastRead ? lastRead : undefined,   // v2.13: how the text was read (photo, list heading found)
+      readLeft: ocrFile && rep && rep.frames && rep.frames.length ? leftOut(rep.frames, main) : undefined,   // v2.33: text left out of the list
       texts: [main, extra].filter(Boolean),
       tags: [],
       allergens: [],
@@ -3810,8 +3952,8 @@
   // ---------- Label reader without internet (all 7 languages on the phone) ----------
   const OCR_MB = { eng: 2.0, deu: 0.9, bul: 0.8, hun: 2.4, ces: 1.7, slk: 1.9, slv: 1.2 };
   const hasSimd = () => { try { return WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11])); } catch (e) { return false; } };
-  const PADDLE_FILES = ['paddle-worker-3.js', 'ort.wasm.min.js', 'ort-wasm-simd-threaded.mjs', 'ort-wasm-simd-threaded.wasm', 'det.onnx', 'rec-latin.onnx', 'rec-eslav.onnx', 'dict-latin.txt', 'dict-eslav.txt'].map(f => 'ocr-paddle/' + f);
-  const PADDLE_MB = { 'ort-wasm-simd-threaded.wasm': 11.2, 'det.onnx': 2.4, 'rec-latin.onnx': 7.9, 'rec-eslav.onnx': 7.9, 'ort.wasm.min.js': 0.05 };
+  const PADDLE_FILES = ['paddle-worker-4.js', 'ort.wasm.min.js', 'ort-wasm-simd-threaded.mjs', 'ort-wasm-simd-threaded.wasm', 'det.onnx', 'rec-latin.onnx', 'rec-eslav-5.onnx', 'dict-latin.txt', 'dict-eslav-5.txt'].map(f => 'ocr-paddle/' + f);
+  const PADDLE_MB = { 'ort-wasm-simd-threaded.wasm': 11.2, 'det.onnx': 2.4, 'rec-latin.onnx': 7.9, 'rec-eslav-5.onnx': 8.1, 'ort.wasm.min.js': 0.05 };
   const ocrCore = () => { const c = hasSimd() ? 'tesseract-core-simd-lstm' : 'tesseract-core-lstm'; return ['ocr/ocr-worker-2.js', 'ocr/' + c + '.js', 'ocr/' + c + '.wasm']; };
   async function offlineMissing() {
     if (!('caches' in window)) return null;
@@ -3877,7 +4019,7 @@
 
   // Small test hook (used only by automated checks).
   window.LC = { analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
-    buildReport, tsvPieces, listPieces, getRep: () => rep, repairNames, garbledName, isSupplementText, cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, nameIdent, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart, sameCatSaved, suggestAlternatives, catScore, altCache, altTimes };
+    buildReport, tsvPieces, listPieces, getRep: () => rep, repairNames, fixMixed, leftOut, garbledName, isSupplementText, cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, nameIdent, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart, sameCatSaved, suggestAlternatives, catScore, altCache, altTimes };
 
   init();
 })();

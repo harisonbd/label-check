@@ -426,6 +426,133 @@
     return [...best.entries()].sort((a, b) => a[1] - b[1] || a[0].length - b[0].length).slice(0, n || 3).map(x => x[0]);
   }
 
+  // v2.33: two Cyrillic words the reader glued together ("лактозамонохидрат" -> "лактоза монохидрат"): split only when the
+  // word is not a known word and both parts are known words of the food names (4+ letters each). Not for Latin letters:
+  // German joins words on purpose (Weizenmehl).
+  let cyrWords = null;
+  function splitGlued(text) {
+    if (!FOODNAMES) return String(text || '');
+    if (!cyrWords) { cyrWords = new Set(); for (const n of FOODNAMES) for (const w of n.split(' ')) if (w.length >= 4 && /^[а-я]+$/.test(w)) cyrWords.add(w); }
+    return String(text || '').replace(/[а-яА-Я]{8,}/g, w => {
+      const k = w.toLowerCase();
+      if (cyrWords.has(k)) return w;
+      for (let i = k.length - 4; i >= 4; i--) if (cyrWords.has(k.slice(0, i)) && cyrWords.has(k.slice(i))) return w.slice(0, i) + ' ' + w.slice(i);
+      return w;
+    });
+  }
+  // v2.33: names the reader broke into pieces: a word cut short, a word lost in the middle ("Helianthu us sed oil" ->
+  // HELIANTHUS ANNUUS SEED OIL, "Caprylic/Capri erde" -> CAPRYLIC/CAPRIC TRIGLYCERIDE). Word by word: the first word must fit
+  // well, every read word must fit a later word of the name (the same, 1-2 letters wrong, its start or its end), at most
+  // one word of the name may be missing. When two names fit the same, the common one comes first (COMMON_INCI).
+  const COMMON_INCI = ('aqua|glycerin|cetearyl alcohol|glyceryl stearate|glyceryl stearate se|cetyl alcohol|stearyl alcohol|stearic acid|dimethicone|' +
+    'cyclopentasiloxane|caprylic/capric triglyceride|paraffinum liquidum|petrolatum|isopropyl myristate|isopropyl palmitate|butylene glycol|' +
+    'propylene glycol|pentylene glycol|caprylyl glycol|phenoxyethanol|ethylhexylglycerin|sodium benzoate|potassium sorbate|benzyl alcohol|' +
+    'dehydroacetic acid|sodium hydroxide|citric acid|lactic acid|sodium chloride|sodium citrate|disodium edta|tetrasodium edta|' +
+    'tetrasodium glutamate diacetate|carbomer|xanthan gum|sodium polyacrylate|acrylates/c10-30 alkyl acrylate crosspolymer|' +
+    'ammonium acryloyldimethyltaurate/vp copolymer|hydroxyethylcellulose|tocopherol|tocopheryl acetate|panthenol|allantoin|niacinamide|' +
+    'sodium hyaluronate|hyaluronic acid|urea|bisabolol|aloe barbadensis leaf juice|butyrospermum parkii butter|cocos nucifera oil|' +
+    'helianthus annuus seed oil|prunus amygdalus dulcis oil|simmondsia chinensis seed oil|olea europaea fruit oil|argania spinosa kernel oil|' +
+    'ricinus communis seed oil|glycine soja oil|persea gratissima oil|theobroma cacao seed butter|cera alba|lanolin|squalane|triethanolamine|' +
+    'peg-100 stearate|peg-40 hydrogenated castor oil|peg-7 glyceryl cocoate|polysorbate 20|polysorbate 60|polysorbate 80|sorbitan stearate|' +
+    'sorbitan olivate|cetearyl olivate|ceteareth-20|steareth-2|steareth-21|glyceryl oleate|glycol distearate|glycol stearate|' +
+    'sodium laureth sulfate|sodium lauryl sulfate|cocamidopropyl betaine|coco-glucoside|decyl glucoside|lauryl glucoside|' +
+    'sodium cocoyl isethionate|disodium laureth sulfosuccinate|sodium lauroyl sarcosinate|cocamide mea|cocamide dea|' +
+    'peg-120 methyl glucose dioleate|polyquaternium-10|polyquaternium-7|guar hydroxypropyltrimonium chloride|behentrimonium chloride|' +
+    'cetrimonium chloride|amodimethicone|dimethiconol|parfum|limonene|linalool|citronellol|geraniol|coumarin|hexyl cinnamal|' +
+    'alpha-isomethyl ionone|benzyl salicylate|benzyl benzoate|citral|eugenol|butylphenyl methylpropional|hydroxycitronellal|isoeugenol|' +
+    'cinnamal|farnesol|amyl cinnamal|titanium dioxide|zinc oxide|ci 77891|ci 77491|ci 77492|ci 77499|mica|silica|talc|kaolin|' +
+    'magnesium stearate|zinc stearate|ethylhexyl methoxycinnamate|butyl methoxydibenzoylmethane|octocrylene|ethylhexyl salicylate|homosalate|' +
+    'bis-ethylhexyloxyphenol methoxyphenyl triazine|diethylamino hydroxybenzoyl hexyl benzoate|ethylhexyl triazone|methylparaben|' +
+    'propylparaben|ethylparaben|methylisothiazolinone|methylchloroisothiazolinone|chlorphenesin|sodium pca|betaine|sorbitol|trehalose|' +
+    'maltodextrin|hydrolyzed wheat protein|hydrolyzed collagen|retinyl palmitate|ascorbic acid|sodium ascorbyl phosphate|ascorbyl palmitate|' +
+    'ceramide np|cholesterol|phytosphingosine|sodium lauroyl lactylate|lecithin|hydrogenated lecithin|caprylyl/capryl glucoside|isohexadecane|' +
+    'isononyl isononanoate|dicaprylyl carbonate|dicaprylyl ether|coco-caprylate/caprate|octyldodecanol|c12-15 alkyl benzoate|' +
+    'hydrogenated polyisobutene|cyclohexasiloxane|dimethicone crosspolymer|polymethyl methacrylate|nylon-12|aluminum starch octenylsuccinate|' +
+    'tapioca starch|zea mays starch|sodium gluconate|sodium phytate|trisodium ethylenediamine disuccinate|pentasodium pentetate|' +
+    'aminomethyl propanol|stearamide amp|triolein|hydroxystearic acid|palmitic acid|myristic acid|lauric acid|behenyl alcohol|' +
+    'myristyl alcohol|glyceryl caprylate|glyceryl laurate|polyglyceryl-3 diisostearate|sucrose stearate|arachidyl alcohol|' +
+    'arachidyl glucoside|cetyl palmitate|hydrogenated castor oil|candelilla cera|copernicia cerifera cera|ozokerite|paraffin|menthol|' +
+    'camphor|salicylic acid|glycolic acid|sodium lactate|potassium hydroxide|ammonium lauryl sulfate|sodium myreth sulfate|' +
+    'sodium c14-16 olefin sulfonate|lauryl betaine|sodium cocoamphoacetate|disodium cocoamphodiacetate|glyceryl glucoside|propanediol|' +
+    'hexylene glycol|dipropylene glycol|1,2-hexanediol|alcohol denat|alcohol|isopropyl alcohol|caprylyl glycol|stearyl alcohol').split('|');
+  let byFirst = null, commonKeys = null;
+  const words = s => norm(s).split(' ').filter(Boolean);
+  function ensureFirst() {
+    if (byFirst) return;
+    byFirst = new Map(); commonKeys = new Map(COMMON_INCI.map((x, i) => [key(x), COMMON_INCI.length - i]));   // earlier in the list = more common
+    for (const it of COS.items) {
+      if ((it[3] || '').includes('o')) continue;          // old names are no guess
+      const w = words(it[0]);
+      if (w.length < 2 || w[0].length < 3) continue;
+      const p = w[0].slice(0, 3);
+      if (!byFirst.has(p)) byFirst.set(p, []);
+      byFirst.get(p).push([w, it[0]]);
+    }
+  }
+  function wordFit(r, t) {
+    if (r === t) return 1;
+    const m = t.length <= 5 ? 1 : Math.max(1, Math.floor(t.length * 0.25));
+    if (r.length >= 3 && lev(r, t, m) <= m) return 0.9;
+    if (r.length >= 3 && t.startsWith(r)) return 0.8;
+    if (r.length >= 2 && t.length > r.length && t.endsWith(r)) return r.length >= 3 ? 0.7 : 0.5;
+    if (r.length >= 4 && t.length > r.length + 1 && Math.min(lev(r, t.slice(-r.length), 1), lev(r, t.slice(-r.length - 1), 1)) <= 1) return 0.6;
+    return 0;
+  }
+  function wordGuess(seg, n) {
+    if (!cosIndex) return [];
+    const from = String(seg || '').replace(/\s*[\[(].*$/, '').replace(/[\s*°¹²³†‡.:]+$/, '').replace(/^[\s*°.:\-–]+/, '');
+    const k = key(from), r = words(from.replace(/[0158]/g, c => OCR_DIGIT[c]));
+    if (r.length < 2 || r.length > 8 || k.length < 6 || /[а-я]/.test(k) || cosIndex.has(k) || r[0].length < 3) return [];
+    ensureFirst();
+    const hits = [];
+    for (const [w, name] of byFirst.get(r[0].slice(0, 3)) || []) {
+      if (w.length < r.length || w.length > r.length + 1) continue;
+      const f0 = wordFit(r[0], w[0]);
+      if (f0 < 0.8) continue;
+      let sum = f0, j = 1, ok = true;
+      for (let i = 1; i < r.length && ok; i++) {
+        let best = 0, bj = -1;
+        for (let jj = j; jj <= Math.min(w.length - 1, j + (w.length - r.length)); jj++) { const f = wordFit(r[i], w[jj]); if (f > best) { best = f; bj = jj; } }
+        if (!best) ok = false; else { sum += best; j = bj + 1; }
+      }
+      if (!ok || r.join('').length < 0.4 * w.join('').length) continue;
+      hits.push({ name, score: sum / w.length, common: commonKeys.get(key(name)) || 0 });
+    }
+    hits.sort((a, b) => b.score - a.score || b.common - a.common || a.name.length - b.name.length);
+    return hits.filter(h => h.score >= 0.6).slice(0, n || 3).map(h => h.name);
+  }
+  // v2.33: the best guesses for an unclear cosmetic name: close spelling first (closest), then the word-by-word fit.
+  // Among equally close spellings the common name comes first.
+  function guessCosmetic(seg, n) {
+    n = n || 3;
+    let a = closest(seg, 6);
+    if (a.length > 1) { ensureFirst(); const i = a.findIndex(x => commonKeys.has(key(x))); if (i > 0) a = [a[i]].concat(a.filter((x, j) => j !== i)); }
+    const out = [];
+    for (const x of a.concat(wordGuess(seg, n))) if (!out.includes(x)) out.push(x);
+    return out.slice(0, n);
+  }
+  // v2.33: a food name the app does not know: the closest food names (Open Food Facts names, any language). [] when nothing is close.
+  let foodByLen = null;
+  function closestFood(seg, n) {
+    if (!FOODNAMES) return [];
+    const base = norm(String(seg || '').replace(/\([^)]*\)|\[[^\]]*\]/g, ' ').replace(/\d+[.,]?\d*\s*%/g, ' '));
+    if (base.length < 5 || FOODNAMES.has(base) || /\d/.test(base)) return [];
+    if (!foodByLen) {
+      foodByLen = new Map();
+      for (const f of FOODNAMES) { if (f.length < 4 || /\d/.test(f)) continue; if (!foodByLen.has(f.length)) foodByLen.set(f.length, []); foodByLen.get(f.length).push(f); }
+    }
+    const max = base.length <= 7 ? 1 : Math.max(2, Math.floor(base.length * 0.2));
+    const best = [];
+    for (let len = base.length - max; len <= base.length + max; len++) {
+      for (const f of foodByLen.get(len) || []) {
+        if (f[0] !== base[0]) continue;
+        const d = lev(base, f, max);
+        if (d <= max) best.push([f, d]);
+      }
+    }
+    return best.sort((a, b) => a[1] - b[1] || a[0].length - b[0].length).slice(0, n || 3).map(x => x[0]);
+  }
+
   // v2.25: known names that stand inside running text ("... Gefahr. SODIUM C14-16 OLEFIN SULFONATE. Enthält MENTHA ARVENSIS LEAF OIL. ..."),
   // exact matches only. Long names (12+ letters) count alone; a regulated allergen (Menthol, Limonene) counts from 6 letters.
   function findNames(seg) {
@@ -540,6 +667,6 @@
     return out;
   }
 
-  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, suggestCosmetic, closest, findInside, findNames, checkFood, knownFood, cosAllergens, foodAllergens, search, foodToCosmetic, meta: () => META, SEV };
+  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, suggestCosmetic, closest, wordGuess, guessCosmetic, closestFood, splitGlued, findInside, findNames, checkFood, knownFood, cosAllergens, foodAllergens, search, foodToCosmetic, meta: () => META, SEV };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.LCDB = api;
 })(typeof window !== 'undefined' ? window : globalThis);
