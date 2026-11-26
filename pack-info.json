@@ -1,0 +1,21 @@
+{
+ "v": 1,
+ "date": "2026-11-26",
+ "source": "Open Food Facts and Open Beauty Facts, Open Database License (ODbL) 1.0",
+ "parts": {
+  "main": {
+   "file": "pack-main.ndjson.gz",
+   "bytes": 4662916,
+   "n": 92629,
+   "ni": 27534,
+   "cosmetic": 539
+  },
+  "de": {
+   "file": "pack-de.ndjson.gz",
+   "bytes": 13204479,
+   "n": 130035,
+   "ni": 130035,
+   "cosmetic": 2543
+  }
+ }
+}
