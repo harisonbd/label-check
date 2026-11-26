@@ -154,6 +154,14 @@ def reload_ready(pg):
             pg.wait_for_timeout(500)
     raise RuntimeError('page did not load')
 
+def open_card(pg, cid):
+    # v2.36: My list topics are cards; open one as the user does (tap its title)
+    if not pg.eval_on_selector('#' + cid, 'd => d.open'): pg.click('#%s > summary' % cid); pg.wait_for_timeout(100)
+
+def kb_close(pg):
+    # v2.36: the Save bar hides while the keyboard is open; close the keyboard as the user does
+    pg.evaluate("document.activeElement && document.activeElement.blur()"); pg.wait_for_timeout(350)
+
 def counts(pg):
     return pg.evaluate('(c => [c.red, c.orange, c.info, c.green])(LC.state.current.a.counts)')
 
@@ -242,7 +250,7 @@ with sync_playwright() as p:
     ok('Instead: Shower gel' not in pg.inner_text('#answer'), '"Instead" only lists products of the same type (food)')
     pg.click('.tabbar button[data-go=list]')
     ok(not pg.eval_on_selector('#foodAlgBox', 'd => d.open') and not pg.eval_on_selector('#moreFold', 'd => d.open'), 'My list: allergens and "More" start folded')
-    pg.click('#foodAlgBox summary')
+    open_card(pg, 'algCard'); pg.click('#foodAlgBox summary')
     pg.click('#foodAlgList label:has-text("Mustard") input')
     pg.click('#moreFold summary')
     pg.click('#veganSwitch')
@@ -529,7 +537,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.35' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.36' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -880,7 +888,8 @@ with sync_playwright() as p:
     pg.evaluate("document.getElementById('taughtBox').scrollIntoView({block: 'center'})"); pg.screenshot(path=os.path.join(SHOTS, 'v212-mylist-bg.png'))
     for k in range(3): pg.locator('#taughtList .taughtrow .x').first.click(); pg.wait_for_timeout(150)
     ok(pg.inner_text('#taughtCount') == '(0)' and 'Още няма' in pg.inner_text('#taughtList') and pg.evaluate("localStorage.getItem('lc.taught')") == '{}', '✕ deletes them; empty text')
-    ok(pg.is_visible('#vibSwitch') or pg.is_visible('#vibRow'), 'v2.13: "Вибрация при резултат" switch in My list')
+    open_card(pg, 'setCard')
+    ok(pg.is_visible('#vibSwitch') or pg.is_visible('#vibRow'), 'v2.13: "Вибрация при резултат" switch in My list (card Settings)')
     ok(no_side_scroll(pg), 'My list: no sideways scroll')
     for tab in ['list', 'history']:   # bug found 21 Oct: 🔍 on My list / History showed nothing
         pg.click('.tabbar button[data-go=%s]' % tab); pg.wait_for_timeout(200); pg.click('#topSearch'); pg.wait_for_timeout(300)
@@ -907,7 +916,7 @@ with sync_playwright() as p:
     n = len(pg.evaluate('window.__buzz')); pg.locator('#historyList li .open').first.click(); pg.wait_for_selector('#result:not([hidden]) #answer')
     ok(len(pg.evaluate('window.__buzz')) == n, 'opening a saved product from History: no vibration')
     pg.screenshot(path=os.path.join(SHOTS, 'v213-history-bg.png'))
-    pg.click('.tabbar button[data-go=list]'); pg.click('#vibSwitch')
+    pg.click('.tabbar button[data-go=list]'); open_card(pg, 'setCard'); pg.click('#vibSwitch')
     ok(pg.evaluate("localStorage.getItem('lc.vibrate')") == 'false', 'vibration switch off is saved')
     # safety: a photo read without the list heading is never green
     v = pg.evaluate("[LC.analyze({kind:'food', ingredientsText:'Zucker, Salz, Hafer, Wasser', read:{photo:true, list:false}}).verdict, LC.analyze({kind:'food', ingredientsText:'Zucker, Salz, Hafer, Wasser', read:{photo:true, list:true}}).verdict, LC.analyze({kind:'food', ingredientsText:'Zucker, Salz, Hafer, Wasser'}).verdict]")
@@ -921,8 +930,8 @@ with sync_playwright() as p:
     pg.click('.tabbar button[data-go=scan]')
     if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
     pg.click('#cardLabel')
-    ok(pg.inner_text('#photoTip') == 'Снимай отблизо, само списъка със съставки.' and pg.is_visible('#textFold') and not pg.eval_on_selector('#textFold', 'd => d.open'),
-       'Read a label: close-up tip under the photo cards; the text part is a folded row (paste)')
+    ok(pg.inner_text('#photoTip') == 'отблизо, само съставките' and pg.is_visible('#photoTip') and pg.is_visible('#textFold') and not pg.eval_on_selector('#textFold', 'd => d.open'),
+       'Read a label: close-up tip inside the Снимай card (v2.36); the text part is a folded row (paste)')
     ctx.close()
     # EN and DE, light, 320 px
     for loc, lang, nd, pick in [('en-GB', 'en', 'No data', 'Choose the ingredient…'), ('de-DE', 'de', 'Keine Daten', 'Zutat auswählen…')]:
@@ -1003,7 +1012,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v53')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v54')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1011,7 +1020,7 @@ with sync_playwright() as p:
     ok(pg.inner_text('#ocrStatus').startswith('Done in') and 'palm oil' in pg.input_value('#labelText').lower(), 'offline: Read text still works')
     ctx.set_offline(False)
     print('v2.8: label reader without internet (My list)')
-    pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(300)
+    pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(300); open_card(pg, 'setCard')
     ok(pg.inner_text('#offState').startswith('On this phone: EN (1 of 7)') and 'Download all languages' in pg.inner_text('#offGet'), 'My list: "On this phone: EN (1 of 7)" + download button (%s / %s)' % (pg.inner_text('#offState'), pg.inner_text('#offGet')))
     pg.click('#offGet')
     pg.wait_for_function("() => document.getElementById('offState').textContent.startsWith('All 7')", timeout=60000)
@@ -1034,8 +1043,8 @@ with sync_playwright() as p:
     # ---------- v2.15 ----------
     ctx, pg = new_page(b, base, 'en-GB')
     pg.click('#cardLabel')
-    ok(pg.locator('#photoStart .scard').count() == 2 and pg.is_visible('#photoTip') and pg.is_visible('#textFold') and pg.is_hidden('#checkBar') and pg.is_hidden('#againRow'),
-       'v2.15: Read a label before a photo: two photo cards, short tip, folded "Type or paste" row')
+    ok(pg.locator('#photoStart .scard').count() == 3 and pg.is_visible('#photoTip') and pg.is_visible('#textFold') and pg.is_hidden('#checkBar') and pg.is_hidden('#againRow'),
+       'v2.15/v2.36: Read a label before a photo: three cards (Photo, Gallery, Type), short tip, folded "Type or paste" row')
     pg.set_input_files('#photoPick', photo); pg.wait_for_selector('#ocrArea:not([hidden])')
     ok(pg.is_hidden('#photoStart') and pg.is_hidden('#textFold') and pg.is_visible('#againRow') and pg.is_visible('#checkBar'), 'v2.15: after the photo the top part folds away; "Another photo" and the Check bar show')
     pg.evaluate('window.scrollTo(0, 0)'); pg.wait_for_timeout(200)
@@ -1561,16 +1570,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v53'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v54'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v53' not in keys: break
+        if 'label-check-v54' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v53' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v54' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1637,7 +1646,7 @@ with sync_playwright() as p:
     ctx, pg = new_page(b, base, 'bg-BG', dark=True)
     pg.evaluate("localStorage.setItem('lc.allergens', JSON.stringify({food:['gluten'], cos:[]})); 0"); reload_ready(pg)
     pg.click('#cardLabel')
-    ok(pg.is_visible('#typeBtn') and pg.inner_text('#typeBtn') == 'Напиши съставките', 'Read a label: button "Напиши съставките"')
+    ok(pg.is_visible('#typeBtn') and pg.inner_text('#typeBtn strong') == 'Напиши' and pg.get_attribute('#typeBtn', 'aria-label') == 'Напиши съставките', 'Read a label: card "Напиши" (screen reader: "Напиши съставките")')
     pg.click('#typeBtn'); pg.wait_for_selector('#typePanel:not([hidden])')
     ok(pg.inner_text('#typeWord') == 'Добави съставки' and pg.is_visible('#typeEmpty'), 'empty list: "Добави съставки" + help line')
     pg.fill('#typeInput', 'пше'); pg.wait_for_timeout(150)
@@ -1657,7 +1666,7 @@ with sync_playwright() as p:
     pg.click('#typeList li:nth-child(1) .tx')
     ok(pg.locator('#typeList li').count() == 6 and pg.inner_text('#typeWord') == 'Непълен резултат', 'without the red name: 3 of 6 names unknown -> "Непълен резултат", never "Без предупреждения" (%s)' % pg.inner_text('#typeWord'))
     pg.screenshot(path=os.path.join(SHOTS, 'v235-type-bg.png'), full_page=True)
-    pg.click('#typeSave'); pg.wait_for_selector('#result:not([hidden]) #answer')
+    kb_close(pg); pg.click('#typeSave'); pg.wait_for_selector('#result:not([hidden]) #answer')
     ok(word(pg) == 'Непълен резултат' and pg.inner_text('#oneLine') == '3 от 6 съставки разпознати' and pg.locator('#readCard').count() == 0 and pg.inner_text('#againBtn') == 'Промени списъка',
        'saved: grey result "3 of 6", no "What the app read" card, button "Промени списъка" (%s | %s)' % (word(pg), pg.inner_text('#oneLine')))
     ok(pg.evaluate("LC.state.current.p.read.typed") is True and pg.evaluate("LC.state.current.a.rows.some(r => (r.allergens || []).some(a => a.id === 'sulphur-dioxide-and-sulphites'))"), 'the product is saved as typed; E223 counts as the allergen sulphites')
@@ -1677,7 +1686,7 @@ with sync_playwright() as p:
     pg.click('#typeBtn'); pg.wait_for_selector('#typePanel:not([hidden])')
     ok('4001234567891' in pg.inner_text('#typeLead'), 'barcode not found: "Напиши съставките" knows the barcode (%s)' % pg.inner_text('#typeLead'))
     pg.fill('#typeInput', 'сол'); pg.press('#typeInput', 'Enter'); pg.fill('#typeInput', 'захар'); pg.press('#typeInput', 'Enter')
-    pg.click('#typeSave'); pg.wait_for_selector('#result:not([hidden]) #answer')
+    kb_close(pg); pg.click('#typeSave'); pg.wait_for_selector('#result:not([hidden]) #answer')
     ok(pg.evaluate("LC.state.current.p.code") == '4001234567891' and word(pg) == 'Без предупреждения', 'saved under the barcode; known names -> "Без предупреждения"')
     pg.click('.tabbar button[data-go=scan]')
     if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
@@ -1692,6 +1701,55 @@ with sync_playwright() as p:
     names = pg.evaluate("(r) => LC.consensusNames(r, " + ctxm + ")", ['Ingredients: rice, olive oil, rosemary extract]. Packaged in a protective atmosphere: nitrogen. Store in a dry and cool place', 'Ingredients: rice, olive oil, salt'])
     ok('rice' in names and 'rosemary extract]' in names and not any('Store' in n or 'Packaged' in n for n in names), 'label sentences after a ". " are still dropped (%s)' % names)
     ctx.close()
+
+    # ---- v2.36: typing mode (user 26 Nov: "while typing the screen becomes very small") ----
+    print('v2.36: typing mode')
+    ctx, pg = new_page(b, base, 'bg-BG', dark=True)
+    pg.evaluate("localStorage.setItem('lc.allergens', JSON.stringify({food:['gluten'], cos:[]})); 0"); reload_ready(pg)
+    pg.click('#cardLabel'); pg.click('#typeBtn'); pg.wait_for_selector('#typePanel:not([hidden])')
+    ok(pg.is_visible('#typePanel h2') and pg.is_visible('#typeKind') and pg.is_visible('#typeSave') and pg.is_visible('.tabbar'), 'just opened: title, Food/Cosmetics/Household, Save and the tab bar show')
+    for w in ('захар', 'сол'): pg.fill('#typeInput', w); pg.press('#typeInput', 'Enter')
+    pg.set_viewport_size({'width': 390, 'height': 420})   # the keyboard takes the lower half
+    pg.fill('#typeInput', 'пше'); pg.wait_for_timeout(300)
+    hidden = pg.evaluate("['#typePanel > h2', '#typeLead', '#typeKind', '#typeBar', '.topbar', '.tabbar', '#typePanel > .panel-back'].filter(q => { const e = document.querySelector(q); return e && e.offsetParent !== null; })")
+    ok(pg.evaluate("document.body.classList.contains('kbtype')") and hidden == [], 'keyboard open: the app bar, title, help text, type buttons, Save and the tab bar fold away (still shown: %s)' % hidden)
+    seen = pg.evaluate("[...document.querySelectorAll('#typeSug .tsrow')].filter(b => { const r = b.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; }).length")
+    circ = pg.evaluate("(() => { const r = document.querySelector('#typeLive .ring, #typeLive svg, #typeLive').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })()")
+    ok(seen >= 3 and circ and pg.is_visible('#typeWord'), '390 x 420 px (keyboard open): the result circle and at least 3 suggestions are visible (%d)' % seen)
+    pg.click('#typeSug .tsrow >> nth=0'); pg.wait_for_timeout(300)
+    ok(pg.evaluate("document.activeElement.id") == 'typeInput' and pg.evaluate("document.body.classList.contains('kbtype')") and pg.locator('#typeList li').count() == 3, 'a tap on a suggestion adds it and keeps the keyboard open (no jump)')
+    pg.press('#typeInput', 'Enter'); pg.wait_for_timeout(350)
+    ok(pg.evaluate("document.activeElement.id") != 'typeInput' and not pg.evaluate("document.body.classList.contains('kbtype')") and pg.is_visible('#typeSave') and pg.is_visible('#typePanel h2'), 'Enter on an empty field closes the keyboard; title and Save come back')
+    pg.focus('#typeInput'); pg.wait_for_timeout(100)
+    ok(pg.evaluate("document.body.classList.contains('kbtype')"), 'tap in the field again: typing mode again')
+    pg.go_back(); pg.wait_for_timeout(300)
+    ok(not pg.evaluate("document.body.classList.contains('kbtype')") and pg.is_visible('.tabbar') and pg.is_visible('.topbar'), 'Back from the type screen: the app bar and the tab bar are back')
+    pg.set_viewport_size({'width': 390, 'height': 844})
+    ok(no_side_scroll(pg), 'no sideways scroll')
+    ctx.close()
+
+    print('v2.36: fewer things per screen (Read a label, My list)')
+    for lang, w in (('bg-BG', 390), ('de-AT', 320), ('en-GB', 320)):
+        ctx, pg = new_page(b, base, lang, dark=(lang == 'bg-BG'), width=w)
+        pg.evaluate("localStorage.setItem('lc.allergens', JSON.stringify({food:['gluten','milk'], cos:['limonene']})); localStorage.setItem('lc.avoid', JSON.stringify([{id:'a1', text:'palm oil, palmöl'}, {id:'a2', text:'sugar'}, {id:'a3', text:'salt'}, {id:'a4', text:'honey'}])); 0"); reload_ready(pg)
+        pg.click('#cardLabel'); pg.wait_for_selector('#labelPanel:not([hidden])')
+        tops = pg.evaluate("[...document.querySelectorAll('#photoStart .scard')].map(c => { const r = c.getBoundingClientRect(); return [Math.round(r.top), Math.round(r.height), c.scrollWidth <= c.clientWidth + 1]; })")
+        ok(len(tops) == 3 and len(set((t[0], t[1]) for t in tops)) == 1 and all(t[2] for t in tops) and pg.is_hidden('#labelLead'), '%s %d px: Read a label = 3 cards in one row, same size, text fits; no general line (%s)' % (lang, w, tops))
+        pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(300)
+        cards = pg.evaluate("[...document.querySelectorAll('#tab-list > details.lcard')].filter(d => !d.hidden).map(d => [d.id, d.open])")
+        ok(cards == [['avoidCard', True], ['algCard', False], ['setCard', False], ['rulesFold', False], ['moreFold', False]], '%s: My list = 5 cards, only the avoid list open; "Taught names" hidden while empty (%s)' % (lang, cards))
+        subs = [pg.inner_text(q) for q in ('#avoidSub', '#algSub', '#setSub')]
+        ok(subs[0].endswith('+1') and subs[0].count(',') == 2 and ('+ 1' in subs[1]) and '·' in subs[2], '%s: the closed cards say what is inside (%s)' % (lang, subs))
+        ok(no_side_scroll(pg) and pg.evaluate("document.documentElement.scrollHeight") < 1500, '%s %d px: no sideways scroll; the page is short (%d px)' % (lang, w, pg.evaluate("document.documentElement.scrollHeight")))
+        if lang == 'bg-BG':
+            ok(subs[1].startswith('Глутен, Мляко') and subs[2].startswith('Езикът на телефона · Като телефона'), 'BG: "Глутен, Мляко …" and "Езикът на телефона · Като телефона"')
+            open_card(pg, 'setCard'); pg.select_option('#themeSelect', 'light'); pg.wait_for_timeout(100)
+            ok('Светли' in pg.inner_text('#setSub') or 'Светл' in pg.inner_text('#setSub'), 'changing Colours updates the line under "Настройки" (%s)' % pg.inner_text('#setSub'))
+            pg.select_option('#themeSelect', 'dark')
+            pg.click('#avoidCard > summary'); pg.wait_for_timeout(100)
+            ok(not pg.eval_on_selector('#avoidCard', 'd => d.open') and pg.is_hidden('#avoidInput'), 'a tap on the title closes the avoid list card')
+            pg.screenshot(path=os.path.join(SHOTS, 'v236-mylist-bg.png'), full_page=True)
+        ctx.close()
 
     for lang, w, dark in (('en-GB', 320, False), ('de-AT', 390, False)):
         ctx, pg = new_page(b, base, lang, dark=dark, width=w)

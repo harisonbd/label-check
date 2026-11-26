@@ -15,7 +15,7 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>Label Check <span class="ver">v2.35</span></h1>
+    <h1>Label Check <span class="ver">v2.36</span></h1>
     <button class="iconbtn topsearch" id="topSearch" type="button" data-t-aria="card.search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg></button>
     <div class="langsw" id="langSwitch" role="group" aria-label="Language">
       <button type="button" data-lang="en" lang="en" aria-pressed="false">EN</button>
@@ -86,14 +86,13 @@
         <h2 id="labelTitle">Read a label</h2>
         <p class="lead" id="labelLead"></p>
         <div id="photoStart">
-          <div class="photocards">
-            <button class="scard primary" id="takePhoto" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.5-2h6l1.5 2h2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="13" r="3.5"/></svg><strong data-t="lbl.take">Take photo</strong></button>
-            <label class="scard filebtn"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="M5 18l5-5 3 3 2-2 4 4"/></svg><strong data-t="lbl.choose">Choose photo</strong>
+          <div class="photocards three">
+            <button class="scard primary" id="takePhoto" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.5-2h6l1.5 2h2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="13" r="3.5"/></svg><strong data-t="lbl.take3">Photo</strong><small id="photoTip" data-t="lbl.takeSub">close, only the list</small></button>
+            <label class="scard filebtn"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="M5 18l5-5 3 3 2-2 4 4"/></svg><strong data-t="lbl.gallery">Gallery</strong><small data-t="lbl.gallerySub">1 or more photos</small>
               <input type="file" id="photoPick" accept="image/*" multiple hidden></label>
             <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
+            <button class="scard" id="typeBtn" type="button" data-t-aria="type.btn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7M17 14l3 3-3 3"/></svg><strong data-t="type.short">Type</strong><small data-t="type.shortSub">no photo, at once</small></button>
           </div>
-          <button class="btn btn-ghost typebtn" id="typeBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7M17 14l3 3-3 3"/></svg><span data-t="type.btn">Type the ingredients</span></button>
-          <p class="photonote" id="photoTip"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg><span data-t="label.tip">Tip: take the photo close, with only the ingredient list in it.</span></p>
         </div>
         <p class="againrow" id="againRow" hidden><button class="linkbtn" id="againPhoto" type="button" data-t="lbl.again">Another photo</button> <span class="dot" aria-hidden="true">·</span> <button class="linkbtn" id="secondPhoto" type="button" data-t="lbl.second">Add 2nd photo (round bottle)</button></p>
 
@@ -217,86 +216,99 @@
 
     <!-- MY LIST TAB (avoid list, allergens, settings, rules, backup) -->
     <section class="tab" id="tab-list" data-tab="list" hidden>
-      <h2 data-t="list.title">Your avoid list</h2>
-      <p class="lead" data-t="list.lead"></p>
-      <form class="row" id="avoidForm" autocomplete="off">
-        <label class="sr-only" for="avoidInput" data-t="list.inputLabel">Ingredient to avoid</label>
-        <input id="avoidInput" data-t-ph="list.ph">
-        <button class="btn btn-primary" type="submit" data-t="list.add">Add</button>
-      </form>
-      <ul class="plainlist" id="avoidList"></ul>
-      <p class="empty" id="avoidEmpty" data-t="list.empty"></p>
-      <h3 data-t="list.picks">Quick picks</h3>
-      <div class="picks" id="picks"></div>
-
-      <h3 data-t="alg.title">Allergens</h3>
-      <details class="fold" id="foodAlgBox">
-        <summary><span data-t="alg.food">Food allergens (EU 14)</span> <span class="count" id="foodAlgCount"></span></summary>
-        <div class="ticks" id="foodAlgList"></div>
+      <h2 data-t="tab.list">My list</h2>
+      <!-- v2.36 (user: "fewer things on each screen"): one card per topic; only the avoid list starts open -->
+      <details class="lcard" id="avoidCard" open>
+        <summary><span class="lci" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.4 6.4l11.2 11.2"/></svg></span><span class="lct"><strong data-t="list.title">Your avoid list</strong><small><span id="avoidSub"></span></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="lcbody">
+        <form class="row" id="avoidForm" autocomplete="off">
+          <label class="sr-only" for="avoidInput" data-t="list.inputLabel">Ingredient to avoid</label>
+          <input id="avoidInput" data-t-ph="list.ph">
+          <button class="btn btn-primary" type="submit" data-t="list.add">Add</button>
+        </form>
+        <p class="minor lchelp" data-t="list.lead2"></p>
+          <ul class="plainlist" id="avoidList"></ul>
+        <p class="empty" id="avoidEmpty" data-t="list.empty"></p>
+        <h3 data-t="list.picks">Quick picks</h3>
+        <div class="picks" id="picks"></div>
+        </div>
       </details>
-      <details class="fold" id="cosAlgBox">
-        <summary><span data-t="alg.cos">Fragrance allergens in cosmetics</span> <span class="count" id="cosAlgCount"></span></summary>
-        <label class="sr-only" for="cosAlgSearch" data-t="alg.search"></label>
-        <input id="cosAlgSearch" type="search" data-t-ph="alg.search" autocomplete="off">
-        <div class="ticks" id="cosAlgList"></div>
-        <button class="btn btn-ghost small" id="cosAlgClear" type="button" data-t="alg.clear">Untick all</button>
+      <details class="lcard" id="algCard">
+        <summary><span class="lci" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg></span><span class="lct"><strong data-t="alg.title">Allergens</strong><small><span id="algSub"></span></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="lcbody">
+          <details class="fold" id="foodAlgBox">
+          <summary><span data-t="alg.food">Food allergens (EU 14)</span> <span class="count" id="foodAlgCount"></span></summary>
+          <div class="ticks" id="foodAlgList"></div>
+        </details>
+          <details class="fold" id="cosAlgBox">
+          <summary><span data-t="alg.cos">Fragrance allergens in cosmetics</span> <span class="count" id="cosAlgCount"></span></summary>
+          <label class="sr-only" for="cosAlgSearch" data-t="alg.search"></label>
+          <input id="cosAlgSearch" type="search" data-t-ph="alg.search" autocomplete="off">
+          <div class="ticks" id="cosAlgList"></div>
+          <button class="btn btn-ghost small" id="cosAlgClear" type="button" data-t="alg.clear">Untick all</button>
+        </details>
+        </div>
       </details>
-
-      <h3 data-t="taught.title">Taught names</h3>
-      <details class="fold" id="taughtBox">
-        <summary><span data-t="taught.fold">Names you taught the app</span> <span class="count" id="taughtCount"></span></summary>
+      <details class="lcard" id="taughtBox" hidden>
+        <summary><span class="lci" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></svg></span><span class="lct"><strong data-t="taught.title">Taught names</strong><small><span data-t="taught.fold"></span> <span class="count" id="taughtCount"></span></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="lcbody">
         <div id="taughtList"></div>
         <p class="minor" data-t="taught.note">Only on this phone. Included in the backup.</p>
+        </div>
       </details>
-
-      <h3 data-t="set.title">Settings</h3>
-      <div class="setting">
-        <label for="langSelect" class="grow" data-t="set.lang">Language</label>
-        <select id="langSelect">
-          <option value="auto" data-t="set.langAuto">Phone language</option>
-          <option value="en">English</option>
-          <option value="de">Deutsch</option>
-          <option value="bg">Български</option>
-        </select>
-      </div>
-      <div class="setting">
-        <label for="themeSelect" class="grow" data-t="set.theme">Colours</label>
-        <select id="themeSelect">
-          <option value="auto" data-t="set.themeAuto">Like the phone</option>
-          <option value="light" data-t="set.themeLight">Light</option>
-          <option value="dark" data-t="set.themeDark">Dark</option>
-        </select>
-      </div>
-      <div class="setting">
-        <label for="bigSwitch" class="grow" data-t="set.big">Big text</label>
-        <span class="switch"><input type="checkbox" role="switch" id="bigSwitch"></span>
-      </div>
-      <div class="setting" id="vibRow">
-        <label for="vibSwitch" class="grow" data-t="set.vib">Vibrate on the result</label>
-        <span class="switch"><input type="checkbox" role="switch" id="vibSwitch"></span>
-      </div>
-      <p class="minor setnote" id="vibNote" data-t="set.vibNote">1 short = no warnings · 2 = check · 3 = avoid. Android only.</p>
-      <div class="offl" id="offline">
-        <strong data-t="off.title">Label reader without internet</strong>
-        <div class="ocrlang">
-          <label for="ocrEngine" data-t="ocr.engine">Reader</label>
-          <select id="ocrEngine" class="ocrsel">
-            <option value="paddle" data-t="ocr.engPaddle">New (Paddle)</option><option value="tess" data-t="ocr.engTess">Old (Tesseract)</option>
+      <details class="lcard" id="setCard">
+        <summary><span class="lci" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg></span><span class="lct"><strong data-t="set.title">Settings</strong><small><span id="setSub"></span></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="lcbody">
+          <div class="setting">
+          <label for="langSelect" class="grow" data-t="set.lang">Language</label>
+          <select id="langSelect">
+            <option value="auto" data-t="set.langAuto">Phone language</option>
+            <option value="en">English</option>
+            <option value="de">Deutsch</option>
+            <option value="bg">Български</option>
           </select>
         </div>
-        <span class="minor" id="offState"></span>
-        <button class="btn btn-ghost" id="offGet" type="button"></button>
-      </div>
-
-      <details class="fold" id="rulesFold">
-        <summary data-t="rules.title">What the app checks</summary>
+        <div class="setting">
+          <label for="themeSelect" class="grow" data-t="set.theme">Colours</label>
+          <select id="themeSelect">
+            <option value="auto" data-t="set.themeAuto">Like the phone</option>
+            <option value="light" data-t="set.themeLight">Light</option>
+            <option value="dark" data-t="set.themeDark">Dark</option>
+          </select>
+        </div>
+        <div class="setting">
+          <label for="bigSwitch" class="grow" data-t="set.big">Big text</label>
+          <span class="switch"><input type="checkbox" role="switch" id="bigSwitch"></span>
+        </div>
+        <div class="setting" id="vibRow">
+          <label for="vibSwitch" class="grow" data-t="set.vib">Vibrate on the result</label>
+          <span class="switch"><input type="checkbox" role="switch" id="vibSwitch"></span>
+        </div>
+        <p class="minor setnote" id="vibNote" data-t="set.vibNote">1 short = no warnings · 2 = check · 3 = avoid. Android only.</p>
+        <div class="offl" id="offline">
+          <strong data-t="off.title">Label reader without internet</strong>
+          <div class="ocrlang">
+            <label for="ocrEngine" data-t="ocr.engine">Reader</label>
+            <select id="ocrEngine" class="ocrsel">
+              <option value="paddle" data-t="ocr.engPaddle">New (Paddle)</option><option value="tess" data-t="ocr.engTess">Old (Tesseract)</option>
+            </select>
+          </div>
+          <span class="minor" id="offState"></span>
+          <button class="btn btn-ghost" id="offGet" type="button"></button>
+        </div>
+        </div>
+      </details>
+      <details class="lcard" id="rulesFold">
+        <summary><span class="lci" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 11v5M12 8h.01"/></svg></span><span class="lct"><strong data-t="rules.title">What the app checks</strong><small><span data-t="rules.sub"></span></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="lcbody">
         <p class="minor" data-t="rules.lead"></p>
         <div id="rulesBox"></div>
         <div class="credit" id="credit"></div>
+        </div>
       </details>
-
-      <details class="fold" id="moreFold">
-        <summary data-t="more.title">More: vegan, backup</summary>
+      <details class="lcard" id="moreFold">
+        <summary><span class="lci" aria-hidden="true"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></svg></span><span class="lct"><strong data-t="data.title">Data and more</strong><small><span data-t="data.sub"></span></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="lcbody">
         <div class="setting">
           <label for="veganSwitch" class="grow"><span data-t="diet.label">I eat vegan</span>
             <span class="sub" data-t="diet.help"></span></label>
@@ -318,6 +330,7 @@
           <label class="btn btn-ghost filebtn"><span data-t="prod.import">Import products</span>
             <input type="file" id="prodInput" accept="application/json,.json" hidden>
           </label>
+        </div>
         </div>
       </details>
     </section>

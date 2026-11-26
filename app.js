@@ -790,8 +790,15 @@
   }
   const smooth = () => (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
 
+  // v2.36 typing mode: the app bar, the tab bar and the type screen's title, help text, buttons and Save fold away
+  function setTyping(on) {
+    document.body.classList.toggle('kbtype', on);
+    $('typePanel').classList.toggle('typing', on);
+  }
+
   function hideAll() {
     closeMore(true);
+    setTyping(false);
     $('result').hidden = true;
     $('labelPanel').hidden = true;
     $('searchPanel').hidden = true;
@@ -2217,6 +2224,7 @@
     if (!box) return;
     const items = Object.entries(state.taught).sort((x, y) => x[1].from.localeCompare(y[1].from));
     $('taughtCount').textContent = '(' + items.length + ')';
+    renderListCards();
     box.replaceChildren(...(items.length ? items.map(([k, v]) => el('div', { class: 'taughtrow' },
       el('div', { class: 'tr-main' }, el('s', { text: v.from }), el('b', { text: v.to ? niceName(v.to) : t('taught.noAuto') })),
       el('button', { class: 'x', type: 'button', 'aria-label': t('taught.del', { from: v.from }), title: t('taught.del', { from: v.from }), text: '✕', onclick: () => untaught(v.from) })))
@@ -2369,7 +2377,7 @@
     kindTouched = !!(p && p.kind && p.ingredientsText);   // "Read again" on a known product: keep its type
     $('kindNote').hidden = true;
     $('labelLead').textContent = labelFor && isBarcode(labelFor.code)
-      ? t('label.leadFor', { code: labelFor.code }) : t('label.lead');
+      ? t('label.leadFor', { code: labelFor.code }) : '';   // v2.36: the general line went (fewer things); the barcode line stays
     panel.scrollIntoView({ behavior: 'auto', block: 'start' });
   }
 
@@ -2387,6 +2395,7 @@
     if (keys.length > TYPE_KEEP) keys.sort((a, b) => (m[a].c - m[b].c) || (m[a].t - m[b].t)).slice(0, keys.length - TYPE_KEEP).forEach(k => delete m[k]);
     store.set('typedNames', m);
   }
+  let typeOpenFocus = false;   // v2.36: the focus that comes with opening the screen does not start typing mode
   function openType(p) {
     typeFor = p && p.code ? p : null;
     const base = typeFor ? (productBy(typeFor.code) || typeFor) : null;
@@ -2397,7 +2406,9 @@
     if (!history.state || history.state.view !== 'type') pushState({ tab: 'scan', view: 'type' });
     $('typeInput').value = '';
     renderType();
+    typeOpenFocus = document.activeElement !== $('typeInput');
     try { $('typeInput').focus({ preventScroll: true }); } catch (e) { /* ignore */ }
+    typeOpenFocus = false;   // the focus event runs at once; never keep the flag for a later tap
   }
   // One short line under a typed name: E-number, your list, the allergen, or the colour reason; "no data" for an unknown name.
   function typeRowWhy(r, skipE) {
@@ -3740,6 +3751,7 @@
       );
     }));
     $('avoidEmpty').hidden = state.avoid.length > 0;
+    renderListCards();
 
     const have = new Set(state.avoid.map(i => i.text.split(',')[0].trim().toLowerCase()));
     // First chip = "I avoid fragrance" (same as the old switch: perfume + the fragrance allergens turn red)
@@ -3824,10 +3836,26 @@
     $('cosAlgList').querySelectorAll('label').forEach(l => { l.hidden = !!q && !l.dataset.search.includes(q); });
   }
 
+  // v2.36: the short line under each My list card title, so the closed cards still say what is inside
+  function renderListCards() {
+    if (!$('avoidSub')) return;
+    const names = state.avoid.map(i => termsOf(i)[0]);
+    if (state.avoidFragrance) names.unshift(t('frag.chip'));
+    $('avoidSub').textContent = names.length ? names.slice(0, 3).join(', ') + (names.length > 3 ? ' +' + (names.length - 3) : '') : t('list.sub0');
+    const food = DBINFO ? LCDB.foodAllergens(LANG).filter(x => state.allergens.food.includes(x.id)).map(x => cap(x.name)) : [];
+    const parts = [food.slice(0, 3).join(', ') + (food.length > 3 ? ' +' + (food.length - 3) : '')].filter(Boolean);
+    if (state.allergens.cos.length) parts.push(t('alg.cosN', { n: state.allergens.cos.length }));
+    $('algSub').textContent = parts.length ? parts.join(' ') : t('alg.none');
+    const opt = id => { const s = $(id); return s && s.selectedOptions[0] ? s.selectedOptions[0].textContent : ''; };
+    $('setSub').textContent = [opt('langSelect'), opt('themeSelect'), state.bigText ? t('set.big') : ''].filter(Boolean).join(' · ');
+    $('taughtBox').hidden = Object.keys(state.taught).length === 0;
+  }
+
   function updateAllergenCounts() {
     $('foodAlgCount').textContent = state.allergens.food.length ? '(' + t('alg.ticked', { n: state.allergens.food.length }) + ')' : '';
     $('cosAlgCount').textContent = '(' + (state.allergens.cos.length ? t('alg.ticked', { n: state.allergens.cos.length }) + ' / ' : '') + COS_ALLERGENS.length + ')';
     $('cosAlgClear').hidden = state.allergens.cos.length === 0;
+    renderListCards();
   }
 
   // ---------- My list: what the app checks ----------
@@ -3890,6 +3918,7 @@
 
   function renderAll() {
     renderAvoid();
+    renderListCards();
     renderAllergens();
     renderTaught();
     renderRules();
@@ -3897,7 +3926,7 @@
     renderHistory();
     if (state.current) renderResult(state.current.p);
     if (!$('searchPanel').hidden) renderSearch();
-    if (!$('labelPanel').hidden) $('labelLead').textContent = labelFor && isBarcode(labelFor.code) ? t('label.leadFor', { code: labelFor.code }) : t('label.lead');
+    if (!$('labelPanel').hidden) $('labelLead').textContent = labelFor && isBarcode(labelFor.code) ? t('label.leadFor', { code: labelFor.code }) : '';
     if (!$('labelPanel').hidden && !$('pickBox').hidden) renderPick();
     if (!$('typePanel').hidden) renderType();
   }
@@ -4152,11 +4181,33 @@
     $('typeInput').addEventListener('keydown', e => {
       if (e.key !== 'Enter') return;
       e.preventDefault();
-      const q = typeQ.trim(); if (!q) return;
+      const q = typeQ.trim(); if (!q) { $('typeInput').blur(); return; }   // v2.36: Enter on an empty field closes the keyboard
       const first = typeSuggestions(q)[0];
       addTyped(first ? first.name : q);
     });
+    // v2.36: typing mode. While the keyboard is open, the title, help text, type buttons and Save fold away,
+    // so the result circle, the field and the suggestions fit above the keyboard. They come back when the keyboard closes.
+    let typeBlurT = 0, vvMax = 0, kbOpen = false;
+    const typing = on => {
+      if (on === document.body.classList.contains('kbtype')) return;
+      setTyping(on);
+      if (on) requestAnimationFrame(() => $('typeLive').scrollIntoView({ block: 'start' }));
+    };
+    // right after the screen opens the title and Food / Cosmetics / Household stay; the first letter or a tap in the field folds them
+    $('typeInput').addEventListener('focus', () => { clearTimeout(typeBlurT); if (typeOpenFocus) { typeOpenFocus = false; return; } typing(true); });
+    $('typeInput').addEventListener('input', () => { typeOpenFocus = false; typing(true); });
+    $('typeInput').addEventListener('blur', () => { typeBlurT = setTimeout(() => { if (document.activeElement !== $('typeInput')) typing(false); }, 250); });
+    // a tap on a suggestion or on ✕ keeps the keyboard open (no jump)
+    ['typeSug', 'typeList'].forEach(id => $(id).addEventListener('pointerdown', e => { if (e.target.closest('button') && document.activeElement === $('typeInput')) e.preventDefault(); }));
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', () => {
+      const h = window.visualViewport.height;
+      vvMax = Math.max(vvMax, h);
+      const open = h < vvMax * 0.8;
+      if (kbOpen && !open && document.activeElement === $('typeInput')) $('typeInput').blur();   // phone Back closed the keyboard
+      kbOpen = open;
+    });
     $('typeSave').addEventListener('click', saveTyped);
+    ['langSelect', 'themeSelect', 'bigSwitch'].forEach(id => $(id).addEventListener('change', () => setTimeout(renderListCards, 0)));
     $('typePhoto').addEventListener('click', () => openLabel(typeFor));
     $('searchInput').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(renderSearch, 120); });
     $('manualForm').addEventListener('submit', e => {

@@ -7,6 +7,7 @@ window.LC_TEXT = {
   en: {
     // v2.35: Type the ingredients
     'type.btn': 'Type the ingredients', 'type.edit': 'Change the list', 'type.title': 'Type the ingredients', 'type.lead': 'Type the first letters and pick a name. It is checked at once, without internet.',
+    'lbl.take3': "Photo", 'lbl.takeSub': "close, only the list", 'lbl.gallery': "Gallery", 'lbl.gallerySub': "1 or more photos", 'type.short': "Type", 'type.shortSub': "no photo, at once",
     'type.leadFor': 'For barcode {code}. Type the first letters and pick a name.', 'type.ph': 'Start typing… e.g. sugar', 'type.input': 'Ingredient',
     'type.free': 'Add “{text}” as typed', 'type.list': 'List', 'type.empty': 'No ingredients yet. Type 2 letters, then tap a name. Commas add several at once.',
     'type.save': 'Save product', 'type.photo': 'Photo', 'type.remove': 'Remove {name}', 'type.start': 'Add ingredients', 'type.startSub': 'The result shows here.',
@@ -305,11 +306,11 @@ window.LC_TEXT = {
     'list.add': 'Add', 'list.remove': 'Remove', 'list.also': 'Also: ',
     'list.empty': 'Your list is empty. Every ingredient is still checked against the EU lists.',
     'list.picks': 'Quick picks',
+    'list.lead2': "Other names on one line, with commas: palm oil, palmöl. A * at the end = any ending.", 'list.sub0': "A product with anything from here turns red", 'alg.none': "Nothing ticked", 'alg.cosN': "+ {n} in cosmetics", 'rules.sub': "EU lists, colours, sources", 'data.title': "Data and more", 'data.sub': "Backup, share products, vegan",
     'toast.added': 'Added: {name}',
     'frag.title': 'Fragrance',
     'frag.label': 'I avoid fragrance (perfume)',
     'frag.chip': 'perfume and fragrances',
-    'more.title': 'More: vegan, backup',
     'frag.help': 'Turns fragrance and fragrance allergens red in cosmetics.',
     'alg.title': 'Allergens',
     'alg.lead': 'Only allergens you tick turn red. The others show as info.',
@@ -364,6 +365,7 @@ window.LC_TEXT = {
   de: {
     // v2.35: Zutaten eintippen
     'type.btn': 'Zutaten eintippen', 'type.edit': 'Liste ändern', 'type.title': 'Zutaten eintippen', 'type.lead': 'Tippe die ersten Buchstaben und wähle einen Namen. Die Prüfung erfolgt sofort, ohne Internet.',
+    'lbl.take3': "Foto", 'lbl.takeSub': "nah, nur die Zutaten", 'lbl.gallery': "Galerie", 'lbl.gallerySub': "1 oder mehr Fotos", 'type.short': "Tippen", 'type.shortSub': "ohne Foto, sofort",
     'type.leadFor': 'Für Barcode {code}. Tippe die ersten Buchstaben und wähle einen Namen.', 'type.ph': 'Tippen… z. B. Zucker', 'type.input': 'Zutat',
     'type.free': '„{text}“ so hinzufügen', 'type.list': 'Liste', 'type.empty': 'Noch keine Zutaten. Tippe 2 Buchstaben und wähle einen Namen. Mit Kommas fügst du mehrere hinzu.',
     'type.save': 'Produkt speichern', 'type.photo': 'Foto', 'type.remove': '{name} entfernen', 'type.start': 'Zutaten hinzufügen', 'type.startSub': 'Das Ergebnis erscheint hier.',
@@ -662,11 +664,11 @@ window.LC_TEXT = {
     'list.add': 'Hinzufügen', 'list.remove': 'Entfernen', 'list.also': 'Auch: ',
     'list.empty': 'Deine Liste ist leer. Jede Zutat wird trotzdem mit den EU-Listen geprüft.',
     'list.picks': 'Schnellauswahl',
+    'list.lead2': "Andere Namen in eine Zeile, mit Kommas: palm oil, palmöl. Ein * am Ende = jede Endung.", 'list.sub0': "Ein Produkt mit etwas von hier wird rot", 'alg.none': "Nichts angehakt", 'alg.cosN': "+ {n} in Kosmetik", 'rules.sub': "EU-Listen, Farben, Quellen", 'data.title': "Daten und mehr", 'data.sub': "Sicherung, Produkte teilen, vegan",
     'toast.added': 'Hinzugefügt: {name}',
     'frag.title': 'Duftstoffe',
     'frag.label': 'Ich meide Duftstoffe (Parfum)',
     'frag.chip': 'Parfum und Duftstoffe',
-    'more.title': 'Mehr: vegan, Sicherung',
     'frag.help': 'Macht Duftstoffe und Duftstoff-Allergene in Kosmetik rot.',
     'alg.title': 'Allergene',
     'alg.lead': 'Nur angehakte Allergene werden rot. Die anderen erscheinen als Info.',
@@ -721,6 +723,7 @@ window.LC_TEXT = {
   bg: {
     // v2.35: Напиши съставките
     'type.btn': 'Напиши съставките', 'type.edit': 'Промени списъка', 'type.title': 'Напиши съставките', 'type.lead': 'Пиши първите букви и избери име. Проверката е веднага, без интернет.',
+    'lbl.take3': "Снимай", 'lbl.takeSub': "отблизо, само съставките", 'lbl.gallery': "Галерия", 'lbl.gallerySub': "1 или повече снимки", 'type.short': "Напиши", 'type.shortSub': "без снимка, веднага",
     'type.leadFor': 'За баркод {code}. Пиши първите букви и избери име.', 'type.ph': 'Започни да пишеш… напр. захар', 'type.input': 'Съставка',
     'type.free': 'Добави „{text}“ както е написано', 'type.list': 'Списък', 'type.empty': 'Още няма съставки. Напиши 2 букви и избери име. Със запетаи добавяш няколко наведнъж.',
     'type.save': 'Запази продукта', 'type.photo': 'Снимка', 'type.remove': 'Махни {name}', 'type.start': 'Добави съставки', 'type.startSub': 'Резултатът се показва тук.',
@@ -1019,11 +1022,11 @@ window.LC_TEXT = {
     'list.add': 'Добави', 'list.remove': 'Махни', 'list.also': 'Още: ',
     'list.empty': 'Списъкът е празен. Всяка съставка пак се проверява по списъците на ЕС.',
     'list.picks': 'Бърз избор',
+    'list.lead2': "Други имена на един ред, със запетаи: palm oil, палмово масло. * в края = всякакъв край.", 'list.sub0': "Продукт с нещо от тук става червен", 'alg.none': "Нищо отметнато", 'alg.cosN': "+ {n} в козметиката", 'rules.sub': "Списъци на ЕС, цветове, източници", 'data.title': "Данни и още", 'data.sub': "Резервно копие, сподели продукти, веган",
     'toast.added': 'Добавено: {name}',
     'frag.title': 'Аромати',
     'frag.label': 'Избягвам аромати (парфюм)',
     'frag.chip': 'парфюм и аромати',
-    'more.title': 'Още: веган, резервно копие',
     'frag.help': 'Прави ароматите и ароматните алергени в козметиката червени.',
     'alg.title': 'Алергени',
     'alg.lead': 'Червени стават само отметнатите алергени. Другите са за информация.',
