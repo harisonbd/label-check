@@ -154,6 +154,32 @@ def reload_ready(pg):
             pg.wait_for_timeout(500)
     raise RuntimeError('page did not load')
 
+# v2.37: a made-up offline pack, served as if it came from GitHub (raw.githubusercontent.com/.../pack/)
+def pack_files(date='2026-12-03'):
+    import gzip as _gz
+    def nd(part, recs):
+        body = json.dumps({'v': 1, 'part': part, 'date': date, 'n': len(recs)}) + '\n' + ''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in recs)
+        return _gz.compress(body.encode('utf-8'))
+    main = [['0123456789012', 'f', 'UPC product', 'Ex', 'water, sugar'],
+            ['3800000000017', 'f', 'Лютеница Тест', 'Тест', 'печени чушки, домати, пшенично брашно, сол', 'gluten'],
+            ['3800000000024', 'f', 'Само име'],
+            ['9001234500003', 'f', 'Bio Geflügelwurst', 'Example', 'Putenfleisch 92 %, Wasser, Meersalz'],
+            ['9008700000000', 'c', 'Duschgel Test', 'Ex', 'Aqua, Sodium Laureth Sulfate, Parfum, Limonene', '', '', '']]
+    de = [['4000000000017', 'f', 'Brot', 'Bäcker', 'Roggenmehl, Wasser, Salz']]
+    files = {'pack-main.ndjson.gz': nd('main', main), 'pack-de.ndjson.gz': nd('de', de)}
+    files['pack-info.json'] = json.dumps({'v': 1, 'date': date, 'source': 'Open Food Facts and Open Beauty Facts, ODbL', 'parts': {
+        'main': {'file': 'pack-main.ndjson.gz', 'bytes': len(files['pack-main.ndjson.gz']), 'n': len(main), 'ni': 4},
+        'de': {'file': 'pack-de.ndjson.gz', 'bytes': len(files['pack-de.ndjson.gz']), 'n': 1, 'ni': 1}}}).encode()
+    return files
+
+def pack_route(ctx, files, hits=None):
+    def h(route):
+        name = route.request.url.split('/pack/')[-1].split('?')[0]
+        if hits is not None: hits.append(name)
+        if name in files: route.fulfill(status=200, content_type='application/octet-stream', body=files[name])
+        else: route.fulfill(status=404, body='404: Not Found')
+    ctx.route('https://raw.githubusercontent.com/harisonbd/label-check/pack/**', h)
+
 def open_card(pg, cid):
     # v2.36: My list topics are cards; open one as the user does (tap its title)
     if not pg.eval_on_selector('#' + cid, 'd => d.open'): pg.click('#%s > summary' % cid); pg.wait_for_timeout(100)
@@ -537,7 +563,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.36' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.37' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -1012,7 +1038,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v54')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v55')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1570,16 +1596,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v54'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v55'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v54' not in keys: break
+        if 'label-check-v55' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v54' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v55' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1737,7 +1763,7 @@ with sync_playwright() as p:
         ok(len(tops) == 3 and len(set((t[0], t[1]) for t in tops)) == 1 and all(t[2] for t in tops) and pg.is_hidden('#labelLead'), '%s %d px: Read a label = 3 cards in one row, same size, text fits; no general line (%s)' % (lang, w, tops))
         pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(300)
         cards = pg.evaluate("[...document.querySelectorAll('#tab-list > details.lcard')].filter(d => !d.hidden).map(d => [d.id, d.open])")
-        ok(cards == [['avoidCard', True], ['algCard', False], ['setCard', False], ['rulesFold', False], ['moreFold', False]], '%s: My list = 5 cards, only the avoid list open; "Taught names" hidden while empty (%s)' % (lang, cards))
+        ok(cards == [['avoidCard', True], ['algCard', False], ['packCard', False], ['setCard', False], ['rulesFold', False], ['moreFold', False]], '%s: My list = 6 cards (v2.37: + products without internet), only the avoid list open; "Taught names" hidden while empty (%s)' % (lang, cards))
         subs = [pg.inner_text(q) for q in ('#avoidSub', '#algSub', '#setSub')]
         ok(subs[0].endswith('+1') and subs[0].count(',') == 2 and ('+ 1' in subs[1]) and '·' in subs[2], '%s: the closed cards say what is inside (%s)' % (lang, subs))
         ok(no_side_scroll(pg) and pg.evaluate("document.documentElement.scrollHeight") < 1500, '%s %d px: no sideways scroll; the page is short (%d px)' % (lang, w, pg.evaluate("document.documentElement.scrollHeight")))
@@ -1750,6 +1776,97 @@ with sync_playwright() as p:
             ok(not pg.eval_on_selector('#avoidCard', 'd => d.open') and pg.is_hidden('#avoidInput'), 'a tap on the title closes the avoid list card')
             pg.screenshot(path=os.path.join(SHOTS, 'v236-mylist-bg.png'), full_page=True)
         ctx.close()
+
+    # ---- v2.37: offline product pack + 3 small things ----
+    print('v2.37: offline product pack')
+    ctx, pg = new_page(b, base, 'bg-BG', dark=True)
+    files = pack_files(); hits = []; pack_route(ctx, files, hits)
+    pg.evaluate("localStorage.setItem('lc.allergens', JSON.stringify({food:['gluten'], cos:[]})); 0"); reload_ready(pg)
+    pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(300)
+    ok(pg.inner_text('#packSub') == 'Не е изтеглено' and not pg.eval_on_selector('#packCard', 'd => d.open'), 'My list: card "Продукти без интернет" closed, "Не е изтеглено"')
+    ok(hits == [], 'nothing is downloaded before you open the card')
+    open_card(pg, 'packCard'); pg.wait_for_function("() => document.getElementById('packMainState').textContent.includes('MB')")
+    ok(pg.inner_text('#packMainState').startswith('Не е на телефона · 0,1 MB') and pg.is_visible('#packMainBtn') and pg.inner_text('#packMainBtn').startswith('Изтегли') and pg.is_hidden('#packMainRm'),
+       'open: "Не е на телефона · size" + "Изтегли" (%s)' % pg.inner_text('#packMainState'))
+    pg.click('#packMainBtn'); pg.wait_for_function("() => document.getElementById('packMainState').textContent.includes('продукта')", timeout=15000)
+    ok(pg.inner_text('#packMainState').startswith('5 продукта · 3.12.2026') or pg.inner_text('#packMainState').startswith('5 продукта · 3 дек'), 'after download: "5 продукта · date" (%s)' % pg.inner_text('#packMainState'))
+    ok(pg.is_hidden('#packMainBtn') and pg.is_visible('#packMainRm') and pg.inner_text('#packSub').startswith('5 продукта'), 'up to date: no button, "Махни" shows; the card line says 5 products')
+    ctx.set_offline(True)
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    type_code(pg, '3800000000017'); pg.wait_for_selector('#result:not([hidden]) #answer')
+    ok(word(pg) == 'Избягвай' and pg.evaluate("LC.state.current.p.pack") == '2026-12-03' and pg.evaluate("LC.state.current.p.source") == 'off',
+       'offline: a pack product is found at once; gluten (your allergen) -> "Избягвай" (%s)' % word(pg))
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    type_code(pg, '123456789012'); pg.wait_for_selector('#result:not([hidden]) #answer')
+    ok(pg.evaluate("LC.state.current.p.name") == 'UPC product', 'a 12-digit UPC finds the 13-digit pack entry with the 0 in front')
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    type_code(pg, '9008700000000'); pg.wait_for_selector('#result:not([hidden]) #answer')
+    ok(pg.evaluate("LC.state.current.p.kind") == 'cosmetic' and 'Limonene' in pg.evaluate("LC.state.current.p.ingredientsText"), 'a cosmetic from the pack is checked as cosmetic')
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    type_code(pg, '3800000000024'); pg.wait_for_timeout(800)
+    ok(pg.evaluate("LC.state.current && LC.state.current.p.name") == 'Само име' or 'Само име' in pg.inner_text('body'), 'offline, name only in the pack: the product name shows (not "not found")')
+    ctx.set_offline(False)
+    # online: the pack answers first, then the online data replaces it quietly (here the online text is longer: mustard)
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    type_code(pg, '9001234500003'); pg.wait_for_selector('#result:not([hidden]) #answer')
+    pg.wait_for_function("() => LC.state.current && LC.state.current.p.ingredientsText.includes('Senf')", timeout=8000)
+    ok(not pg.evaluate("LC.state.current.p.pack") and 'Обновено от интернет' in pg.inner_text('#status'), 'online: the pack answer is replaced by the newer online text; note "Обновено от интернет."')
+    # a newer pack on GitHub
+    files2 = pack_files('2027-01-03'); files.clear(); files.update(files2)
+    pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(200)
+    pg.evaluate("document.getElementById('packCard').open = false"); open_card(pg, 'packCard')
+    pg.evaluate("LC.packInfo && LC.packInfo(true)"); pg.wait_for_timeout(300); pg.evaluate("LC.renderPack && LC.renderPack()"); pg.wait_for_timeout(300)
+    ok('нова версия' in pg.inner_text('#packMainState') and pg.is_visible('#packMainBtn') and pg.inner_text('#packMainBtn').startswith('Обнови'), 'a newer pack: "нова версия" + "Обнови" (%s)' % pg.inner_text('#packMainState'))
+    pg.click('#packDeBtn'); pg.wait_for_function("() => document.getElementById('packDeState').textContent.includes('продукт')", timeout=15000)
+    ok(pg.inner_text('#packSub').endswith('+ Германия'), 'Germany downloaded: the card line says "+ Германия"')
+    pg.screenshot(path=os.path.join(SHOTS, 'v237-pack-bg.png'), full_page=True)
+    pg.click('#packMainRm'); pg.wait_for_timeout(400)
+    ok(pg.is_visible('#packMainBtn') and pg.is_hidden('#packMainRm') and pg.inner_text('#packSub').startswith('Не е изтеглено'), '"Махни" removes the main pack; "Изтегли" again')
+    ok(no_side_scroll(pg), 'no sideways scroll')
+    ctx.close()
+
+    print('v2.37: chips, start on the camera, unknown barcode -> type first')
+    ctx, pg = new_page(b, base, 'bg-BG', dark=True)
+    pg.evaluate("localStorage.setItem('lc.typedNames', JSON.stringify({'xqzv': {n: 'xqzv', c: 3, t: 1}, 'once': {n: 'once', c: 1, t: 2}})); 0"); reload_ready(pg)
+    pg.click('#cardLabel'); pg.click('#typeBtn'); pg.wait_for_selector('#typePanel:not([hidden])')
+    chips = pg.eval_on_selector_all('#typeChipRow .tchip', 'b => b.map(x => x.textContent)')
+    ok(pg.is_visible('#typeChips') and len(chips) == 8 and chips[0] == 'Xqzv' and chips[1] == 'Сол' and 'Once' not in chips, 'empty field: 8 chips, your name used 3 times first, then common names (%s)' % chips)
+    pg.click('#typeChipRow .tchip >> nth=1'); pg.wait_for_timeout(150)
+    chips2 = pg.eval_on_selector_all('#typeChipRow .tchip', 'b => b.map(x => x.textContent)')
+    ok(pg.locator('#typeList li').count() == 1 and 'Сол' not in chips2 and len(chips2) == 8, 'a tap adds "Сол"; it leaves the chips, the next common name comes in (%s)' % chips2)
+    pg.fill('#typeInput', 'пш'); pg.wait_for_timeout(150)
+    ok(pg.is_hidden('#typeChips') and pg.is_visible('#typeSug'), 'while you type: suggestions, no chips')
+    pg.fill('#typeInput', ''); pg.dispatch_event('#typeInput', 'input'); pg.wait_for_timeout(150)
+    ok(pg.is_visible('#typeChips'), 'field empty again: chips again')
+    kb_close(pg); pg.click('#typeKind .seg[data-k=cosmetic]'); pg.wait_for_timeout(150)
+    ok(pg.inner_text('#typeChipRow .tchip >> nth=1') == 'Aqua', 'Cosmetic: INCI names as chips (Aqua …)')
+    pg.go_back(); pg.go_back(); pg.wait_for_timeout(300)
+    # unknown barcode -> "Напиши" is the first, big card
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    type_code(pg, '4001234567808'); pg.wait_for_selector('#labelPanel:not([hidden])')
+    xs = pg.evaluate("['#typeBtn', '#takePhoto'].map(q => Math.round(document.querySelector(q).getBoundingClientRect().left))")
+    bg = pg.evaluate("getComputedStyle(document.getElementById('typeBtn')).backgroundColor") == pg.evaluate("getComputedStyle(document.querySelector('.tabbar button[aria-current=page]')).color")
+    ok(pg.evaluate("document.getElementById('photoStart').classList.contains('typefirst')") and xs[0] < xs[1], 'barcode not found: "Напиши" is the first card (%s)' % xs)
+    pg.go_back(); pg.wait_for_timeout(200)
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    pg.click('#cardLabel'); pg.wait_for_selector('#labelPanel:not([hidden])')
+    ok(not pg.evaluate("document.getElementById('photoStart').classList.contains('typefirst')"), '"Прочети етикет" from the start: Снимай stays first')
+    # setting: open on the barcode camera
+    pg.click('.tabbar button[data-go=list]'); open_card(pg, 'setCard')
+    ok(pg.is_visible('#camStartSwitch') and pg.inner_text('#camStartRow label') == 'Отваряй направо камерата за баркод', 'Settings: switch "Отваряй направо камерата за баркод"')
+    pg.click('#camStartSwitch'); pg.wait_for_timeout(100)
+    ok(pg.evaluate("localStorage.getItem('lc.camStart')") == 'true', 'the switch is saved')
+    pg.evaluate("document.getElementById('exportBtn')")
+    pg.goto(base); pg.evaluate('LC.dbReady'); pg.wait_for_timeout(600)
+    ok(pg.is_visible('#manualForm') or pg.is_visible('#scanner video') or pg.evaluate("!!document.querySelector('.toast:not([hidden])')"), 'app start with the switch on: the barcode camera opens (no camera here: the code box opens)')
+    ctx.close()
 
     for lang, w, dark in (('en-GB', 320, False), ('de-AT', 390, False)):
         ctx, pg = new_page(b, base, lang, dark=dark, width=w)

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex, nofollow">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://world.openfoodfacts.org https://world.openbeautyfacts.org; img-src 'self' data: blob: https://images.openfoodfacts.org https://images.openbeautyfacts.org https://static.openfoodfacts.org https://static.openbeautyfacts.org; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://world.openfoodfacts.org https://world.openbeautyfacts.org https://raw.githubusercontent.com; img-src 'self' data: blob: https://images.openfoodfacts.org https://images.openbeautyfacts.org https://static.openfoodfacts.org https://static.openbeautyfacts.org; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Label Check</title>
   <meta name="description" content="Scan food and cosmetics and check every ingredient against official EU lists and your own avoid list.">
   <meta name="theme-color" content="#F2F5FA" id="themeColor">
@@ -15,7 +15,7 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>Label Check <span class="ver">v2.36</span></h1>
+    <h1>Label Check <span class="ver">v2.37</span></h1>
     <button class="iconbtn topsearch" id="topSearch" type="button" data-t-aria="card.search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg></button>
     <div class="langsw" id="langSwitch" role="group" aria-label="Language">
       <button type="button" data-lang="en" lang="en" aria-pressed="false">EN</button>
@@ -191,6 +191,7 @@
           <input id="typeInput" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" enterkeyhint="done" data-t-ph="type.ph">
         </div>
         <ul class="tsug" id="typeSug"></ul>
+        <div class="tchips" id="typeChips" hidden><p class="tchead" data-t="type.often">Often used</p><div class="tcrow" id="typeChipRow"></div></div>
         <h4 class="thead" id="typeHead"></h4>
         <ul class="qlist" id="typeList"></ul>
         <p class="empty" id="typeEmpty" data-t="type.empty"></p>
@@ -249,6 +250,24 @@
         </details>
         </div>
       </details>
+      <details class="lcard" id="packCard">
+        <summary><span class="lci" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7.5L12 4l8 3.5v9L12 20l-8-3.5z"/><path d="M4 7.5L12 11l8-3.5M12 11v9"/></svg></span><span class="lct"><strong data-t="pack.title">Products without internet</strong><small><span id="packSub"></span></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="lcbody">
+          <p class="minor lchelp" data-t="pack.lead"></p>
+          <div class="packrow">
+            <span class="grow"><strong data-t="pack.main">Austria · Bulgaria · Romania · Slovakia</strong><small id="packMainState"></small></span>
+            <button class="btn btn-primary small" id="packMainBtn" type="button" hidden></button>
+            <button class="linkbtn" id="packMainRm" type="button" data-t="pack.rm" hidden>Remove</button>
+          </div>
+          <div class="packrow">
+            <span class="grow"><strong data-t="pack.de">Germany (extra, bigger)</strong><small id="packDeState"></small></span>
+            <button class="btn btn-ghost small" id="packDeBtn" type="button" hidden></button>
+            <button class="linkbtn" id="packDeRm" type="button" data-t="pack.rm" hidden>Remove</button>
+          </div>
+          <progress class="readbar" id="packBar" max="100" value="0" hidden></progress>
+          <p class="minor" data-t="pack.src"></p>
+        </div>
+      </details>
       <details class="lcard" id="taughtBox" hidden>
         <summary><span class="lci" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></svg></span><span class="lct"><strong data-t="taught.title">Taught names</strong><small><span data-t="taught.fold"></span> <span class="count" id="taughtCount"></span></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
         <div class="lcbody">
@@ -284,7 +303,11 @@
           <label for="vibSwitch" class="grow" data-t="set.vib">Vibrate on the result</label>
           <span class="switch"><input type="checkbox" role="switch" id="vibSwitch"></span>
         </div>
-        <p class="minor setnote" id="vibNote" data-t="set.vibNote">1 short = no warnings · 2 = check · 3 = avoid. Android only.</p>
+        <div class="setting" id="camStartRow">
+            <label for="camStartSwitch" class="grow" data-t="set.camStart">Open on the barcode camera</label>
+            <span class="switch"><input type="checkbox" role="switch" id="camStartSwitch"></span>
+          </div>
+          <p class="minor setnote" id="vibNote" data-t="set.vibNote">1 short = no warnings · 2 = check · 3 = avoid. Android only.</p>
         <div class="offl" id="offline">
           <strong data-t="off.title">Label reader without internet</strong>
           <div class="ocrlang">

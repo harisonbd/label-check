@@ -1200,3 +1200,25 @@ details.lcard[open] > summary .lct small { white-space: normal; }
 .lcbody .lchelp { margin: 8px 2px 0; }
 .lcbody details.fold:last-of-type { border-bottom: 0; }
 .lcbody .setting:first-child { padding-top: 0; }
+
+/* v2.37: chips with often-used names on the Type screen (field empty) */
+.tchips { margin: 10px 0 0; }
+.tchead { margin: 0 2px 6px; color: var(--muted); font-size: 0.8rem; font-weight: 650; }
+.tcrow { display: flex; flex-wrap: wrap; gap: 8px; }
+.tchip { font: inherit; font-size: 0.9rem; color: var(--ink); display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 6px 14px 6px 12px;
+  border: 0; border-radius: 999px; background: var(--card2, var(--card)); cursor: pointer; }
+:where(.tchip) .dot { --dc: var(--gdot); }
+.tchip .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--dc); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dc) 30%, transparent); }
+/* v2.37: barcode not found -> "Type" is the first, big card; Photo becomes a normal card */
+#photoStart.typefirst #typeBtn { order: -1; background: var(--accent); color: var(--accent-ink); }
+#photoStart.typefirst #typeBtn small { color: inherit; opacity: 0.85; }
+#photoStart.typefirst #takePhoto { background: var(--card2, var(--card)); color: var(--ink); }
+#photoStart.typefirst #takePhoto small { color: var(--muted); opacity: 1; }
+
+/* v2.37: offline product pack card */
+.packrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--line); }
+.packrow .grow { flex: 1 1 160px; min-width: 0; }
+.packrow strong { display: block; font-size: 0.95rem; }
+.packrow small { display: block; color: var(--muted); font-size: 0.82rem; margin-top: 2px; }
+.packrow .btn.small { min-height: 40px; padding: 8px 14px; margin-top: 0; }
+#packBar { width: 100%; margin: 6px 0 2px; }

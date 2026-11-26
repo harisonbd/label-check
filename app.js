@@ -722,14 +722,19 @@
     const fresh = cached && !forceOnline && !noCats &&
       (cached.source === 'label' || Date.now() - cached.fetchedAt < CACHE_DAYS * 864e5);
     if (fresh) { showProduct(cached); return; }
+    // v2.37: the offline pack answers at once; online data follows quietly (pictures, categories, newer text)
+    const pk = forceOnline ? null : await packFind(code);
+    if (pk && pk.ingredientsText) { saveProduct(pk); showProduct(pk); packRefresh(code); return; }
 
     try {
       const p = await fetchProduct(code);
       if (p) { saveProduct(p); showProduct(p); }
       else if (cached) showProduct(cached, t('status.notOnline'));
+      else if (pk) { saveProduct(pk); showProduct(pk); }       // the pack knows the name, not the ingredients
       else showNotFound(code);
     } catch (e) {
       if (cached) showProduct(cached, t('status.noConn'));
+      else if (pk) { saveProduct(pk); showProduct(pk); }
       else showOffline(code);
     }
   }
@@ -2378,6 +2383,7 @@
     $('kindNote').hidden = true;
     $('labelLead').textContent = labelFor && isBarcode(labelFor.code)
       ? t('label.leadFor', { code: labelFor.code }) : '';   // v2.36: the general line went (fewer things); the barcode line stays
+    $('photoStart').classList.toggle('typefirst', !!(labelFor && isBarcode(labelFor.code) && !labelFor.ingredientsText));   // v2.37: unknown barcode -> typing first
     panel.scrollIntoView({ behavior: 'auto', block: 'start' });
   }
 
@@ -2443,6 +2449,7 @@
           el('i', { 'aria-hidden': 'true' }), el('span', {}, el('b', { text: String(a.counts[g]) }), ' ' + t('legend.' + g))))) : null));
     $('typeHead').textContent = t('type.list') + (typeItems.length ? ' (' + typeItems.length + ')' : '');
     $('typeHead').hidden = !typeItems.length;
+    renderTypeChips();
     $('typeEmpty').hidden = typeItems.length > 0;
     const rows = a ? a.rows : [];
     $('typeList').replaceChildren(...typeItems.map((txt, i) => {
@@ -2452,6 +2459,33 @@
         el('span', { class: 'qtx' }, el('strong', { text: cap(txt) }), why ? el('small', { text: why }) : null),
         el('button', { class: 'tx', type: 'button', 'aria-label': t('type.remove', { name: txt }), title: t('type.remove', { name: txt }),
           onclick: () => { typeItems.splice(i, 1); renderType(); renderTypeSug(); } }, icon(ICON.close))));
+    }));
+  }
+  // v2.37: when the field is empty, your most-used names (then common ones) as chips: one tap adds a name
+  const COMMON = {
+    food: { bg: ['сол', 'захар', 'вода', 'пшенично брашно', 'слънчогледово масло', 'мляко', 'яйца', 'царевично нишесте'],
+            de: ['Salz', 'Zucker', 'Wasser', 'Weizenmehl', 'Sonnenblumenöl', 'Milch', 'Eier', 'Maisstärke'],
+            en: ['salt', 'sugar', 'water', 'wheat flour', 'sunflower oil', 'milk', 'eggs', 'corn starch'] },
+    cosmetic: ['aqua', 'glycerin', 'parfum', 'sodium laureth sulfate', 'cocamidopropyl betaine', 'sodium chloride', 'citric acid', 'phenoxyethanol'],
+    household: ['aqua', 'sodium laureth sulfate', 'parfum', 'sodium chloride', 'citric acid', 'limonene', 'sodium citrate', 'benzisothiazolinone']
+  };
+  const TYPE_CHIPS = 8;
+  function typeChipNames() {
+    const have = new Set(typeItems.map(nrm)), out = [], seen = new Set();
+    const push = n => { const k = nrm(n); if (!k || have.has(k) || seen.has(k) || out.length >= TYPE_CHIPS) return; seen.add(k); out.push(n); };
+    Object.values(typedNames()).filter(o => o && o.n && o.c >= 2).sort((x, y) => y.c - x.c || y.t - x.t).forEach(o => push(o.n));
+    const c = COMMON[typeKind] || COMMON.food;
+    (Array.isArray(c) ? c : (c[LANG] || c.en)).forEach(push);
+    return out;
+  }
+  function renderTypeChips() {
+    const box = $('typeChips');
+    if (!box) return;
+    const names = typeQ.trim() ? [] : typeChipNames();
+    box.hidden = !names.length;
+    $('typeChipRow').replaceChildren(...names.map(n => {
+      const r = analyze(typedProduct([n], typeKind)).rows.find(z => z.pos === 1);
+      return el('button', { type: 'button', class: 'tchip', onclick: () => addTyped(n) }, el('i', { class: 'dot g-' + (r ? r.group : 'nodata'), 'aria-hidden': 'true' }), cap(n));
     }));
   }
   function typeSuggestions(q) {
@@ -2480,6 +2514,7 @@
       el('i', { class: 'dot g-nodata', 'aria-hidden': 'true' }), el('span', { class: 'nm', text: t('type.free', { text: q }) }))));
     box.replaceChildren(...items);
     box.hidden = !items.length;
+    renderTypeChips();
   }
   function addTyped(text) {
     const have = new Set(typeItems.map(nrm));
@@ -3919,6 +3954,7 @@
   function renderAll() {
     renderAvoid();
     renderListCards();
+    renderPack();
     renderAllergens();
     renderTaught();
     renderRules();
@@ -3936,7 +3972,7 @@
     const data = {
       app: 'label-check', version: 2, exportedAt: new Date().toISOString(),
       avoid: state.avoid, favs: state.favs, names: state.names, taught: state.taught, allergens: state.allergens, avoidFragrance: state.avoidFragrance, vegan: state.vegan,
-      lang: state.lang, theme: state.theme, bigText: state.bigText, vibrate: state.vibrate,
+      lang: state.lang, theme: state.theme, bigText: state.bigText, vibrate: state.vibrate, typedNames: typedNames(), camStart: !!store.get('camStart', false),
       history: state.history, products: state.products
     };
     const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' });
@@ -4033,6 +4069,12 @@
     if (['auto', 'light', 'dark'].includes(data.theme)) state.theme = data.theme;
     if (typeof data.bigText === 'boolean') state.bigText = data.bigText;
     if (typeof data.vibrate === 'boolean') state.vibrate = data.vibrate;
+    if (data.typedNames && typeof data.typedNames === 'object') {   // v2.37: your typed names (for the suggestions and chips)
+      const m = typedNames();
+      for (const [k, v] of Object.entries(data.typedNames)) if (v && typeof v.n === 'string' && !m[k]) m[k] = { n: v.n.slice(0, 120), c: Number(v.c) || 1, t: Number(v.t) || 0 };
+      store.set('typedNames', m);
+    }
+    if (typeof data.camStart === 'boolean') store.set('camStart', data.camStart);
     for (const k of ['avoid', 'history', 'products', 'favs', 'names', 'taught', 'allergens', 'avoidFragrance', 'vegan', 'lang', 'theme', 'bigText', 'vibrate']) store.set(k, state[k]);
     verdictCache.clear();
     syncSettingsControls();
@@ -4048,6 +4090,7 @@
     $('veganSwitch').checked = !!state.vegan;
     $('bigSwitch').checked = !!state.bigText;
     $('vibSwitch').checked = !!state.vibrate;
+    $('camStartSwitch').checked = !!store.get('camStart', false);
     $('langSelect').value = state.lang;
     $('themeSelect').value = state.theme;
   }
@@ -4198,7 +4241,7 @@
     $('typeInput').addEventListener('input', () => { typeOpenFocus = false; typing(true); });
     $('typeInput').addEventListener('blur', () => { typeBlurT = setTimeout(() => { if (document.activeElement !== $('typeInput')) typing(false); }, 250); });
     // a tap on a suggestion or on ✕ keeps the keyboard open (no jump)
-    ['typeSug', 'typeList'].forEach(id => $(id).addEventListener('pointerdown', e => { if (e.target.closest('button') && document.activeElement === $('typeInput')) e.preventDefault(); }));
+    ['typeSug', 'typeList', 'typeChips'].forEach(id => $(id).addEventListener('pointerdown', e => { if (e.target.closest('button') && document.activeElement === $('typeInput')) e.preventDefault(); }));
     if (window.visualViewport) window.visualViewport.addEventListener('resize', () => {
       const h = window.visualViewport.height;
       vvMax = Math.max(vvMax, h);
@@ -4260,6 +4303,12 @@
     }));
     $('themeSelect').addEventListener('change', e => { state.theme = e.target.value; store.set('theme', state.theme); applyTheme(); });
     $('bigSwitch').addEventListener('change', e => { state.bigText = e.target.checked; store.set('bigText', state.bigText); applyBig(); });
+    $('packMainBtn').addEventListener('click', () => packDownload('main'));
+    $('packDeBtn').addEventListener('click', () => packDownload('de'));
+    $('packMainRm').addEventListener('click', () => packRemove('main'));
+    $('packDeRm').addEventListener('click', () => packRemove('de'));
+    $('packCard').addEventListener('toggle', () => { if ($('packCard').open) packInfo().then(renderPack); });
+    $('camStartSwitch').addEventListener('change', e => { store.set('camStart', e.target.checked); setTimeout(renderListCards, 0); });
     $('vibSwitch').addEventListener('change', e => { state.vibrate = e.target.checked; store.set('vibrate', state.vibrate); if (state.vibrate) buzz('ok'); });
     try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme); } catch (e) { /* old browser */ }
     $('exportBtn').addEventListener('click', exportBackup);
@@ -4281,7 +4330,7 @@
     renderFavs();
     renderHistory();
     renderRules();
-    Promise.all([dbReady, ownReady]).then(() => { renderRules(); renderAllergens(); renderTaught(); renderFavs(); renderHistory(); });
+    Promise.all([dbReady, ownReady]).then(() => { renderRules(); renderAllergens(); renderTaught(); renderFavs(); renderHistory(); renderPack(); });
 
     if ('serviceWorker' in navigator) {
       // A new version took over (after a push): offer a reload. Not on the very first install.
@@ -4292,6 +4341,173 @@
     // Ask the browser to keep the saved data (it may otherwise clear it when the phone is short of space).
     try { if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(ok => ok || navigator.storage.persist()).catch(() => {}); } catch (e) { /* old browser */ }
     openFromUrl();
+  }
+
+  // ---------- v2.37: offline product pack (Open Food Facts / Open Beauty Facts, ODbL) ----------
+  // A GitHub job builds it once a month (tools/build_pack.py) and puts it on the branch "pack". The app keeps it in IndexedDB:
+  // one store per part ("main" = AT, BG, RO, SK; "de" = Germany, optional). Lookup order: your own products -> pack -> online.
+  const PACK_BASE = 'https://raw.githubusercontent.com/harisonbd/label-check/pack/';
+  const PACK_PARTS = ['main', 'de'];
+  let packDbP = null, packInfoCache = null, packBusy = null, packMetaCache = null;
+  function packDb() {
+    if (!packDbP) {
+      packDbP = new Promise((res, rej) => {
+        if (!('indexedDB' in window)) { rej(new Error('no indexedDB')); return; }
+        const rq = indexedDB.open('lc-pack', 1);
+        rq.onupgradeneeded = () => { const db = rq.result; for (const p of PACK_PARTS) db.createObjectStore(p); db.createObjectStore('meta'); };
+        rq.onsuccess = () => res(rq.result);
+        rq.onerror = () => rej(rq.error);
+      });
+      packDbP.catch(() => { packDbP = null; });
+    }
+    return packDbP;
+  }
+  const idbDone = tx => new Promise((res, rej) => { tx.oncomplete = () => res(); tx.onerror = tx.onabort = () => rej(tx.error || new Error('idb')); });
+  const idbReq = rq => new Promise((res, rej) => { rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); });
+  async function packMeta(fresh) {
+    if (packMetaCache && !fresh) return packMetaCache;
+    try { const db = await packDb(); packMetaCache = (await idbReq(db.transaction('meta').objectStore('meta').get('parts'))) || {}; }
+    catch (e) { packMetaCache = {}; }
+    return packMetaCache;
+  }
+  // The same barcode can be written as UPC-A (12 digits) or EAN-13 with a 0 in front.
+  const codeForms = c => [c].concat(c.length === 12 ? ['0' + c] : c.length === 13 && c[0] === '0' ? [c.slice(1)] : []);
+  async function packFind(code) {
+    const meta = await packMeta();
+    const parts = PACK_PARTS.filter(p => meta[p]);
+    if (!parts.length) return null;
+    try {
+      const db = await packDb(), tx = db.transaction(parts);
+      for (const part of parts) for (const c of codeForms(code)) {
+        const rec = await idbReq(tx.objectStore(part).get(c));
+        if (rec) return packProduct(code, rec, meta[part].date);
+      }
+    } catch (e) { /* no pack: go online */ }
+    return null;
+  }
+  // [kind, name, brand, ingredients, allergens, traces, additives] -> the same shape as a product from the online database
+  function packProduct(code, r, date) {
+    const kind = r[0] === 'c' ? 'cosmetic' : 'food', text = r[3] || '';
+    const list = (s, pre) => String(s || '').split(',').filter(Boolean).map(x => pre + x);
+    return {
+      code, kind, source: kind === 'food' ? 'off' : 'obf', pack: date || true,
+      name: r[1] || '', brand: r[2] || '', image: '',
+      ingredientsText: text, texts: text ? [text] : [],
+      tags: list(r[6], 'en:'), allergens: list(r[4], 'en:'), traces: list(r[5], 'en:'), analysis: [],
+      nutriscore: null, nova: null, nut: null, updated: null, fetchedAt: Date.now(),
+      url: (kind === 'food' ? OFF : OBF) + '/product/' + code
+    };
+  }
+  // After a result from the pack: when online, ask the online database quietly (pictures, categories for "Instead", newer text).
+  function packRefresh(code) {
+    if (navigator.onLine === false) return;
+    fetchProduct(code).then(p => {
+      if (!p) return;
+      const before = state.products[code];
+      saveProduct(p);
+      const cur = state.current && state.current.p;
+      if (!cur || cur.code !== code || $('result').hidden) return;
+      if (before && p.ingredientsText === before.ingredientsText && p.kind === before.kind) return;   // same answer: no jump on the screen
+      const a = renderResult(p, t('status.updated'));
+      addHistory(p, a.verdict);
+    }).catch(() => { /* offline: the pack result stays */ });
+  }
+  async function packInfo(fresh) {
+    if (packInfoCache && !fresh && Date.now() - packInfoCache.at < 6 * 3600e3) return packInfoCache.info;
+    try {
+      const r = await fetch(PACK_BASE + 'pack-info.json', { cache: 'no-store' });
+      const info = r.ok ? await r.json() : null;
+      packInfoCache = { at: Date.now(), info: info && info.parts ? info : null };
+    } catch (e) { return packInfoCache ? packInfoCache.info : null; }
+    return packInfoCache.info;
+  }
+  async function packDownload(part) {
+    if (packBusy) return;
+    if (!('DecompressionStream' in window)) { toast(t('pack.old')); return; }
+    packBusy = { part, got: 0, total: 0 };
+    renderPack();
+    try {
+      const info = await packInfo(true), pi = info && info.parts && info.parts[part];
+      if (!pi) throw new Error('no pack');
+      try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) { /* ignore */ }
+      const r = await fetch(PACK_BASE + pi.file, { cache: 'no-store' });
+      if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
+      packBusy.total = pi.bytes || 0;
+      const count = new TransformStream({ transform(ch, c) { packBusy.got += ch.byteLength; renderPackBar(); c.enqueue(ch); } });
+      const reader = r.body.pipeThrough(count).pipeThrough(new DecompressionStream('gzip')).pipeThrough(new TextDecoderStream()).getReader();
+      const db = await packDb();
+      await idbDone((() => { const tx = db.transaction(part, 'readwrite'); tx.objectStore(part).clear(); return tx; })());
+      let buf = '', head = null, batch = [], n = 0;
+      const flush = async () => {
+        if (!batch.length) return;
+        const tx = db.transaction(part, 'readwrite'), s = tx.objectStore(part);
+        for (const x of batch) s.put(x.slice(1), String(x[0]));
+        await idbDone(tx); n += batch.length; batch = [];
+      };
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (value) buf += value;
+        let i;
+        while ((i = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, i); buf = buf.slice(i + 1);
+          if (!line.trim()) continue;
+          const j = JSON.parse(line);
+          if (!head) { head = j; continue; }
+          if (Array.isArray(j) && j.length >= 2) batch.push(j);
+          if (batch.length >= 2000) await flush();
+        }
+        if (done) break;
+      }
+      await flush();
+      if (!head || !n) throw new Error('empty pack');
+      const meta = Object.assign({}, await packMeta(true), { [part]: { date: head.date, n, bytes: packBusy.total } });
+      const tx = db.transaction('meta', 'readwrite'); tx.objectStore('meta').put(meta, 'parts'); await idbDone(tx);
+      packMetaCache = meta;
+      toast(tn('pack.done', n, { n: fmtNum(n) }));
+    } catch (e) {
+      toast(t('pack.fail'));
+    }
+    packBusy = null;
+    renderPack();
+  }
+  async function packRemove(part) {
+    try {
+      const db = await packDb(), meta = Object.assign({}, await packMeta(true));
+      delete meta[part];
+      const tx = db.transaction([part, 'meta'], 'readwrite');
+      tx.objectStore(part).clear(); tx.objectStore('meta').put(meta, 'parts');
+      await idbDone(tx); packMetaCache = meta;
+    } catch (e) { /* nothing to remove */ }
+    renderPack();
+  }
+  const fmtNum = n => { try { return Number(n).toLocaleString(LOCALE[LANG]); } catch (e) { return String(n); } };
+  const fmtMB = b => (Math.max(0.1, b / 1048576)).toLocaleString(LOCALE[LANG], { maximumFractionDigits: 1 }) + ' MB';
+  function renderPackBar() {
+    const bar = $('packBar');
+    if (!bar) return;
+    bar.hidden = !packBusy;
+    if (packBusy && packBusy.total) bar.value = Math.min(100, Math.round(packBusy.got / packBusy.total * 100));
+  }
+  async function renderPack() {
+    if (!$('packCard')) return;
+    const meta = await packMeta(), info = packInfoCache ? packInfoCache.info : null;
+    let sub = '';
+    for (const part of PACK_PARTS) {
+      const have = meta[part], pi = info && info.parts && info.parts[part];
+      const st = $(part === 'main' ? 'packMainState' : 'packDeState'), btn = $(part === 'main' ? 'packMainBtn' : 'packDeBtn'), rm = $(part === 'main' ? 'packMainRm' : 'packDeRm');
+      const busy = packBusy && packBusy.part === part;
+      const newer = have && pi && pi.file && info.date > have.date;
+      st.textContent = busy ? t('pack.busy') : have ? tn('pack.have', have.n, { n: fmtNum(have.n), date: fmtDate(Date.parse(have.date)) }) + (newer ? ' · ' + t('pack.newer') : '')
+        : pi ? t('pack.no', { mb: fmtMB(pi.bytes) }) : info === null && packInfoCache ? t('pack.notReady') : t('pack.noInfo');
+      btn.hidden = !busy && ((have && !newer) || (!have && !pi));
+      btn.disabled = !!packBusy;
+      btn.textContent = have ? t('pack.update', { mb: pi ? fmtMB(pi.bytes) : '' }) : t('pack.get', { mb: pi ? fmtMB(pi.bytes) : '' });
+      rm.hidden = !have || busy;
+      if (part === 'main') sub = have ? tn('pack.have', have.n, { n: fmtNum(have.n), date: fmtDate(Date.parse(have.date)) }) : t('pack.subNo');
+      else if (have) sub += ' · ' + t('pack.plusDe');
+    }
+    $('packSub').textContent = sub;
+    renderPackBar();
   }
 
   // ---------- Label reader without internet (all 7 languages on the phone) ----------
@@ -4346,7 +4562,7 @@
   function openFromUrl() {
     const q = new URLSearchParams(location.search);
     const goTo = q.get('go'), shared = q.get('shared');
-    if (!goTo && !shared) return;
+    if (!goTo && !shared) { if (store.get('camStart', false)) startCamera(); return; }   // v2.37: setting "Open on the barcode camera"
     try { history.replaceState({ tab: 'scan' }, '', location.pathname); } catch (e) { /* ignore */ }
     if (shared && 'caches' in window) {
       caches.open('lc-share').then(async c => {
@@ -4363,7 +4579,7 @@
   }
 
   // Small test hook (used only by automated checks).
-  window.LC = { analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
+  window.LC = { packInfo: f => packInfo(f), renderPack: () => renderPack(), packFind: c => packFind(c), analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
     buildReport, tsvPieces, listPieces, getRep: () => rep, repairNames, fixMixed, leftOut, garbledName, isSupplementText, cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, nameIdent, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart, sameCatSaved, suggestAlternatives, catScore, altCache, altTimes };
 
   init();
