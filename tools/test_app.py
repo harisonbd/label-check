@@ -563,7 +563,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.39' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.40' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -1038,7 +1038,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v57')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v58')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1596,16 +1596,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v57'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v58'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v57' not in keys: break
+        if 'label-check-v58' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v57' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v58' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1933,6 +1933,62 @@ with sync_playwright() as p:
     read_label(pg, 'Zutaten: Schweinefleisch, Salz, Konservierungsstoff: Kaliumnitrat, Zucker.', 'food')
     ok(pg.inner_text('#qList .qaccbtn') == 'Für mich OK' and no_side_scroll(pg) and pg.evaluate("(() => { const b = document.querySelector('#qList .qaccbtn').getBoundingClientRect(); return b.right <= innerWidth && b.height >= 40; })()"),
        'DE 320 px: "Für mich OK" fits, at least 40 px high')
+    ctx.close()
+
+    # ---- v2.40: "To check" -> one file to Claude -> import the answer ----
+    print('v2.40: To check, one file to Claude, import the answer')
+    ctx, pg = new_page(b, base, 'bg-BG', dark=True)
+    ok(pg.is_hidden('#toCheckRow'), 'start: no "За проверка" row while nothing waits')
+    seed = {}
+    for i, (nm, tx) in enumerate([('Крекери', 'Съставки: пшенично брашно, сирене, сол'), ('', 'Съставки: захар, какаово масло'), ('Чипс', 'Съставки: картофи, сол')]):
+        seed['label-t%d' % i] = {'code': 'label-t%d' % i, 'kind': 'food', 'source': 'label', 'name': nm, 'ingredientsText': tx, 'texts': [tx], 'tags': [], 'allergens': [], 'analysis': [],
+                                 'read': {'photo': True, 'list': True}, 'fetchedAt': 1795700000000 + i}
+    seed['label-t2']['readOk'] = 1795700000000                       # marked "Всичко е вярно": not to check
+    seed['label-typed'] = dict(seed['label-t0'], code='label-typed', read={'typed': True})   # typed: not to check
+    pg.evaluate("s => { localStorage.setItem('lc.products', JSON.stringify(s)); }", seed); reload_ready(pg)
+    ok(pg.is_visible('#toCheckRow') and pg.inner_text('#toCheckSub') == '2 прочетени етикета чакат', 'start: "За проверка от Claude · 2 прочетени етикета чакат" (checked and typed products are not in it)')
+    pg.click('#toCheckRow'); pg.wait_for_selector('#checkPanel:not([hidden])'); pg.wait_for_timeout(300)
+    ok(pg.locator('#chkList li').count() == 2 and pg.inner_text('#chkCount') == '(2)' and 'Без име' in pg.inner_text('#chkList') and pg.inner_text('#chkSend') == 'Изпрати 2 на Claude',
+       'the screen lists 2 products ("Без име" for no name), button "Изпрати 2 на Claude"')
+    pg.evaluate("""() => new Promise(res => { const rq = indexedDB.open('lc-photos', 1); rq.onupgradeneeded = () => rq.result.createObjectStore('p');
+      rq.onsuccess = () => { const tx = rq.result.transaction('p', 'readwrite'); tx.objectStore('p').put({ at: 1, list: ['data:image/jpeg;base64,AAAA', 'data:image/jpeg;base64,BBBB'] }, 'label-t0'); tx.oncomplete = res; }; })""")
+    pg.go_back(); pg.wait_for_timeout(200); pg.click('#toCheckRow'); pg.wait_for_timeout(400)
+    ok('2 снимки' in pg.inner_text('#chkList li:has-text("Крекери")'), 'a product with saved photos says "2 снимки"')
+    with pg.expect_download() as dl: pg.click('#chkSend')
+    import tempfile as _tf
+    fp = os.path.join(_tf.mkdtemp(), 'f.txt'); dl.value.save_as(fp); body = open(fp, encoding='utf-8').read()
+    data = json.loads(body.rstrip().split('\n')[-1])                 # the note (with the answer format) first, the data on the last line
+    ok(body.startswith('NOTE FOR CLAUDE: This file comes from the Label Check app: 2 products to check') and '"labelCheckAnswer":1' in body and data['batch'] == 2
+       and sorted(x['code'] for x in data['products']) == ['label-t0', 'label-t1'] and next(x for x in data['products'] if x['code'] == 'label-t0')['photos'] == ['data:image/jpeg;base64,AAAA', 'data:image/jpeg;base64,BBBB'],
+       'one file: the note for Claude (with the answer format), 2 products, the saved photos inside (%s)' % dl.value.suggested_filename)
+    pg.wait_for_timeout(300)
+    ok(pg.locator('#chkList .tag.sent').count() == 2 and pg.evaluate("document.querySelector('#chkSteps li[data-s=\"2\"]').classList.contains('done')"), 'after sending: both say "изпратено", step 2 is done')
+    ans = {'labelCheckAnswer': 1, 'products': [
+        {'code': 'label-t0', 'name': 'Крекери със сирене', 'kind': 'food', 'ingredients': 'Съставки: пшенично брашно, сирене (мляко), сол', 'en': 'wheat flour, cheese (milk), salt', 'note': 'milk was missing'},
+        {'code': 'label-t1', 'name': '', 'kind': 'food', 'ingredients': None, 'note': 'no photo'},
+        {'code': 'label-gone', 'ingredients': 'x'}]}
+    pg.click('#chkPasteFold > summary'); pg.fill('#chkPaste', 'Here it is:\n```json\n' + json.dumps(ans, ensure_ascii=False) + '\n```'); pg.click('#chkPasteBtn'); pg.wait_for_timeout(500)
+    p0 = pg.evaluate("LC.state.products['label-t0']")
+    ok(p0['ingredientsText'] == 'Съставки: пшенично брашно, сирене (мляко), сол' and p0['name'] == 'Крекери' and p0['texts'][1] == 'EN: wheat flour, cheese (milk), salt' and p0.get('claude') and 'sent' not in p0,
+       'import: the correct list replaces the read text (+ EN line); your name stays; the product is "checked by Claude"')
+    ok(pg.locator('#chkList li').count() == 1 and 'Claude: no photo' in pg.inner_text('#chkList') and pg.inner_text('#chkList .tag') == 'чака' and pg.inner_text('#chkLast').startswith('Последен отговор:'),
+       'a product Claude could not read waits again, with Claude\'s note; "Последен отговор: …"')
+    ok(pg.evaluate("new Promise(res => { const rq = indexedDB.open('lc-photos', 1); rq.onsuccess = () => { const g = rq.result.transaction('p').objectStore('p').get('label-t0'); g.onsuccess = () => res(!g.result); }; })"), 'the photos of an answered product are deleted')
+    ok(not pg.eval_on_selector('#chkPasteFold', 'd => d.open') and pg.input_value('#chkPaste') == '', 'after a good import the paste box is empty and folded')
+    pg.click('#chkPasteFold > summary'); pg.fill('#chkPaste', 'hello'); pg.click('#chkPasteBtn'); pg.wait_for_timeout(300)
+    ok('Това не е отговор за Label Check' in pg.inner_text('#toast'), 'other text: "Това не е отговор за Label Check …"')
+    pg.evaluate("LC.showProduct(LC.state.products['label-t0'])"); pg.wait_for_timeout(500)
+    ok('Проверено от Claude' in pg.inner_text('#readCard'), 'the product: the read card is one line "Проверено от Claude"')
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    pg.wait_for_timeout(300)
+    ok(pg.inner_text('#toCheckSub') == '1 прочетен етикет чака', 'start: "1 прочетен етикет чака"')
+    ok(no_side_scroll(pg), 'no sideways scroll')
+    ctx.close()
+    ctx, pg = new_page(b, base, 'de-AT', width=320)
+    pg.evaluate("s => { localStorage.setItem('lc.products', JSON.stringify(s)); }", {'label-t0': seed['label-t0']}); reload_ready(pg)
+    pg.click('#toCheckRow'); pg.wait_for_timeout(300)
+    ok(pg.inner_text('#chkSend') == '1 an Claude senden' and no_side_scroll(pg) and pg.evaluate("document.getElementById('chkSend').getBoundingClientRect().height") <= 80, 'DE 320 px: "1 an Claude senden" fits')
     ctx.close()
 
     for lang, w, dark in (('en-GB', 320, False), ('de-AT', 390, False)):

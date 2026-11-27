@@ -827,12 +827,14 @@
     $('labelPanel').hidden = true;
     $('searchPanel').hidden = true;
     $('typePanel').hidden = true;
+    $('checkPanel').hidden = true;
     $('status').hidden = true;
   }
 
   function showScanner() {
     hideAll();
     $('scanner').hidden = false;
+    renderToCheckRow();
     state.current = null;
     window.scrollTo({ top: 0 });
   }
@@ -848,7 +850,7 @@
 
   function closePanel() {
     const v = history.state && history.state.view;
-    if (v === 'label' || v === 'search' || v === 'type') { try { history.back(); return; } catch (e) { /* fall through */ } }
+    if (v === 'label' || v === 'search' || v === 'type' || v === 'check') { try { history.back(); return; } catch (e) { /* fall through */ } }
     showScanner();
   }
 
@@ -2158,9 +2160,9 @@
     const left = (p.readDropped || []).concat(left0.filter(x => !(p.readDropped || []).includes(x)), (p.readAdded || []).filter(x => !left0.includes(x)));
     if (p.source !== 'label' && !q.length) return null;
     // v2.38: a read you marked as correct is one line (open it again with "Покажи")
-    if (p.readOk && !q.length && !readOpen.has(p.code)) {
+    if ((p.readOk || p.claude) && !q.length && !readOpen.has(p.code)) {
       return el('div', { class: 'readB ok', id: 'readCard' },
-        el('div', { class: 'rd-top' }, el('span', { class: 'rd-badge', text: '✓' }), el('b', { text: t('read.okDone') }),
+        el('div', { class: 'rd-top' }, el('span', { class: 'rd-badge', text: '✓' }), el('b', { text: t(p.claude && !p.readOk ? 'read.okClaude' : 'read.okDone') }),
           el('button', { class: 'linkbtn', type: 'button', id: 'readShow', text: t('read.show'), onclick: () => { readOpen.add(p.code); renderResult(p); } })));
     }
     const n = k => items.filter(x => x.state === k).length;
@@ -3784,6 +3786,7 @@
       url: ''
     };
     saveProduct(p);
+    if (ocrFile && rep && rep.photos && rep.photos.length) savePhotos(code, rep.photos);   // v2.40: for the "To check" file
     buzzNext = true;   // a new answer: you can feel it (vibration)
     showProduct(p);
   }
@@ -4054,6 +4057,7 @@
     renderAvoid();
     renderListCards();
     renderPack();
+    renderToCheckRow();
     renderAllergens();
     renderTaught();
     renderRules();
@@ -4274,6 +4278,9 @@
     } else if (st.view === 'type') {
       showPanel('typePanel');
       renderType();
+    } else if (st.view === 'check') {
+      showPanel('checkPanel');
+      renderCheck();
     } else if (st.view === 'label' || st.view === 'cam') {
       showPanel('labelPanel');
       if (st.view === 'label' && camUiOn()) closeCam(true);
@@ -4402,6 +4409,10 @@
     }));
     $('themeSelect').addEventListener('change', e => { state.theme = e.target.value; store.set('theme', state.theme); applyTheme(); });
     $('bigSwitch').addEventListener('change', e => { state.bigText = e.target.checked; store.set('bigText', state.bigText); applyBig(); });
+    $('toCheckRow').addEventListener('click', openCheck);
+    $('chkSend').addEventListener('click', sendCheck);
+    $('chkFile').addEventListener('change', async e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) importAnswer(await f.text()); });
+    $('chkPasteBtn').addEventListener('click', () => { if (importAnswer($('chkPaste').value)) { $('chkPaste').value = ''; $('chkPasteFold').open = false; } });
     $('packMainBtn').addEventListener('click', () => packDownload('main'));
     $('packDeBtn').addEventListener('click', () => packDownload('de'));
     $('packMainRm').addEventListener('click', () => packRemove('main'));
@@ -4429,7 +4440,7 @@
     renderFavs();
     renderHistory();
     renderRules();
-    Promise.all([dbReady, ownReady]).then(() => { renderRules(); renderAllergens(); renderTaught(); renderFavs(); renderHistory(); renderPack(); });
+    Promise.all([dbReady, ownReady]).then(() => { renderRules(); renderAllergens(); renderTaught(); renderFavs(); renderHistory(); renderPack(); renderToCheckRow(); });
 
     if ('serviceWorker' in navigator) {
       // A new version took over (after a push): offer a reload. Not on the very first install.
@@ -4607,6 +4618,143 @@
     }
     $('packSub').textContent = sub;
     renderPackBar();
+  }
+
+  // ---------- v2.40: "To check" (agreed 25 Nov, mockup "2 To check + send") ----------
+  // Photo reads that you did not mark as correct wait here. One button makes ONE file for Claude (all of them, with small
+  // photos). Claude sends back a JSON answer; "Import answer" puts the correct lists into your products. Nothing leaves the
+  // phone unless you share the file.
+  const CLAUDE_BATCH_NOTE =
+    'NOTE FOR CLAUDE: This file comes from the Label Check app: {n} products to check (label photos the app read). For each product the JSON below has "code", "name", "kind", what the app read ("text"), its rows, and the label photos ("photos", base64 JPEG; some products have none).\n' +
+    'Please, for each product: 1) read the ingredient list from the photos (no photos: check "text" for misread names), 2) write the correct full list in the language on the label, 3) say in a few words what the app got wrong.\n' +
+    'Then reply with ONE file named label-check-answer.json (or one code block) that has exactly this JSON and nothing else:\n' +
+    '{"labelCheckAnswer":1,"products":[{"code":"<code as given>","name":"<product name>","kind":"food|cosmetic|household","ingredients":"<full list, language of the label>","en":"<English translation, or empty>","note":"<what was wrong, short>"}]}\n' +
+    'If you cannot read a list, use "ingredients": null and say why in "note". Keep every "code" exactly as given.\n\n';
+  const toCheck = () => Object.values(state.products).filter(p => p && p.source === 'label' && p.read && p.read.photo && !p.read.typed && !p.readOk && !p.claude && !p.shared)
+    .sort((x, y) => (y.fetchedAt || 0) - (x.fetchedAt || 0));
+  let photoDbP = null;
+  function photoDb() {
+    if (!photoDbP) {
+      photoDbP = new Promise((res, rej) => {
+        if (!('indexedDB' in window)) { rej(new Error('no indexedDB')); return; }
+        const rq = indexedDB.open('lc-photos', 1);
+        rq.onupgradeneeded = () => rq.result.createObjectStore('p');
+        rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
+      });
+      photoDbP.catch(() => { photoDbP = null; });
+    }
+    return photoDbP;
+  }
+  async function savePhotos(code, files) {             // small JPEGs (about 100 KB each), at most 6 per product
+    try {
+      const list = (await Promise.all(files.slice(0, 6).map(smallPhoto))).filter(Boolean);
+      if (!list.length) return;
+      const db = await photoDb(), tx = db.transaction('p', 'readwrite');
+      tx.objectStore('p').put({ at: Date.now(), list }, code); await idbDone(tx);
+    } catch (e) { /* no photo store: the file goes without photos */ }
+  }
+  async function getPhotos(code) {
+    try { const db = await photoDb(); const v = await idbReq(db.transaction('p').objectStore('p').get(code)); return (v && v.list) || []; } catch (e) { return []; }
+  }
+  async function dropPhotos(codes) {
+    try { const db = await photoDb(), tx = db.transaction('p', 'readwrite'), s = tx.objectStore('p'); codes.forEach(c => s.delete(c)); await idbDone(tx); } catch (e) { /* ignore */ }
+  }
+  function renderToCheckRow() {
+    const row = $('toCheckRow');
+    if (!row) return;
+    const n = toCheck().length;
+    row.hidden = !n;
+    if (n) $('toCheckSub').textContent = tn('chk.rowSub', n);
+  }
+  function openCheck() {
+    showPanel('checkPanel');
+    if (!history.state || history.state.view !== 'check') pushState({ tab: 'scan', view: 'check' });
+    renderCheck();
+  }
+  async function renderCheck() {
+    const list = toCheck(), waiting = list.filter(p => !p.sent);
+    $('chkCount').textContent = '(' + list.length + ')';
+    $('chkEmpty').hidden = list.length > 0;
+    const nPh = await Promise.all(list.map(p => getPhotos(p.code).then(l => l.length)));
+    $('chkList').replaceChildren(...list.map((p, i) => el('li', {}, el('button', { type: 'button', class: 'qrow', onclick: () => openSaved(p.code) },
+      el('span', { class: 'thumb', 'aria-hidden': 'true' }, icon(ICON.cam || 'M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.5-2h6l1.5 2h2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5zM12 16.5a3.5 3.5 0 1 0 0-7a3.5 3.5 0 0 0 0 7z')),
+      el('span', { class: 'qtx' }, el('strong', { text: p.name || t('chk.noName') }),
+        el('small', { text: [fmtDay(p.fetchedAt), nPh[i] ? tn('chk.photos', nPh[i]) : t('chk.noPhoto'), p.claudeNote ? t('chk.claudeNote', { note: p.claudeNote }) : ''].filter(Boolean).join(' · ') })),
+      el('span', { class: 'tag' + (p.sent ? ' sent' : ''), text: t(p.sent ? 'chk.sent' : 'chk.wait') })))));
+    const step = !list.length ? 4 : waiting.length ? 1 : 2;
+    document.querySelectorAll('#chkSteps li').forEach(li => li.classList.toggle('done', +li.dataset.s <= step));
+    $('chkSend').textContent = tn('chk.send', list.length || 1);
+    $('chkSend').disabled = !list.length;
+    const last = store.get('chkLast', null);
+    $('chkLast').textContent = last && last.at ? t('chk.last', { date: fmtDay(last.at) }) : '';
+    renderToCheckRow();
+  }
+  async function sendCheck() {
+    const list = toCheck();
+    if (!list.length) return;
+    const btn = $('chkSend'); btn.disabled = true;
+    try {
+      const products = [];
+      for (const p of list) {
+        const a = analyze(p);
+        products.push({ code: p.code, name: p.name || '', kind: p.kind, verdict: a.verdict, text: p.ingredientsText || '',
+          rows: a.rows.map(r => ({ text: r.text || '', group: r.group })), photos: await getPhotos(p.code) });
+      }
+      const data = { app: 'Label Check', version: (document.querySelector('.ver') || {}).textContent || '', created: new Date().toISOString(), language: LANG, batch: products.length, products };
+      const d = new Date(), pad = n => String(n).padStart(2, '0');
+      const name = 'label-check-to-check-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '.txt';
+      const file = new File([CLAUDE_BATCH_NOTE.replace('{n}', String(products.length)) + JSON.stringify(data)], name, { type: 'text/plain' });
+      let done = false;
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: 'Label Check' }); done = true; }
+        catch (e) { if (e && e.name === 'AbortError') return; }
+      }
+      if (!done) {
+        const url = URL.createObjectURL(file), link = document.createElement('a');
+        link.href = url; link.download = name; document.body.append(link); link.click(); link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+      }
+      const now = Date.now();
+      for (const p of list) { p.sent = now; saveProduct(p); }
+      store.set('chkSent', now);
+      toast(t('chk.sentToast'));
+    } finally { btn.disabled = false; renderCheck(); }
+  }
+  function parseAnswer(raw) {
+    const s = String(raw || ''), i = s.indexOf('{'), j = s.lastIndexOf('}');
+    if (i < 0 || j < i) return null;
+    let o;
+    try { o = JSON.parse(s.slice(i, j + 1)); } catch (e) { return null; }
+    if (!o || o.labelCheckAnswer !== 1 || !Array.isArray(o.products)) return null;
+    return o.products.filter(x => x && typeof x.code === 'string').slice(0, 500);
+  }
+  function importAnswer(raw) {
+    const items = parseAnswer(raw);
+    if (!items) { toast(t('chk.bad')); return false; }
+    let n = 0, skip = 0;
+    const done = [];
+    for (const x of items) {
+      const p = state.products[x.code];
+      if (!p) { skip++; continue; }
+      const ingr = typeof x.ingredients === 'string' ? x.ingredients.trim().slice(0, 4000) : '';
+      const note = typeof x.note === 'string' ? x.note.trim().slice(0, 300) : '';
+      if (!ingr) { delete p.sent; if (note) p.claudeNote = note; saveProduct(p); continue; }   // Claude could not read it: it waits again
+      const en = typeof x.en === 'string' ? x.en.trim().slice(0, 4000) : '';
+      p.ingredientsText = ingr;
+      p.texts = [ingr].concat(en ? ['EN: ' + en] : []);
+      if (typeof x.name === 'string' && x.name.trim() && (!p.name || p.nameFrom === 'photo')) { p.name = x.name.trim().slice(0, 120); delete p.nameFrom; }
+      if (KINDS.includes(x.kind) && !p.kindSet) p.kind = x.kind;
+      p.claude = { at: Date.now(), note };
+      ['sent', 'claudeNote', 'readAdded', 'readDropped', 'readKept', 'readLeft', 'readFixed'].forEach(k => { delete p[k]; });
+      saveProduct(p);
+      n++; done.push(p.code);
+    }
+    dropPhotos(done);
+    if (n) store.set('chkLast', { at: Date.now(), n });
+    toast(tn('chk.imported', n) + (skip ? ' ' + tn('chk.skipped', skip) : ''));
+    renderCheck();
+    renderHistory();
+    return true;
   }
 
   // ---------- Label reader without internet (all 7 languages on the phone) ----------
