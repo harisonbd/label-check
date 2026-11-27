@@ -294,7 +294,26 @@
     };
   }
 
-  // v2.39: the key of a name for "accepted in this product" (the E-number when there is one, else the shown name)
+  // v2.43 (user 27 Nov: "the icons are fine"): colour = what to do, a small mark in the dot = why.
+  // ✕ not allowed · person = because of your profile · ! concern · ? under review · i information · ✓ accepted by you · – no data
+  const PERSONAL = new Set(['mine', 'allergen', 'vegan', 'fragrance']);
+  function markOf(r, g) {
+    g = g || (r && r.group);
+    if (!r) return g === 'nodata' ? '–' : '';
+    if (g === 'red') return PERSONAL.has(r.why) || r.mine ? 'p' : '✕';
+    if (g === 'orange') return r.level === 'u' || r.ask ? '?' : '!';
+    if (g === 'info') return r.accepted ? '✓' : 'i';
+    if (g === 'nodata') return '–';
+    return '';
+  }
+  const PERSON_SVG = 'M12 11.2a3.2 3.2 0 1 0 0-6.4a3.2 3.2 0 0 0 0 6.4zM5.5 19.5c.8-3.2 3.3-5 6.5-5s5.7 1.8 6.5 5';
+  function rdot(r, g) {
+    g = g || (r ? r.group : 'nodata');
+    const m = markOf(r, g);
+    return el('i', { class: 'dot g-' + g + (m ? ' mk' : ''), 'data-m': m || null, 'aria-hidden': 'true' }, m === 'p' ? icon(PERSON_SVG) : null);   // text marks come from CSS (attr), so names stay clean
+  }
+
+  // v2.39: the key of a name for "accepted in this product\" (the E-number when there is one, else the shown name)
   const accKey = r => {
     const es = (r.additives || []).map(x => x && x.e).filter(Boolean);
     return String(es.length ? es.join('+') : (r.src && r.src.inci) || r.label || r.text || '').toLowerCase().trim();
@@ -709,10 +728,12 @@
     return null;
   }
 
+  const isOwn = q => !!q && (q.source === 'label' || q.readOk || q.claude || (q.accepted && q.accepted.length));
   function saveProduct(p) {
     state.products[p.code] = p;
     verdictCache.delete(p.code);
-    const codes = Object.keys(state.products).filter(c => !state.favs.includes(c));
+    // v2.43: products you checked yourself are never removed by the limit; only copies from the internet / the pack go
+    const codes = Object.keys(state.products).filter(c => !state.favs.includes(c) && !isOwn(state.products[c]));
     const extra = Object.keys(state.products).length - MAX_PRODUCTS;
     if (extra > 0) {
       codes
@@ -750,6 +771,8 @@
       toast(t('err.digits'));
       return;
     }
+    if (linkFor && Date.now() - linkFor.at < 5 * 60e3) { const p = linkFor.p; linkFor = null; linkToBarcode(p, code); return; }   // v2.43
+    linkFor = null;
     showChecking(code);
     await ownReady;
 
@@ -759,7 +782,7 @@
     const noCats = cached && (cached.source === 'off' || cached.source === 'obf') && !Array.isArray(cached.cats) && navigator.onLine !== false;
     const fresh = cached && !forceOnline && !noCats &&
       (cached.source === 'label' || Date.now() - cached.fetchedAt < CACHE_DAYS * 864e5);
-    if (fresh) { showProduct(cached); return; }
+    if (fresh) { await showProduct(cached); if (isOwn(cached)) showKnown(cached); return; }
     // v2.37: the offline pack answers at once; online data follows quietly (pictures, categories, newer text)
     const pk = forceOnline ? null : await packFind(code);
     if (pk && pk.ingredientsText) { saveProduct(pk); showProduct(pk); packRefresh(code); return; }
@@ -1024,7 +1047,7 @@
         shown.map(r => {
           const why = [...new Set([chipOf(r), whyOf(r)].filter(Boolean))].join(' · ');
           return el('li', { class: r.group === 'orange' ? 'qacc-li' : null }, el('button', { type: 'button', class: 'qrow', onclick: e => openDetail(r.i, e.currentTarget) },
-            el('i', { class: 'dot g-' + r.group, 'aria-hidden': 'true' }),
+            rdot(r),
             el('span', { class: 'qtx' },
               el('strong', { text: r.label + (r.why === 'allergen' && r.traceOnly ? ' (' + t('qa.traceMark') + ')' : '') }),
               why ? el('small', { text: why }) : null),
@@ -1039,7 +1062,7 @@
     // v2.39: what you accepted in this product, with "Върни"
     const accRows = a.rows.filter(r => r.accepted);
     if (accRows.length) card.append(el('ul', { class: 'qlist qacc', id: 'qAcc' }, accRows.map(r => el('li', { class: 'qacc-li' },
-      el('div', { class: 'qrow done' }, el('i', { class: 'dot g-info', 'aria-hidden': 'true' }),
+      el('div', { class: 'qrow done' }, rdot(r),
         el('span', { class: 'qtx' }, el('strong', { text: r.label }), el('small', { text: t('qa.acceptedLine') }))),
       el('button', { type: 'button', class: 'qaccbtn undo', text: t('qa.undoAccept'), 'aria-label': t('qa.undoAria', { name: r.label }), onclick: () => acceptRow(p, r, false) })))));
     if (v === 'avoid' || v === 'check') {
@@ -1060,6 +1083,10 @@
     }
     // v2.34: the type line only when the app is not sure about the type (the ⋯ menu can always change it)
     if (p.ingredientsText && v !== 'unknown' && kindUnsure(p)) card.append(typeChip(p));
+    // v2.43: a label product without a barcode: "Добави баркода", so the next scan finds it
+    if (p.source === 'label' && !isBarcode(p.code) && p.code !== 'type-preview' && p.ingredientsText)
+      card.append(el('div', { class: 'linkrow', id: 'linkRow' }, el('small', { text: t('link.lead') }),
+        el('button', { class: 'btn btn-ghost', type: 'button', id: 'linkBtn', onclick: () => startLink(p) }, icon('M4 6v12M7 6v12M10 6v12M14 6v12M17 6v12M20 6v12'), t('link.add'))));
     return card;
   }
   const HOT_MAX = 6;
@@ -2547,7 +2574,7 @@
     $('typeList').replaceChildren(...typeItems.map((txt, i) => {
       const r = rows.find(x => x.pos === i + 1), why = typeRowWhy(r);
       return el('li', {}, el('div', { class: 'qrow' },
-        el('i', { class: 'dot g-' + (r ? r.group : 'nodata'), 'aria-hidden': 'true' }),
+        rdot(r),
         el('span', { class: 'qtx' }, el('strong', { text: cap(txt) }), why ? el('small', { text: why }) : null),
         el('button', { class: 'tx', type: 'button', 'aria-label': t('type.remove', { name: txt }), title: t('type.remove', { name: txt }),
           onclick: () => { typeItems.splice(i, 1); renderType(); renderTypeSug(); } }, icon(ICON.close))));
@@ -2577,7 +2604,7 @@
     box.hidden = !names.length;
     $('typeChipRow').replaceChildren(...names.map(n => {
       const r = analyze(typedProduct([n], typeKind)).rows.find(z => z.pos === 1);
-      return el('button', { type: 'button', class: 'tchip', onclick: () => addTyped(n) }, el('i', { class: 'dot g-' + (r ? r.group : 'nodata'), 'aria-hidden': 'true' }), cap(n));
+      return el('button', { type: 'button', class: 'tchip', onclick: () => addTyped(n) }, rdot(r), cap(n));
     }));
   }
   function typeSuggestions(q) {
@@ -2600,7 +2627,7 @@
       const label = (x.e ? x.e + ' · ' : '') + cap(x.name), k = label.toLowerCase().indexOf(q.toLowerCase());
       const nameEl = k >= 0 ? el('span', { class: 'nm' }, label.slice(0, k), el('mark', { text: label.slice(k, k + q.length) }), label.slice(k + q.length)) : el('span', { class: 'nm', text: label });
       return el('li', {}, el('button', { type: 'button', class: 'tsrow' + (i === 0 ? ' first' : ''), onclick: () => addTyped(x.name) },
-        el('i', { class: 'dot g-' + g, 'aria-hidden': 'true' }), nameEl, why ? el('small', { text: why }) : null));
+        rdot(r, g), nameEl, why ? el('small', { text: why }) : null));
     });
     if (q.length >= TYPE_MIN && !exact) items.push(el('li', {}, el('button', { type: 'button', class: 'tsrow tsfree', id: 'typeFree', onclick: () => addTyped(q) },
       el('i', { class: 'dot g-nodata', 'aria-hidden': 'true' }), el('span', { class: 'nm', text: t('type.free', { text: q }) }))));
@@ -3809,6 +3836,88 @@
     if (ocrFile && rep && rep.photos && rep.photos.length) savePhotos(code, rep.photos);   // v2.40: for the "To check" file
     buzzNext = true;   // a new answer: you can feel it (vibration)
     showProduct(p);
+    if (ocrFile && !isBarcode(code)) showTwin(p);   // v2.43: the same label photographed before?
+  }
+
+  // v2.43: "Вече проверен от теб · 12 ноем ✓" on top of your own product when you open it again by its barcode
+  function showKnown(p) {
+    if (!$('result') || $('result').hidden || $('knownBox')) return;
+    const when = p.readOk || (p.claude && p.claude.at) || p.fetchedAt;
+    const key = p.readOk ? 'known.checked' : p.claude ? 'known.claude' : 'known.seen';
+    $('result').insertBefore(el('div', { class: 'twin known', id: 'knownBox', role: 'status' },
+      el('span', { class: 'twin-i', 'aria-hidden': 'true', text: p.readOk || p.claude ? '✓' : '↺' }),
+      el('span', { class: 'twin-t' }, el('strong', { text: t(key, { date: fmtDay(when) }) }))), $('result').firstChild);
+  }
+  // v2.43 (user 27 Nov: "photograph or scan the code ... add the product in memory, so when I scan it again ... it shows up"):
+  // a label product without a barcode gets "Add the barcode"; the next scan (or typed code) saves it under that barcode.
+  let linkFor = null;
+  function startLink(p) {
+    linkFor = { p, at: Date.now() };
+    go('scan');
+    showScanner();
+    showStatus(t('link.scanNow', { name: state.names[p.code] || p.name || t('chk.noName') }),
+      [el('button', { class: 'btn btn-ghost', type: 'button', text: t('link.cancel'), onclick: () => { linkFor = null; $('status').hidden = true; openSaved(p.code); } })]);
+    startCamera();
+  }
+  async function linkToBarcode(p, code) {
+    const old = p.code;
+    const have = state.products[code];
+    if (have && isOwn(have) && have.code !== old && !confirm(t('link.replace', { name: state.names[code] || have.name || code }))) { openSaved(old); return; }
+    const q = Object.assign({}, p, { code });
+    delete state.products[old];
+    if (state.names[old]) { state.names[code] = state.names[old]; delete state.names[old]; store.set('names', state.names); }
+    state.favs = state.favs.map(c => c === old ? code : c); store.set('favs', state.favs);
+    state.history = state.history.filter(h => h.code !== code).map(h => h.code === old ? Object.assign({}, h, { code }) : h); store.set('history', state.history);
+    saveProduct(q);
+    try { const ph = await getPhotos(old); if (ph.length) { const db = await photoDb(), tx = db.transaction('p', 'readwrite'); tx.objectStore('p').put({ at: Date.now(), list: ph }, code); tx.objectStore('p').delete(old); await idbDone(tx); } } catch (e) { /* no photos */ }
+    toast(t('link.done', { code }));
+    openSaved(code);
+  }
+
+  // v2.43 (user 27 Nov: "I scan a label I deem it ok, I photograph the product, I see it again, it should show up"):
+  // a new photo read without a barcode is compared with your saved products. Most names the same -> "Already checked: <name>".
+  const twinKey = s => nrm(String(s || '').replace(/\([^)]*\)|\d+([.,]\d+)?\s*%?/g, ' ')).replace(/[^\p{L} ]/gu, '').replace(/\s+/g, ' ').trim();
+  function twinNames(text) {
+    const out = [];
+    for (const x of LCDB.splitIngredients(String(text || '').replace(/^[^:]{0,40}:\s*/, ''))) {
+      const k = twinKey(x);
+      if (k.length >= 3 && !out.includes(k)) out.push(k);
+    }
+    return out;
+  }
+  function findTwin(p) {
+    const mine = twinNames(p.ingredientsText);
+    if (mine.length < 3) return null;
+    let best = null;
+    for (const q of Object.values(state.products)) {
+      if (!q || q.code === p.code || !q.ingredientsText || q.kind !== p.kind) continue;
+      const theirs = twinNames(q.ingredientsText);
+      if (theirs.length < 3) continue;
+      let same = 0;
+      for (const n of mine) if (theirs.some(m => m === n || bigramDice(m, n) >= 0.8)) same++;
+      const score = same / Math.max(mine.length, theirs.length);
+      if (same >= 3 && score >= 0.7 && (!best || score > best.score || (score === best.score && (q.readOk || q.claude) && !(best.q.readOk || best.q.claude)))) best = { q, score };
+    }
+    return best;
+  }
+  function showTwin(p) {
+    const tw = findTwin(p);
+    if (!tw) return;
+    const q = tw.q, checked = q.readOk || q.claude;
+    const name = state.names[q.code] || q.name || t('chk.noName');
+    const box = el('div', { class: 'twin', id: 'twinBox', role: 'status' },
+      el('span', { class: 'twin-i', 'aria-hidden': 'true', text: checked ? '✓' : '↺' }),
+      el('span', { class: 'twin-t' }, el('strong', { text: t(checked ? 'twin.checked' : 'twin.seen', { name }) }), el('small', { text: t('twin.why', { n: Math.round(tw.score * 100) }) })),
+      el('button', { class: 'btn btn-primary', type: 'button', id: 'twinOpen', text: t('twin.open'), onclick: () => {
+        // the new read was only a copy of a product you have: it goes, your saved product (with your ✓ and choices) opens
+        delete state.products[p.code];
+        state.history = state.history.filter(h => h.code !== p.code);
+        store.set('products', state.products); store.set('history', state.history);
+        dropPhotos([p.code]);
+        openSaved(q.code);
+      } }));
+    const res = $('result');
+    res.insertBefore(box, res.firstChild);
   }
 
   // ---------- Camera ----------
@@ -4886,7 +4995,7 @@
   }
 
   // Small test hook (used only by automated checks).
-  window.LC = { packInfo: f => packInfo(f), renderPack: () => renderPack(), packFind: c => packFind(c), analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
+  window.LC = { markOf: (r, g) => markOf(r, g), findTwin: p => findTwin(p), showTwin: p => showTwin(p), isOwn: q => isOwn(q), saveProduct: p => saveProduct(p), packInfo: f => packInfo(f), renderPack: () => renderPack(), packFind: c => packFind(c), analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
     buildReport, tsvPieces, listPieces, getRep: () => rep, repairNames, fixMixed, leftOut, garbledName, isSupplementText, cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, nameIdent, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart, sameCatSaved, suggestAlternatives, catScore, altCache, altTimes };
 
   init();

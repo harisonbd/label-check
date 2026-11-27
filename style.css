@@ -1267,3 +1267,36 @@ details.lcard[open] > summary .lct small { white-space: normal; }
 .pchip.on { background: color-mix(in srgb, var(--accent) 22%, var(--card)); border-color: var(--accent); }
 .pchip.on .pmark { background: var(--accent); color: var(--accent-ink); }
 .pchip.more { border-style: dashed; color: var(--muted); padding: 6px 14px; }
+/* v2.42 (user 27 Nov: the Germany "Изтегли" button went under the text at 375 px, the other one stayed beside it):
+   the button always stays beside the text; the text wraps instead */
+.packrow { flex-wrap: nowrap; }
+.packrow .grow { flex: 1 1 auto; }
+.packrow .btn, .packrow .linkbtn { flex: none; }
+
+/* v2.43: info is a clear blue (user 27 Nov: "the colors I like B"; grey-blue was too close to grey "no data") */
+:root { --info: #1F6FD6; --info-ink: #1A5DB5; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --info: #4DA3FF; --info-ink: #9CC8FF; } }
+:root[data-theme="dark"] { --info: #4DA3FF; --info-ink: #9CC8FF; }
+/* v2.43: a mark in the dot says why (✕ not allowed, person = your profile, ! concern, ? under review, i info, ✓ accepted, – no data) */
+.dot.mk { display: inline-grid; place-items: center; color: var(--bg); font-style: normal; font-weight: 800; font-size: 11px; line-height: 1; }
+.qrow .dot.mk, .tsrow .dot.mk { width: 18px; height: 18px; }
+.tchip .dot.mk { width: 16px; height: 16px; font-size: 10px; }
+.dot.mk svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.dot.g-nodata { --dc: var(--gdot); background: var(--gdot); }
+
+/* v2.43: "Already checked: <name>" on a new label photo */
+.twin { display: flex; align-items: center; gap: 12px; background: color-mix(in srgb, var(--green) 14%, var(--card)); border-radius: 18px; padding: 12px 14px; margin: 0 0 12px; }
+.twin-i { width: 32px; height: 32px; border-radius: 50%; flex: none; display: grid; place-items: center; background: var(--green); color: var(--bg); font-weight: 800; }
+.twin-t { flex: 1; min-width: 0; }
+.twin-t strong { display: block; font-size: 0.98rem; line-height: 1.25; }
+.twin-t small { display: block; color: var(--muted); font-size: 0.82rem; }
+.twin .btn { flex: none; margin: 0; min-height: 44px; padding: 8px 16px; }
+
+/* v2.43: "Добави баркода" under the answer of a label product without a barcode */
+.linkrow { display: flex; align-items: center; gap: 10px; margin: 12px 0 0; padding: 10px 12px; border-radius: 14px; background: var(--card2, var(--card)); text-align: left; }
+.linkrow small { flex: 1; min-width: 0; color: var(--muted); font-size: 0.84rem; line-height: 1.3; }
+.linkrow .btn { flex: none; margin: 0; min-height: 44px; padding: 8px 12px; display: inline-flex; align-items: center; gap: 6px; }
+.linkrow .btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.twin.known { background: color-mix(in srgb, var(--green) 12%, var(--card)); }
+.dot.mk:not([data-m="p"])::before { content: attr(data-m); }
+.dot.mk svg { width: 15px; height: 15px; stroke-width: 3; }

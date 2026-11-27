@@ -563,7 +563,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.41' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.43' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -1038,7 +1038,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v59')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v61')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1596,16 +1596,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v59'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v61'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v59' not in keys: break
+        if 'label-check-v61' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v59' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v61' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1788,6 +1788,10 @@ with sync_playwright() as p:
     open_card(pg, 'packCard'); pg.wait_for_function("() => document.getElementById('packMainState').textContent.includes('MB')")
     ok(pg.inner_text('#packMainState').startswith('Не е на телефона · 0,1 MB') and pg.is_visible('#packMainBtn') and pg.inner_text('#packMainBtn').startswith('Изтегли') and pg.is_hidden('#packMainRm'),
        'open: "Не е на телефона · size" + "Изтегли" (%s)' % pg.inner_text('#packMainState'))
+    pg.set_viewport_size({'width': 375, 'height': 844}); pg.wait_for_timeout(150)
+    xs = pg.evaluate("['packMainBtn', 'packDeBtn'].map(id => { const b = document.getElementById(id).getBoundingClientRect(), row = document.getElementById(id).closest('.packrow'), g = row.querySelector('.grow').getBoundingClientRect(), r = row.getBoundingClientRect(); return [Math.round(r.right - b.right), Math.round(b.left - g.right)]; })")
+    ok(xs[0][0] == xs[1][0] and all(gap >= 0 for _, gap in xs), 'v2.42: 375 px: both "Изтегли" buttons sit on the right, beside their text, not under it ([right gap, gap to text] %s)' % xs)
+    pg.set_viewport_size({'width': 390, 'height': 844}); pg.wait_for_timeout(150)
     pg.click('#packMainBtn'); pg.wait_for_function("() => document.getElementById('packMainState').textContent.includes('продукта')", timeout=15000)
     ok(pg.inner_text('#packMainState').startswith('5 продукта · 3.12.2026') or pg.inner_text('#packMainState').startswith('5 продукта · 3 дек'), 'after download: "5 продукта · date" (%s)' % pg.inner_text('#packMainState'))
     ok(pg.is_hidden('#packMainBtn') and pg.is_visible('#packMainRm') and pg.inner_text('#packSub').startswith('5 продукта'), 'up to date: no button, "Махни" shows; the card line says 5 products')
@@ -2025,6 +2029,49 @@ with sync_playwright() as p:
             ok(pg.evaluate("document.activeElement.id") == 'avoidInput' and pg.eval_on_selector('#avoidCard', 'd => d.open'), '"+ моя дума" opens your list and puts the cursor in the field')
             pg.screenshot(path=os.path.join(SHOTS, 'v241-profile-bg.png'), full_page=True)
         ctx.close()
+
+    # ---- v2.43: marks in the dots, blue info, "already checked", "add the barcode", own products kept ----
+    print('v2.43: marks, blue info, already checked, add the barcode')
+    ctx, pg = new_page(b, base, 'bg-BG', dark=True)
+    marks = pg.evaluate("""[['red', {why: 'b'}], ['red', {why: 'mine', mine: {}}], ['red', {why: 'allergen'}], ['orange', {level: 'c'}], ['orange', {level: 'u'}],
+      ['info', {level: 'r'}], ['info', {accepted: true}], ['nodata', {}], ['green', {}]].map(([g, r]) => LC.markOf(Object.assign({group: g}, r), g))""")
+    ok(marks == ['✕', 'p', 'p', '!', '?', 'i', '✓', '–', ''], 'marks: ✕ not allowed, person = your profile, ! concern, ? under review, i info, ✓ accepted, – no data, none for green (%s)' % marks)
+    read_label(pg, 'Съставки: свинско месо, сол, захар, консервант: калиев нитрат, соя', 'food', 'Луканка')
+    ok(pg.get_attribute('#qList .dot', 'data-m') == '!' and pg.evaluate("getComputedStyle(document.querySelector('#qList .dot'), '::before').content") == '"!"', 'E252 (concern): orange dot with "!"')
+    blue = pg.evaluate("(() => { const d = document.createElement('i'); d.className = 'dot g-info'; document.body.append(d); const c = getComputedStyle(d).backgroundColor; d.remove(); return c; })()")
+    ok(blue == 'rgb(77, 163, 255)', 'info is clear blue in dark mode (%s)' % blue)
+    ok(pg.is_visible('#linkBtn') and pg.inner_text('#linkBtn') == 'Добави баркода', 'a label product without a barcode: "Добави баркода"')
+    old = pg.evaluate("LC.state.current.p.code")
+    pg.click('#readOkBtn'); pg.wait_for_timeout(300)
+    pg.click('#linkBtn'); pg.wait_for_timeout(400)
+    ok('Сканирай баркода на „Луканка“' in pg.inner_text('#status'), 'the scanner opens with "Сканирай баркода на „Луканка“ …"')
+    pg.evaluate("LC.lookup('4056489693802')"); pg.wait_for_timeout(700)
+    ok(pg.evaluate("LC.state.current.p.code") == '4056489693802' and pg.evaluate("!LC.state.products['%s'] && !!LC.state.products['4056489693802'].readOk" % old)
+       and pg.evaluate("LC.state.history[0].code") == '4056489693802' and pg.evaluate("LC.state.names['4056489693802']") == 'Луканка',
+       'the product (with your ✓ and name) is now saved under the barcode; history follows')
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    pg.evaluate("LC.lookup('4056489693802')"); pg.wait_for_timeout(700)
+    ok(pg.is_visible('#knownBox') and pg.inner_text('#knownBox strong').startswith('Вече проверен от теб · ') and pg.locator('#linkBtn').count() == 0, 'scanning the barcode again: "Вече проверен от теб · <date> ✓", no "Добави баркода"')
+    # the same label photographed again
+    pg.click('.tabbar button[data-go=scan]'); pg.wait_for_timeout(200)
+    read_label(pg, 'Съставки: свинско месо, сол, захар, консервант калиев нитрат, соя', 'food')
+    newc = pg.evaluate("LC.state.current.p.code")
+    pg.evaluate("LC.showTwin(LC.state.current.p)"); pg.wait_for_timeout(200)
+    ok(pg.is_visible('#twinBox') and pg.inner_text('#twinBox strong') == 'Вече проверен: Луканка', 'a new read of the same list: "Вече проверен: Луканка"')
+    pg.click('#twinOpen'); pg.wait_for_timeout(500)
+    ok(pg.evaluate("LC.state.current.p.code") == '4056489693802' and pg.evaluate("!LC.state.products['%s']" % newc) and pg.evaluate("!LC.state.history.some(h => h.code === '%s')" % newc),
+       '"Отвори": your saved product opens; the copy goes')
+    pg.click('.tabbar button[data-go=scan]'); pg.wait_for_timeout(200)
+    read_label(pg, 'Съставки: вода, захар, лимонена киселина', 'food')
+    pg.evaluate("LC.showTwin(LC.state.current.p)"); pg.wait_for_timeout(200)
+    ok(pg.locator('#twinBox').count() == 0, 'a different list: no "Вече проверен"')
+    n = pg.evaluate("""(() => { const P = LC.state.products; for (let i = 0; i < 1005; i++) P['40000000' + String(i).padStart(5, '0')] = { code: '40000000' + String(i).padStart(5, '0'), source: 'off', kind: 'food', name: 'x', ingredientsText: 'a', fetchedAt: i };
+      LC.saveProduct({ code: '4099999999999', source: 'off', kind: 'food', name: 'y', ingredientsText: 'b', fetchedAt: 9e12 });
+      return [Object.keys(P).length, !!P['4056489693802'], Object.values(P).filter(q => LC.isOwn(q)).length]; })()""")
+    ok(n[0] <= 1000 and n[1] and n[2] >= 2, 'over 1,000 products: copies from the internet go, your own products stay (%s)' % n)
+    ok(no_side_scroll(pg), 'no sideways scroll')
+    ctx.close()
 
     for lang, w, dark in (('en-GB', 320, False), ('de-AT', 390, False)):
         ctx, pg = new_page(b, base, lang, dark=dark, width=w)
