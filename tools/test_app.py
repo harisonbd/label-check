@@ -563,7 +563,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.37' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.38' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -1038,7 +1038,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v55')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v56')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1596,16 +1596,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v55'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v56'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v55' not in keys: break
+        if 'label-check-v56' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v55' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v56' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1866,6 +1866,44 @@ with sync_playwright() as p:
     pg.evaluate("document.getElementById('exportBtn')")
     pg.goto(base); pg.evaluate('LC.dbReady'); pg.wait_for_timeout(600)
     ok(pg.is_visible('#manualForm') or pg.is_visible('#scanner video') or pg.evaluate("!!document.querySelector('.toast:not([hidden])')"), 'app start with the switch on: the barcode camera opens (no camera here: the code box opens)')
+    ctx.close()
+
+    # ---- v2.38: Луканка report (27 Nov): the list ends at the nutrition table / label text; tap a name = not an ingredient; "All correct" ----
+    print('v2.38: list end, not an ingredient, all correct')
+    ctx, pg = new_page(b, base, 'bg-BG', dark=True)
+    LUK = ("Съставки: свинско месо, говеждо месо, трапезна сол, подправки (кимион, черен пипер), захар, консервант: калиев нитрат; антиоксидант: натриев аскорбат; "
+           "стартерни култури. Мазнини: 30,7 g, от които наситени мастни киселини: 13,3 д, Въглехидрати: 2,0 д, от които захари: 0,8 д, Влакнини: 0,8 д, Белтьци: 24,5 д, "
+           "Сол: 3,70 г. Неотворен, при съхранение от 0°С до +8°С, най-добър до:/ Партида: Произведено от „КФМ“ ООД бул.„Св. Димитър Солунски“№1, 2700 Благоевград, България. Нетно 400ge количество: ИЗХВЪРЛЯЙ ПРАВИЛНО")
+    cut = pg.evaluate('t => LC.repairNames(LC.cleanOcr(t))', LUK)
+    ok(cut.endswith('натриев аскорбат; стартерни култури.') and 'Мазнини' not in cut and 'Благоевград' not in cut, 'Луканка: the list ends after "стартерни култури"; nutrition table and label text are out (%s)' % cut[-60:])
+    cases = [("Zutaten: Schweinefleisch, Speck, Salz, Gewürze, Dextrose. Nährwerte pro 100 g: Energie 1500 kJ / 360 kcal, Fett 30 g, Salz 4,2 g", 'Zutaten: Schweinefleisch, Speck, Salz, Gewürze, Dextrose.'),
+             ("Ingredients: wheat flour, sugar, salt 1.2%, yeast. Store in a cool dry place. Best before: see top", 'Ingredients: wheat flour, sugar, salt 1.2%, yeast.'),
+             ("Съставки: свинско месо, сол, захар. Произведено от Х ООД. Може да съдържа следи от соя.", 'Съставки: свинско месо, сол, захар. Може да съдържа следи от соя.'),
+             ("Zutaten: Wasser, Zucker (12 g pro 100 ml), Zitronensaft, Salz. Nährwerte: Energie 80 kJ", 'Zutaten: Wasser, Zucker (12 g pro 100 ml), Zitronensaft, Salz.'),
+             ("Ingredients: oats, salt, sugar, fat 30 g, protein 10 g, salt 1 g", 'Ingredients: oats, salt, sugar.'),
+             ("Съставки: краве мляко, сол (2%), култури.", 'Съставки: краве мляко, сол (2%), култури.')]
+    got = [pg.evaluate('t => LC.repairNames(LC.cleanOcr(t))', c) for c, _ in cases]
+    ok(got == [w for _, w in cases], 'list end: DE nutrition table, EN storage line, BG producer (the "may contain" line stays), an amount inside ( ) stays, a short list without a table is unchanged (%s)' % [g for g, (_, w) in zip(got, cases) if g != w])
+    read_label(pg, 'Съставки: свинско месо, трапезна сол, захар, Изхвърляй правилно. Може да съдържа следи от соя.', 'food')
+    pg.wait_for_selector('#readCard', timeout=20000)
+    ok(pg.is_visible('#readCard .rd-hint') and pg.inner_text('#readCard .rd-hint') == 'Тапни име, което не е съставка.' and pg.is_visible('#readOkBtn') and pg.inner_text('#readOkBtn') == '✓ Всичко е вярно',
+       'the card says "Тапни име, което не е съставка." and has "✓ Всичко е вярно"')
+    pg.click('#readChips .chip:has-text("Изхвърляй правилно")'); pg.wait_for_timeout(500)
+    txt = pg.evaluate("LC.state.current.p.ingredientsText")
+    ok('Изхвърляй' not in txt and 'захар. Може да съдържа' in txt and pg.locator('#readChips .chip:has-text("Изхвърляй")').count() == 0 and pg.locator('#readLeft .chip.left:has-text("Изхвърляй правилно")').count() == 1,
+       'a tap takes the name out of the list; it waits under "left out" with + (%s)' % txt)
+    pg.click('#readLeft .chip.left:has-text("Изхвърляй правилно")'); pg.wait_for_timeout(500)
+    txt = pg.evaluate("LC.state.current.p.ingredientsText")
+    ok(txt.index('Изхвърляй правилно') < txt.index('Може да съдържа') and pg.locator('#readChips .chip:has-text("Изхвърляй")').count() == 1, '+ brings it back, before the "may contain" sentence (not as a trace) (%s)' % txt)
+    pg.click('#readChips .chip:has-text("Изхвърляй правилно")'); pg.wait_for_timeout(400)
+    pg.click('#readOkBtn'); pg.wait_for_timeout(500)
+    ok(pg.evaluate("!!LC.state.current.p.readOk") and pg.locator('#readChips').count() == 0 and 'Проверено от теб' in pg.inner_text('#readCard') and pg.is_visible('#readShow'),
+       '"Всичко е вярно": saved on the product; the card is one line "Проверено от теб" + "Покажи"')
+    pg.click('#readShow'); pg.wait_for_timeout(400)
+    ok(pg.locator('#readChips .chip').count() == 4, '"Покажи" opens the card again (3 names + the "may contain" line)')
+    pg.reload(); pg.evaluate('LC.dbReady'); pg.wait_for_timeout(300)
+    ok(pg.evaluate("Object.values(LC.state.products).some(p => p.readOk && (p.readDropped || []).includes('Изхвърляй правилно'))"), 'kept after a reload (saved with the product)')
+    ok(no_side_scroll(pg), 'no sideways scroll')
     ctx.close()
 
     for lang, w, dark in (('en-GB', 320, False), ('de-AT', 390, False)):

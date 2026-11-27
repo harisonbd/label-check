@@ -1222,3 +1222,10 @@ details.lcard[open] > summary .lct small { white-space: normal; }
 .packrow small { display: block; color: var(--muted); font-size: 0.82rem; margin-top: 2px; }
 .packrow .btn.small { min-height: 40px; padding: 8px 14px; margin-top: 0; }
 #packBar { width: 100%; margin: 6px 0 2px; }
+
+/* v2.38: read card: tap a name = not an ingredient; "All correct"; a checked read is one line */
+.readB .rd-hint { margin: -2px 2px 0; color: var(--muted); font-size: 0.82rem; }
+.readB .rd-ok { width: 100%; margin-top: 2px; }
+.readB.ok .rd-top { display: flex; align-items: center; gap: 10px; }
+.readB.ok .rd-badge { background: var(--green); color: #0F1115; }
+.readB.ok .linkbtn { margin-left: auto; }

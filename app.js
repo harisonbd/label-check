@@ -2080,24 +2080,60 @@
     readSel = null;
     readChanged(p, t('read.keptToast', { name: cleanSeg(it.r.text) }));
   }
+  // v2.38: a name goes back in before the "may contain" sentence (after it, it would count as a trace)
+  function insertName(txt, piece) {
+    const m = txt.search(TRACE_LINE);
+    if (m > 0) {
+      const head = txt.slice(0, m).replace(/[\s.,;]+$/, ''), tail = txt.slice(m);
+      return head + ', ' + piece + '. ' + tail;
+    }
+    return txt.replace(/[\s.,;]+$/, '') + ', ' + piece;
+  }
   function readAdd(p, piece) {
+    if ((p.readDropped || []).includes(piece)) {                        // v2.38: a name you took out comes back
+      setText(p, insertName(p.ingredientsText || '', piece));
+      p.readDropped = p.readDropped.filter(x => x !== piece);
+      readChanged(p, t('read.addedToast', { text: piece.length > 40 ? piece.slice(0, 38) + '…' : piece }));
+      return;
+    }
     const on = (p.readAdded || []).includes(piece), txt = p.ingredientsText || '';
     if (on) {
       const i = txt.lastIndexOf(', ' + piece);
       setText(p, i >= 0 ? txt.slice(0, i) + txt.slice(i + 2 + piece.length) : txt);
       p.readAdded = p.readAdded.filter(x => x !== piece);
     } else {
-      setText(p, txt.replace(/[\s.,;]+$/, '') + ', ' + piece);
+      setText(p, insertName(txt, piece));
       p.readAdded = (p.readAdded || []).concat(piece);
     }
     readChanged(p, t(on ? 'read.removedToast' : 'read.addedToast', { text: piece.length > 40 ? piece.slice(0, 38) + '…' : piece }));
   }
+  // v2.38 (user 27 Nov): "letting it know it's ok, and the other ingredients it thinks are actually food description"
+  function readDrop(p, it) {
+    const txt = p.ingredientsText || '', s = it.r.text, i = txt.indexOf(s);
+    if (i < 0) return;
+    let a0 = i, b0 = i + s.length;
+    const after = txt.slice(b0).match(/^\s*[,;]\s*/), before = txt.slice(0, a0).match(/\s*[,;:]\s*$/);
+    if (after) b0 += after[0].length; else if (before) a0 -= before[0].length;
+    const dot = /[.!?]\s*$/.test(s) && !after ? '.' : '';           // "захар, Изхвърляй правилно. Може да …": the sentence end stays
+    setText(p, (txt.slice(0, a0) + dot + txt.slice(b0)).replace(/\s{2,}/g, ' '));
+    p.readDropped = (p.readDropped || []).concat(cleanSeg(s));
+    readSel = null;
+    readChanged(p, t('read.droppedToast', { text: cleanSeg(s).length > 40 ? cleanSeg(s).slice(0, 38) + '…' : cleanSeg(s) }));
+  }
+  const readOpen = new Set();                                      // codes whose checked read you opened again
   function readCard(p, a) {
     const items = readItems(p, a);
     if (!items.length) return null;
     const q = items.filter(x => x.state === 'q');
-    const left = (p.readLeft || []).slice(0, LEFT_MAX).concat((p.readAdded || []).filter(x => !(p.readLeft || []).slice(0, LEFT_MAX).includes(x)));
+    const left0 = (p.readLeft || []).slice(0, LEFT_MAX);
+    const left = (p.readDropped || []).concat(left0.filter(x => !(p.readDropped || []).includes(x)), (p.readAdded || []).filter(x => !left0.includes(x)));
     if (p.source !== 'label' && !q.length) return null;
+    // v2.38: a read you marked as correct is one line (open it again with "Покажи")
+    if (p.readOk && !q.length && !readOpen.has(p.code)) {
+      return el('div', { class: 'readB ok', id: 'readCard' },
+        el('div', { class: 'rd-top' }, el('span', { class: 'rd-badge', text: '✓' }), el('b', { text: t('read.okDone') }),
+          el('button', { class: 'linkbtn', type: 'button', id: 'readShow', text: t('read.show'), onclick: () => { readOpen.add(p.code); renderResult(p); } })));
+    }
     const n = k => items.filter(x => x.state === k).length;
     let sel = readSel && readSel.code === p.code ? q.find(x => x.r.text === readSel.text) : null;
     if (!sel) sel = q.find(x => x.guesses.length) || q[0] || null;
@@ -2114,14 +2150,16 @@
       const kids = [label, r.auto ? el('small', { class: 'chip-auto', text: ' ·' + t('read.auto') }) : null];
       if (it.state === 'q') return el('button', { class: cls, type: 'button', 'aria-pressed': String(it === sel), onclick: () => { readSel = { code: p.code, text: r.text }; renderResult(p); } }, ...kids);
       if (it.state === 'fixed') return el('button', { class: cls, type: 'button', title: t('read.undoFix'), onclick: () => readUnfix(p, it) }, ...kids);
-      return el('span', { class: cls }, ...kids);
+      // v2.38: tap a name that is not an ingredient (nutrition table, storage text): it leaves the list (+ brings it back)
+      return el('button', { class: cls, type: 'button', title: t('read.dropHint'), 'aria-label': t('read.dropAria', { name: label }), onclick: () => readDrop(p, it) }, ...kids);
     };
     const panel = sel ? el('div', { class: 'rd-panel', id: 'readPanel' },
       el('p', { class: 'rd-lab', text: t(sel.guesses.length ? 'read.didYou' : 'read.noGuess', { read: cleanSeg(sel.r.text) }) }),
       ...sel.guesses.map((g, k) => el('button', { class: 'btn ' + (k ? 'btn-ghost' : 'btn-primary'), type: 'button', id: 'readGuess' + k, text: sel.r.kind === 'food' ? g : niceName(g), onclick: () => readFix(p, sel, g) })),
       el('div', { class: 'rd-two' },
         sel.r.kind !== 'food' ? el('button', { class: 'btn btn-ghost', type: 'button', id: 'readSearch', text: t('read.search'), onclick: () => openPicker(sel.r) }) : null,
-        el('button', { class: 'btn btn-ghost', type: 'button', id: 'readKeep', text: t('read.keep'), onclick: () => readKeep(p, sel) })))
+        el('button', { class: 'btn btn-ghost', type: 'button', id: 'readKeep', text: t('read.keep'), onclick: () => readKeep(p, sel) })),
+      el('button', { class: 'linkbtn', type: 'button', id: 'readNotIng', text: t('read.notIng'), onclick: () => readDrop(p, sel) }))
       : null;
     return el('div', { class: 'readB' + (q.length ? ' flag' : ''), id: 'readCard' },
       el('div', { class: 'rd-top' }, el('span', { class: 'rd-badge', text: q.length ? String(q.length) : '✓' }), el('b', { text: t('read.title') }),
@@ -2129,9 +2167,12 @@
       legend,
       panel || (n('fixed') || (p.readKept || []).length ? el('p', { class: 'rd-note', text: t('read.allDone') }) : null),
       el('div', { class: 'rd-chips', id: 'readChips' }, ...items.map(chip)),
+      el('p', { class: 'rd-hint', text: t('read.dropHint') }),
       left.length ? el('p', { class: 'rd-lab', text: t('read.leftLab') }) : null,
       left.length ? el('div', { class: 'rd-chips', id: 'readLeft' }, ...left.map(piece => el('button', {
-        class: 'chip left' + ((p.readAdded || []).includes(piece) ? ' added' : ''), type: 'button', 'aria-pressed': String((p.readAdded || []).includes(piece)), onclick: () => readAdd(p, piece) }, piece))) : null);
+        class: 'chip left' + ((p.readAdded || []).includes(piece) ? ' added' : ''), type: 'button', 'aria-pressed': String((p.readAdded || []).includes(piece)), onclick: () => readAdd(p, piece) }, piece))) : null,
+      !q.length && p.source === 'label' ? el('button', { class: 'btn btn-primary rd-ok', type: 'button', id: 'readOkBtn', text: '✓ ' + t('read.ok'),
+        onclick: () => { p.readOk = Date.now(); readOpen.delete(p.code); readChanged(p, t('read.okToast')); } }) : null);
   }
   // v2.33: text the app read on the photos but did not take into the list: sentences after the list, pieces dropped as
   // running text. Not: text before the heading (product name), numbers, other-language lists (long pieces).
@@ -3489,6 +3530,34 @@
   // Only outside brackets ("Gewürze (Pfeffer, Senf etc.), Salz" goes on).
   const LIST_END = /(?<!\p{L})(?:и\s+др|и\s+други|etc|usw|and\s+others|und\s+andere)\s*\./giu;
   const LIST_END_NODOT = /(?<!\p{L})[иИ]\s+(?:др|ДР)(?=\s+\p{Lu})/gu;   // v2.33: "и др Регистрационен…": the reader lost the dot, a new sentence follows
+  // v2.38 (Луканка report 27 Nov): after the list the reader also took the nutrition table ("Мазнини: 30,7 g, …") and the label
+  // text ("при съхранение …", "най-добър до", "Произведено от", "Нетно количество"). They end the list. A nutrient with an amount
+  // counts only when 2 different nutrients follow (a table), so "сол 1,5 г на 100 г" in a list stays. A heading alone is enough.
+  const NUTRIENT = /(?<!\p{L})(енергийна\s+стойност|енергия|мазнини|наситени(?:\s+мастни\s+киселини)?|въглехидрати|захари|влакнини|белт[ъь]ци|протеини|сол|energie|energy|brennwert|fett|fat|ges[äa]ttigte(?:\s+fetts[äa]uren)?|saturates|kohlenhydrate|carbohydrates?|zucker|sugars|ballaststoffe|fibre|fiber|eiwei(?:ß|ss)|protein|salz|salt|valoare\s+energetic[ăa]|gr[ăa]simi|glucide|zaharuri|proteine|sare)\s*[:：]?\s*(?:<\s*)?\d+(?:[.,]\d+)?\s*(?:g|г|д|gr|kj|kcal|кдж|ккал|mg|мг)(?!\p{L})/giu;
+  const LABEL_END = /(?<!\p{L})(?:(?:средни\s+)?хранителн[аи]\s+стойност|хранителна\s+информация|n[äa]hrwert(?:e|angaben|information)?|nutrition(?:al)?\s+(?:information|facts|declaration|values?)|valori\s+nutri[tțţ]ionale|най-добър\s+до|годен\s+до|да\s+се\s+консумира\s+до|срок\s+на\s+годност|mindestens\s+haltbar|zu\s+verbrauchen\s+bis|best\s+before|use\s+by|a\s+se\s+consuma|при\s+съхранение|да\s+се\s+съхранява|съхранявайте|съхранява\s+се|условия\s+на\s+съхранение|k[üu]hl\s+(?:und\s+trocken\s+)?lagern|store\s+(?:in|at|below|cool)|keep\s+refrigerated|a\s+se\s+p[ăa]stra|произведено\s+(?:от|в|за)|производител|hergestellt|hersteller|produced\s+(?:by|for|in)|manufactured\s+(?:by|for)|produs\s+de|produc[ăa]tor|партида|нетно\s+(?:количество|тегло)|nettof[üu]llmenge|net\s+(?:weight|quantity)|неотворен|след\s+отваряне|nach\s+dem\s+[öo]ffnen|after\s+opening|опаковано\s+в\s+защитна|unter\s+schutzatmosph[äa]re|packaged\s+in\s+a\s+protective)/giu;
+  function labelTailAt(b) {
+    const depthOk = i => { const before = b.slice(0, i); return (before.match(/[(\[]/g) || []).length <= (before.match(/[)\]]/g) || []).length; };
+    const enough = i => (b.slice(0, i).match(/[,;]/g) || []).length >= 2;            // at least 3 names before it
+    let at = -1;
+    const nut = [...b.matchAll(NUTRIENT)];
+    for (let k = 0; k < nut.length && at < 0; k++) {
+      const kinds = new Set(nut.slice(k).map(m => m[1].toLowerCase().split(/\s+/)[0]));
+      if (kinds.size >= 3 && depthOk(nut[k].index) && enough(nut[k].index)) at = nut[k].index;
+    }
+    for (const m of b.matchAll(LABEL_END)) {
+      if (at >= 0 && m.index >= at) break;
+      if (depthOk(m.index) && enough(m.index)) { at = m.index; break; }
+    }
+    return at;
+  }
+  function cutLabelTail(b) {
+    const at = labelTailAt(b);
+    if (at < 0) return b;
+    const head = b.slice(0, at).replace(/[\s,;:.\-–]+$/, ''), tail = b.slice(at);
+    // a "may contain" sentence after the cut stays (allergen traces must never be lost)
+    const tr = tail.split(/(?<=[.!?])\s+/).filter(x => TRACE_LINE.test(x) && !TRACE_LINE.test(head));
+    return head + '.' + (tr.length ? ' ' + tr.join(' ').trim() : '');
+  }
   function finishList(s) {
     const st = (s.match(HEAD_RE) || [''])[0], body = s.slice(s.indexOf(st) + st.length);
     if (!st) return s;
@@ -3500,6 +3569,7 @@
       if ((before.match(/[(\[]/g) || []).length > (before.match(/[)\]]/g) || []).length) continue;
       b = before.replace(/[\s,;]+$/, ''); break;
     }
+    b = cutLabelTail(b);   // v2.38: nutrition table and label text after the list
     return s.slice(0, s.indexOf(st) + st.length) + (/\s$/.test(st) ? '' : ' ') + b.trim();
   }
   function cleanOcr(text) {
