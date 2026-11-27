@@ -247,6 +247,9 @@
 
     rows.sort((x, y) => (x.pos || 999) - (y.pos || 999));
     rows.forEach((r, i) => { r.i = i; });
+    // v2.39 (user 27 Nov, "only on this product"): an orange name you accepted in THIS product is shown for information, not as a concern
+    const acc = new Set(p.accepted || []);
+    if (acc.size) for (const r of rows) if (r.group === 'orange' && acc.has(accKey(r))) { r.accepted = true; r.group = 'info'; }
 
     const counts = { red: 0, orange: 0, info: 0, nodata: 0, green: 0 };
     for (const r of rows) counts[r.group]++;
@@ -265,10 +268,26 @@
     const verdict = counts.red ? 'avoid' : counts.orange ? 'check' : rows.length ? (partial || noList || weak ? 'partial' : 'ok') : 'unknown';
     return {
       verdict, rows, counts, known, unknown, noList, weak, supplement: p.kind !== 'cosmetic' && p.kind !== 'household' && isSupplementText(text),
-      summary: summarize(verdict, rows, counts, { n: known, of: listed.length, noList, weak, total }),
+      summary: summarize(verdict, rows, counts, { n: known, of: listed.length, noList, weak, total })
+        + (rows.some(r => r.accepted) ? ' ' + t('sum.accepted', { names: rows.filter(r => r.accepted).map(r => r.label).join(', ') }) : ''),
       total,
       fragrance: rows.filter(r => r.fragrance || r.allergen).length
     };
+  }
+
+  // v2.39: the key of a name for "accepted in this product" (the E-number when there is one, else the shown name)
+  const accKey = r => {
+    const es = (r.additives || []).map(x => x && x.e).filter(Boolean);
+    return String(es.length ? es.join('+') : (r.src && r.src.inci) || r.label || r.text || '').toLowerCase().trim();
+  };
+  function acceptRow(p, r, on) {
+    const k = accKey(r), list = (p.accepted || []).filter(x => x !== k);
+    p.accepted = on ? list.concat(k) : list;
+    if (!p.accepted.length) delete p.accepted;
+    saveProduct(p);
+    const a = renderResult(p);
+    addHistory(p, a.verdict);
+    if (on) toast(t('toast.accepted'));
   }
 
   // v2.16: the reader's own confidence for the text. Good reads gave 73-95, garbled ones (Ketozolin) 50-63.
@@ -983,16 +1002,25 @@
       card.append(el('ul', { class: 'qlist', id: 'qList' },
         shown.map(r => {
           const why = [...new Set([chipOf(r), whyOf(r)].filter(Boolean))].join(' · ');
-          return el('li', {}, el('button', { type: 'button', class: 'qrow', onclick: e => openDetail(r.i, e.currentTarget) },
+          return el('li', { class: r.group === 'orange' ? 'qacc-li' : null }, el('button', { type: 'button', class: 'qrow', onclick: e => openDetail(r.i, e.currentTarget) },
             el('i', { class: 'dot g-' + r.group, 'aria-hidden': 'true' }),
             el('span', { class: 'qtx' },
               el('strong', { text: r.label + (r.why === 'allergen' && r.traceOnly ? ' (' + t('qa.traceMark') + ')' : '') }),
               why ? el('small', { text: why }) : null),
-            icon(ICON.chev, 'chev')));
+            icon(ICON.chev, 'chev')),
+            // v2.39: "Приемам" = OK for me in this product only (orange only; red = your list / your allergens / not allowed)
+            r.group === 'orange' ? el('button', { type: 'button', class: 'qaccbtn', text: t('qa.accept'), 'aria-label': t('qa.acceptAria', { name: r.label }),
+              onclick: () => acceptRow(p, r, true) }) : null);
         }),
         hot.length > shown.length ? el('li', {}, el('button', { type: 'button', class: 'qrow more', onclick: () => openGroup(hot[shown.length].group),
           text: t('qa.more', { n: hot.length - shown.length }) })) : null));
     }
+    // v2.39: what you accepted in this product, with "Върни"
+    const accRows = a.rows.filter(r => r.accepted);
+    if (accRows.length) card.append(el('ul', { class: 'qlist qacc', id: 'qAcc' }, accRows.map(r => el('li', { class: 'qacc-li' },
+      el('div', { class: 'qrow done' }, el('i', { class: 'dot g-info', 'aria-hidden': 'true' }),
+        el('span', { class: 'qtx' }, el('strong', { text: r.label }), el('small', { text: t('qa.acceptedLine') }))),
+      el('button', { type: 'button', class: 'qaccbtn undo', text: t('qa.undoAccept'), 'aria-label': t('qa.undoAria', { name: r.label }), onclick: () => acceptRow(p, r, false) })))));
     if (v === 'avoid' || v === 'check') {
       const line = el('p', { class: 'qalt', id: 'qalt', hidden: true });
       const fill = list => {
@@ -1509,6 +1537,7 @@
 
   // Short coloured tag on the right of a row.
   function chipOf(r) {
+    if (r.accepted) return t('qa.acceptedLine');   // v2.39
     const k = r.ask ? 'chip.ask' : r.why === 'b' ? 'chip.b' : r.why === 'use' ? 'chip.use' : r.why === 'mine' ? 'chip.mine' : r.why === 'allergen' ? (r.traceOnly ? 'chip.traces' : 'chip.yourAlg')
       : r.why === 'fragrance' ? 'chip.frag' : r.why === 'vegan' ? 'chip.vegan' : r.banCos ? 'chip.banCos'
       : r.group === 'orange' ? (r.level === 'u' ? 'chip.u' : 'chip.c')

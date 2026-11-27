@@ -1229,3 +1229,11 @@ details.lcard[open] > summary .lct small { white-space: normal; }
 .readB.ok .rd-top { display: flex; align-items: center; gap: 10px; }
 .readB.ok .rd-badge { background: var(--green); color: #0F1115; }
 .readB.ok .linkbtn { margin-left: auto; }
+
+/* v2.39: "Приемам" on an orange name (only this product) + the accepted line with "Върни" */
+.qlist li.qacc-li { display: flex; align-items: center; gap: 8px; }
+.qlist li.qacc-li > .qrow { flex: 1; min-width: 0; }
+.qaccbtn { flex: none; font: inherit; font-size: 0.86rem; font-weight: 650; min-height: 40px; padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--orange); background: transparent; color: var(--ink); cursor: pointer; }
+.qaccbtn.undo { border-color: var(--line); color: var(--muted); }
+.qlist.qacc .qrow.done { cursor: default; }
