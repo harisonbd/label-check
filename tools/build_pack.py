@@ -7,6 +7,8 @@ Input: the CSV exports (gzip, tab separated, UTF-8), see https://world.openfoodf
 Output (in out/):
     pack-main.ndjson.gz  products sold in Austria, Bulgaria, Romania or Slovakia (with and without ingredients)
     pack-de.ndjson.gz    products sold in Germany and not in the main pack (only those with ingredients, to keep it small)
+    pack-hu/cz/hr/it.ndjson.gz  the same for Hungary, Czechia, Croatia, Italy (v2.44). A product sold in two of these countries is
+                         in both files, so each country file is complete without the others.
     pack-info.json       date, file sizes and counts (the app reads this first)
     README.md            source and licence (ODbL)
 File format: line 1 = {"v":1,"part":...,"date":...,"n":...}; every other line = one product:
@@ -16,7 +18,8 @@ File format: line 1 = {"v":1,"part":...,"date":...,"n":...}; every other line = 
 import csv, gzip, io, json, os, re, sys, time
 
 MAIN = {'en:austria', 'en:bulgaria', 'en:romania', 'en:slovakia'}
-DE = {'en:germany'}
+# v2.44: one file per extra country (only products with ingredients, and not those already in the main pack)
+EXTRA = {'de': {'en:germany'}, 'hu': {'en:hungary'}, 'cz': {'en:czech-republic', 'en:czechia'}, 'hr': {'en:croatia'}, 'it': {'en:italy'}}
 MAX_INGR = 3000
 CODE_RE = re.compile(r'^\d{8,14}$')
 TAG_RE = re.compile(r'en:([a-z0-9-]+)')
@@ -60,15 +63,15 @@ def read_export(path, kind, packs, stats):
                 continue
             countries = set(TAG_RE.findall(get(row, 'countries')))
             countries = {'en:' + x for x in countries}
-            part = 'main' if countries & MAIN else 'de' if countries & DE else None
-            if not part:
+            parts = ['main'] if countries & MAIN else [p for p, tags_ in EXTRA.items() if tags_ & countries]
+            if not parts:
                 continue
             code = get(row, 'code').strip()
             if not CODE_RE.match(code):
                 continue
             ingr = WS_RE.sub(' ', get(row, 'ingr')).strip()[:MAX_INGR]
             name = WS_RE.sub(' ', get(row, 'name') or get(row, 'generic')).strip()[:120]
-            if part == 'de' and not ingr:
+            if parts != ['main'] and not ingr:
                 continue
             if not ingr and not name:
                 continue
@@ -76,10 +79,11 @@ def read_export(path, kind, packs, stats):
                    tags(get(row, 'allergens')), tags(get(row, 'traces')), tags(get(row, 'additives'), E_RE)]
             while rec and rec[-1] == '':
                 rec.pop()
-            old = packs[part].get(code)
-            # the same barcode twice (food and cosmetic export): keep the one with ingredients
-            if old is None or (not (len(old) > 4 and old[4]) and ingr):
-                packs[part][code] = rec
+            for part in parts:
+                old = packs[part].get(code)
+                # the same barcode twice (food and cosmetic export): keep the one with ingredients
+                if old is None or (not (len(old) > 4 and old[4]) and ingr):
+                    packs[part][code] = rec
     return stats
 
 
@@ -89,14 +93,15 @@ def main():
     off, obf, out = sys.argv[1], sys.argv[2], sys.argv[3]
     os.makedirs(out, exist_ok=True)
     date = os.environ.get('PACK_DATE') or time.strftime('%Y-%m-%d', time.gmtime())
-    packs = {'main': {}, 'de': {}}
+    packs = dict([('main', {})] + [(p, {}) for p in EXTRA])
     stats = {'rows': 0, 'bad': 0}
     read_export(off, 'f', packs, stats)
     if obf and obf != '-' and os.path.exists(obf):
         read_export(obf, 'c', packs, stats)
-    for code in list(packs['de']):
-        if code in packs['main']:
-            del packs['de'][code]
+    for part in EXTRA:
+        for code in list(packs[part]):
+            if code in packs['main']:
+                del packs[part][code]
     info = {'v': 1, 'date': date, 'source': 'Open Food Facts and Open Beauty Facts, Open Database License (ODbL) 1.0', 'parts': {}}
     for part, items in packs.items():
         fn = 'pack-%s.ndjson.gz' % part

@@ -563,7 +563,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.43' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.44' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -1038,7 +1038,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v61')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v62')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1596,16 +1596,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v61'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v62'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v61' not in keys: break
+        if 'label-check-v62' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v61' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v62' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1633,7 +1633,7 @@ with sync_playwright() as p:
     pg.go_back(); pg.wait_for_selector('#detail', state='hidden')
     pg.click('#moreBtn'); pg.wait_for_selector('#moreMenu')
     items = pg.evaluate("[...document.querySelectorAll('#moreMenu .mitem')].map(b => b.id)")
-    ok(items == ['mName', 'favBtn', 'mShare', 'mDetails', 'repBtn'] and pg.locator('#moreMenu .seg').count() == 3, '⋯ menu: rename, ♥, share, details, type, Send to Claude (%s)' % items)
+    ok(items == ['mName', 'favBtn', 'mShare', 'mFront', 'mDetails', 'repBtn'] and pg.locator('#moreMenu .seg').count() == 3, '⋯ menu: rename, ♥, share, product photo (v2.44), details, type, Send to Claude (%s)' % items)
     pg.go_back(); pg.wait_for_timeout(300)
     ok(pg.locator('#moreMenu').count() == 0 and pg.is_visible('#result') and pg.inner_text('#nameBtn') == 'Душ гел', 'phone Back closes the menu and stays on the result')
     pg.click('#moreBtn'); pg.keyboard.press('Escape'); pg.wait_for_timeout(300)
@@ -1763,7 +1763,7 @@ with sync_playwright() as p:
         ok(len(tops) == 3 and len(set((t[0], t[1]) for t in tops)) == 1 and all(t[2] for t in tops) and pg.is_hidden('#labelLead'), '%s %d px: Read a label = 3 cards in one row, same size, text fits; no general line (%s)' % (lang, w, tops))
         pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(300)
         cards = pg.evaluate("[...document.querySelectorAll('#tab-list > details.lcard')].filter(d => !d.hidden).map(d => [d.id, d.open])")
-        ok(cards == [['avoidCard', True], ['algCard', False], ['packCard', False], ['setCard', False], ['rulesFold', False], ['moreFold', False]], '%s: My list = 6 cards (v2.37: + products without internet), only the avoid list open; "Taught names" hidden while empty (%s)' % (lang, cards))
+        ok(cards == [['avoidCard', True], ['algCard', False], ['packCard', False], ['ghCard', False], ['setCard', False], ['rulesFold', False], ['moreFold', False]], '%s: My list = 7 cards (v2.37: + products without internet, v2.44: + GitHub backup), only the avoid list open; "Taught names" hidden while empty (%s)' % (lang, cards))
         subs = [pg.inner_text(q) for q in ('#avoidSub', '#algSub', '#setSub')]
         ok(subs[0].endswith('+1') and subs[0].count(',') == 2 and ('+ 1' in subs[1]) and '·' in subs[2], '%s: the closed cards say what is inside (%s)' % (lang, subs))
         ok(no_side_scroll(pg) and pg.evaluate("document.documentElement.scrollHeight") < 2500, '%s %d px: no sideways scroll; the page is short (%d px; v2.41: + profile chips)' % (lang, w, pg.evaluate("document.documentElement.scrollHeight")))
@@ -1785,16 +1785,17 @@ with sync_playwright() as p:
     pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(300)
     ok(pg.inner_text('#packSub') == 'Не е изтеглено' and not pg.eval_on_selector('#packCard', 'd => d.open'), 'My list: card "Продукти без интернет" closed, "Не е изтеглено"')
     ok(hits == [], 'nothing is downloaded before you open the card')
-    open_card(pg, 'packCard'); pg.wait_for_function("() => document.getElementById('packMainState').textContent.includes('MB')")
-    ok(pg.inner_text('#packMainState').startswith('Не е на телефона · 0,1 MB') and pg.is_visible('#packMainBtn') and pg.inner_text('#packMainBtn').startswith('Изтегли') and pg.is_hidden('#packMainRm'),
-       'open: "Не е на телефона · size" + "Изтегли" (%s)' % pg.inner_text('#packMainState'))
+    open_card(pg, 'packCard'); pg.wait_for_function("() => document.getElementById('packState-main').textContent.includes('MB')")
+    ok(pg.inner_text('#packState-main').startswith('Не е на телефона · 0,1 MB') and not pg.is_checked('#packSw-main') and pg.is_hidden('#packAuto'),
+       'open: "Не е на телефона · size", switch off, no "updates by itself" line yet (%s)' % pg.inner_text('#packState-main'))
     pg.set_viewport_size({'width': 375, 'height': 844}); pg.wait_for_timeout(150)
-    xs = pg.evaluate("['packMainBtn', 'packDeBtn'].map(id => { const b = document.getElementById(id).getBoundingClientRect(), row = document.getElementById(id).closest('.packrow'), g = row.querySelector('.grow').getBoundingClientRect(), r = row.getBoundingClientRect(); return [Math.round(r.right - b.right), Math.round(b.left - g.right)]; })")
-    ok(xs[0][0] == xs[1][0] and all(gap >= 0 for _, gap in xs), 'v2.42: 375 px: both "Изтегли" buttons sit on the right, beside their text, not under it ([right gap, gap to text] %s)' % xs)
+    xs = pg.evaluate("[...document.querySelectorAll('#packRows .packset')].map(r => { const sw = r.querySelector('.switch').getBoundingClientRect(), g = r.querySelector('.grow').getBoundingClientRect(), b = r.getBoundingClientRect(); return [Math.round(b.right - sw.right), Math.round(sw.left - g.right), r.dataset.part]; })")
+    ok(len(xs) == 6 and len(set(x[0] for x in xs)) == 1 and all(x[1] >= 0 for x in xs), 'v2.44: 375 px: 6 country rows, every switch on the right, beside its text ([right gap, gap to text] %s)' % xs)
     pg.set_viewport_size({'width': 390, 'height': 844}); pg.wait_for_timeout(150)
-    pg.click('#packMainBtn'); pg.wait_for_function("() => document.getElementById('packMainState').textContent.includes('продукта')", timeout=15000)
-    ok(pg.inner_text('#packMainState').startswith('5 продукта · 3.12.2026') or pg.inner_text('#packMainState').startswith('5 продукта · 3 дек'), 'after download: "5 продукта · date" (%s)' % pg.inner_text('#packMainState'))
-    ok(pg.is_hidden('#packMainBtn') and pg.is_visible('#packMainRm') and pg.inner_text('#packSub').startswith('5 продукта'), 'up to date: no button, "Махни" shows; the card line says 5 products')
+    pg.click('#packSw-main'); pg.wait_for_function("() => document.getElementById('packState-main').textContent.includes('продукта')", timeout=15000)
+    ok(pg.inner_text('#packState-main').startswith('5 продукта · 3.12.2026') or pg.inner_text('#packState-main').startswith('5 продукта · 3 дек'), 'switch on: downloads at once: "5 продукта · date" (%s)' % pg.inner_text('#packState-main'))
+    ok(pg.is_checked('#packSw-main') and pg.inner_text('#packSub').startswith('5 продукта') and pg.is_visible('#packAuto') and 'Обновява се само' in pg.inner_text('#packAuto'),
+       'switch stays on; the card line says 5 products; "Обновява се само, всяка седмица" shows')
     ctx.set_offline(True)
     pg.click('.tabbar button[data-go=scan]')
     if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
@@ -1825,12 +1826,21 @@ with sync_playwright() as p:
     pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(200)
     pg.evaluate("document.getElementById('packCard').open = false"); open_card(pg, 'packCard')
     pg.evaluate("LC.packInfo && LC.packInfo(true)"); pg.wait_for_timeout(300); pg.evaluate("LC.renderPack && LC.renderPack()"); pg.wait_for_timeout(300)
-    ok('нова версия' in pg.inner_text('#packMainState') and pg.is_visible('#packMainBtn') and pg.inner_text('#packMainBtn').startswith('Обнови'), 'a newer pack: "нова версия" + "Обнови" (%s)' % pg.inner_text('#packMainState'))
-    pg.click('#packDeBtn'); pg.wait_for_function("() => document.getElementById('packDeState').textContent.includes('продукт')", timeout=15000)
-    ok(pg.inner_text('#packSub').endswith('+ Германия'), 'Germany downloaded: the card line says "+ Германия"')
+    ok('нова версия' in pg.inner_text('#packState-main'), 'a newer pack on GitHub: "нова версия" (%s)' % pg.inner_text('#packState-main'))
+    hits.clear(); pg.evaluate("LC.packAuto()"); pg.wait_for_timeout(500)
+    ok(hits == [], 'v2.44: checked less than a week ago: the app does not look again (%s)' % hits)
+    pg.evaluate("localStorage.setItem('lc.packCheck', String(Date.now() - 8 * 864e5)); LC.packAuto()")
+    pg.wait_for_function("() => document.getElementById('packState-main').textContent.includes('2027') || document.getElementById('packState-main').textContent.includes('3.01')", timeout=15000)
+    ok('нова версия' not in pg.inner_text('#packState-main') and 'pack-main.ndjson.gz' in hits and 'pack-de.ndjson.gz' not in hits,
+       'v2.44: after a week the new version downloads by itself, only the switched-on part (%s, %s)' % (pg.inner_text('#packState-main'), hits))
+    pg.click('#packSw-de'); pg.wait_for_function("() => document.getElementById('packState-de').textContent.includes('продукт')", timeout=15000)
+    ok(pg.inner_text('#packSub').endswith('+ Германия'), 'Germany switched on: the card line says "+ Германия"')
     pg.screenshot(path=os.path.join(SHOTS, 'v237-pack-bg.png'), full_page=True)
-    pg.click('#packMainRm'); pg.wait_for_timeout(400)
-    ok(pg.is_visible('#packMainBtn') and pg.is_hidden('#packMainRm') and pg.inner_text('#packSub').startswith('Не е изтеглено'), '"Махни" removes the main pack; "Изтегли" again')
+    pg.click('#packSw-main'); pg.wait_for_timeout(400)
+    ok(pg.is_checked('#packSw-main') and pg.inner_text('#packState-main').startswith('5 продукта'), 'v2.44: switch off -> the app asks first; "Cancel" keeps the pack')
+    pg.once('dialog', lambda d: d.accept()); pg.click('#packSw-main'); pg.wait_for_timeout(500)
+    ok(not pg.is_checked('#packSw-main') and pg.inner_text('#packState-main').startswith('Не е на телефона') and pg.inner_text('#packSub') == '+ Германия',
+       'switch off + OK removes the main pack; Germany stays (%s)' % pg.inner_text('#packSub'))
     ok(no_side_scroll(pg), 'no sideways scroll')
     ctx.close()
 
@@ -2072,6 +2082,182 @@ with sync_playwright() as p:
     ok(n[0] <= 1000 and n[1] and n[2] >= 2, 'over 1,000 products: copies from the internet go, your own products stay (%s)' % n)
     ok(no_side_scroll(pg), 'no sideways scroll')
     ctx.close()
+
+    # ---- v2.44: product photo, more countries (switches, updates by themselves), automatic GitHub backup ----
+    print('v2.44: pack database version 2 keeps the packs of version 1; more countries')
+    import gzip as _gz, base64 as _b64, urllib.parse as _up
+    ctx = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, locale='bg-BG', color_scheme='dark', service_workers='block')
+    ctx.route('https://world.openfoodfacts.org/**', fake_api); ctx.route('https://world.openbeautyfacts.org/**', fake_api)
+    files = pack_files(); hits = []; pack_route(ctx, files, hits)
+    pg = ctx.new_page(); pg.on('pageerror', lambda e: errors.append(str(e)))
+    pg.goto(base.replace('index.html', 'manifest.json'))
+    pg.evaluate("""() => new Promise((res, rej) => { const rq = indexedDB.open('lc-pack', 1);
+      rq.onupgradeneeded = () => { const db = rq.result; ['main', 'de', 'meta'].forEach(n => db.createObjectStore(n)); };
+      rq.onsuccess = () => { const db = rq.result, tx = db.transaction(['main', 'meta'], 'readwrite');
+        tx.objectStore('main').put(['f', 'Стар пакет', 'X', 'вода, сол'], '3800000000099');
+        tx.objectStore('meta').put({ main: { date: '2026-11-26', n: 1, bytes: 10 } }, 'parts');
+        tx.oncomplete = () => { db.close(); res(); }; tx.onerror = () => rej(tx.error); }; rq.onerror = () => rej(rq.error); })""")
+    pg.goto(base); pg.evaluate('LC.dbReady'); ctx.set_offline(True)
+    type_code(pg, '3800000000099'); pg.wait_for_selector('#result:not([hidden]) #answer')
+    ok(pg.evaluate("LC.state.current.p.name") == 'Стар пакет', 'the pack downloaded before v2.44 still works after the update (database version 2)')
+    ctx.set_offline(False)
+    pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(200); open_card(pg, 'packCard')
+    pg.wait_for_function("() => document.getElementById('packState-main').textContent.includes('3.12') || document.getElementById('packState-main').textContent.includes('3 дек')", timeout=15000)
+    ok(pg.is_checked('#packSw-main') and not pg.is_checked('#packSw-de') and not pg.is_checked('#packSw-hu') and 'pack-main.ndjson.gz' in hits,
+       'old user: the pack on the phone counts as switched on and updates by itself to the new version; Germany stays off')
+    names = pg.eval_on_selector_all('#packRows .packset label > span:first-child', 'e => e.map(x => x.textContent)')
+    ok(names == ['Австрия · България · Румъния · Словакия', 'Германия', 'Унгария', 'Чехия', 'Хърватия', 'Италия'], '6 rows: main, Germany, Hungary, Czechia, Croatia, Italy (%s)' % names)
+    pg.click('#packSw-hu'); pg.wait_for_timeout(600)
+    ok(pg.is_checked('#packSw-hu') and 'скоро' in pg.inner_text('#packState-hu'), 'Hungary on before GitHub has it: the switch stays on, "Изтегля се скоро" (%s)' % pg.inner_text('#packState-hu'))
+    body = json.dumps({'v': 1, 'part': 'hu', 'date': '2026-12-03', 'n': 1}) + '\n' + json.dumps(['5990000000013', 'f', 'Pick szalámi', 'Pick', 'sertéshús, só, paprika'], ensure_ascii=False) + '\n'
+    files['pack-hu.ndjson.gz'] = _gz.compress(body.encode('utf-8'))
+    info = json.loads(files['pack-info.json']); info['parts']['hu'] = {'file': 'pack-hu.ndjson.gz', 'bytes': len(files['pack-hu.ndjson.gz']), 'n': 1, 'ni': 1}
+    files['pack-info.json'] = json.dumps(info).encode()
+    pg.evaluate("LC.packAuto()")
+    pg.wait_for_function("() => document.getElementById('packState-hu').textContent.includes('продукт')", timeout=15000)
+    ok(pg.inner_text('#packSub').endswith('+ Унгария'), 'as soon as GitHub has Hungary, it downloads by itself (no button); the card line says "+ Унгария" (%s)' % pg.inner_text('#packSub'))
+    ctx.set_offline(True)
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    type_code(pg, '5990000000013'); pg.wait_for_selector('#result:not([hidden]) #answer')
+    ok(pg.evaluate("LC.state.current.p.name") == 'Pick szalámi', 'offline: a Hungarian product is found in the Hungary pack')
+    ctx.set_offline(False)
+    ok(no_side_scroll(pg), 'no sideways scroll')
+    ctx.close()
+
+    print('v2.44: product photo')
+    JPG = {'name': 'front.jpg', 'mimeType': 'image/jpeg', 'buffer': _b64.b64decode('/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAoHBwgHBgoICAgLCgoLDhgQDg0NDh0VFhEYIx8lJCIfIiEmKzcvJik0KSEiMEExNDk7Pj4+JS5ESUM8SDc9Pjv/2wBDAQoLCw4NDhwQEBw7KCIoOzs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozv/wAARCAAeACgDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDnqKKK8U/QQooooAKKKKACiiigAooooAKKKKAP/9k=')}
+    ctx, pg = new_page(b, base, 'bg-BG', dark=True)
+    read_label(pg, 'Съставки: свинско месо, сол, черен пипер', 'food', 'Луканка Тест')
+    code = pg.evaluate("LC.state.current.p.code")
+    ok(pg.is_visible('#frontBtn') and 'add' in pg.get_attribute('#frontBtn', 'class') and pg.inner_text('#frontBtn') == 'Снимка', 'no photo yet: a dashed "Снимка" tile next to the name')
+    with pg.expect_file_chooser() as fc: pg.click('#frontBtn')
+    fc.value.set_files(JPG); pg.wait_for_function("() => document.querySelector('#frontBtn img')", timeout=8000)
+    ok('add' not in pg.get_attribute('#frontBtn', 'class') and pg.evaluate("!!LC.state.products['%s'].front && !!LC.frontOf('%s')" % (code, code)), 'the photo shows next to the name and is saved')
+    ok(pg.evaluate("LC.isOwn(LC.state.products['%s'])" % code), 'a product with your photo is your own product (never removed by the limit)')
+    pg.click('.tabbar button[data-go=history]'); pg.wait_for_timeout(300)
+    ok(pg.locator('#historyList .hrow .thumb img').count() == 1, 'History shows the photo')
+    pg.click('.tabbar button[data-go=scan]'); pg.wait_for_timeout(300)
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]'); pg.wait_for_timeout(200)
+    ok(pg.locator('#recentList .srow .thumb img').count() == 1, '"Последни" shows the photo')
+    pg.evaluate("LC.showProduct(LC.state.products['%s'])" % code); pg.wait_for_timeout(300)
+    pg.click('#moreBtn'); pg.wait_for_selector('#moreMenu')
+    ok(pg.inner_text('#mFront') == 'Нова снимка на продукта' and pg.is_visible('#mFrontRm'), '⋯ menu: "Нова снимка на продукта" and "Махни снимката на продукта"')
+    pg.click('#mFrontRm'); pg.wait_for_timeout(500)
+    ok('add' in pg.get_attribute('#frontBtn', 'class') and not pg.evaluate("LC.state.products['%s'].front || LC.frontOf('%s')" % (code, code)), '"Махни": back to the dashed tile')
+    with pg.expect_file_chooser() as fc: pg.click('#frontBtn')
+    fc.value.set_files(JPG); pg.wait_for_function("() => document.querySelector('#frontBtn img')", timeout=8000)
+    pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(200); open_card(pg, 'moreFold')
+    with pg.expect_download() as dl: pg.click('#exportBtn')
+    bkfile = os.path.join(SHOTS, 'v244-backup.json'); dl.value.save_as(bkfile)
+    data = json.load(open(bkfile, encoding='utf-8'))
+    ok(str(data.get('fronts', {}).get(code, '')).startswith('data:image/jpeg') and 'packWant' in data, 'the backup file has the product photo and your countries')
+    ctx.close()
+    ctx, pg = new_page(b, base, 'bg-BG', dark=True)
+    pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(200); open_card(pg, 'moreFold')
+    pg.once('dialog', lambda d: d.accept())
+    pg.set_input_files('#importInput', bkfile); pg.wait_for_function("(c) => !!LC.frontOf(c)", arg=code, timeout=8000)
+    ok(pg.evaluate("!!LC.state.products['%s'].front" % code), 'import on a new phone: the product and its photo come back')
+    ctx.close()
+
+    print('v2.44: GitHub backup')
+    KEY = 'github_pat_' + 'A1b2' * 10
+    GH = {'files': {}, 'puts': [], 'gets': 0, 'key': KEY}
+    def gh_route(route):
+        rq = route.request
+        H = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, accept, x-github-api-version', 'Access-Control-Allow-Methods': 'GET, PUT'}
+        if rq.method == 'OPTIONS': route.fulfill(status=204, headers=H); return
+        if rq.headers.get('authorization') != 'Bearer ' + GH['key']: route.fulfill(status=401, headers=H, content_type='application/json', body='{"message":"Bad credentials"}'); return
+        parts = rq.url.split('api.github.com/repos/')[1].split('?')[0].split('/')
+        repo, rest = parts[0] + '/' + parts[1], '/'.join(parts[2:])
+        if repo not in ('harisonbd/label-check-backup', 'harisonbd/public-one'): route.fulfill(status=404, headers=H, body='{}'); return
+        if not rest: route.fulfill(status=200, headers=H, content_type='application/json', body=json.dumps({'full_name': repo, 'private': repo != 'harisonbd/public-one'})); return
+        fp = _up.unquote(rest[len('contents/'):])
+        if rq.method == 'GET':
+            GH['gets'] += 1
+            f = GH['files'].get(fp)
+            if not f: route.fulfill(status=404, headers=H, body='{"message":"Not Found"}'); return
+            if 'raw' in rq.headers.get('accept', ''): route.fulfill(status=200, headers=H, body=f['bytes']); return
+            route.fulfill(status=200, headers=H, content_type='application/json', body=json.dumps({'sha': f['sha']})); return
+        d = json.loads(rq.post_data)
+        f = GH['files'].get(fp)
+        if f and d.get('sha') != f['sha']: route.fulfill(status=409, headers=H, body='{}'); return
+        GH['files'][fp] = {'bytes': _b64.b64decode(d['content']), 'sha': 'sha%d' % len(GH['puts'])}; GH['puts'].append(fp)
+        route.fulfill(status=201, headers=H, content_type='application/json', body='{"content":{}}')
+    ctx, pg = new_page(b, base, 'bg-BG', dark=True)
+    ctx.route('https://api.github.com/**', gh_route)
+    read_label(pg, 'Съставки: свинско месо, сол, черен пипер', 'food', 'Луканка Облак')
+    code = pg.evaluate("LC.state.current.p.code")
+    with pg.expect_file_chooser() as fc: pg.click('#frontBtn')
+    fc.value.set_files(JPG); pg.wait_for_function("() => document.querySelector('#frontBtn img')", timeout=8000)
+    pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(200)
+    ok(pg.inner_text('#ghSub') == 'Не е настроено' and not pg.eval_on_selector('#ghCard', 'd => d.open'), 'Profile: card "Резервно копие в GitHub", closed, "Не е настроено"')
+    open_card(pg, 'ghCard')
+    hrefs = pg.eval_on_selector_all('#ghSetup .ghsteps a', 'a => a.map(x => x.href)')
+    ok(pg.is_visible('#ghSetup') and pg.is_hidden('#ghOn') and hrefs[0].startswith('https://github.com/new') and hrefs[1] == 'https://github.com/settings/personal-access-tokens/new',
+       '3 steps with direct links (%s)' % hrefs)
+    def connect(repo, key):
+        pg.fill('#ghRepo', repo); pg.fill('#ghToken', key); pg.click('#ghConnect'); pg.wait_for_timeout(700)
+    connect('harisonbd/label-check-backup', 'abc')
+    ok('не е ключ' in pg.inner_text('#ghMsg') and GH['gets'] == 0, 'not a key: a clear message, nothing is sent')
+    connect('harisonbd/public-one', KEY)
+    ok('публично' in pg.inner_text('#ghMsg') and pg.evaluate("localStorage.getItem('lc.gh')") in (None, 'null') and not GH['puts'], 'a PUBLIC repository is refused; nothing is saved or sent')
+    connect('harisonbd/label-check-backup', 'github_pat_' + 'Z9' * 15)
+    ok('не работи' in pg.inner_text('#ghMsg') and not GH['puts'], 'a wrong key: "Ключът не работи"')
+    connect('https://github.com/harisonbd/label-check-backup', KEY)
+    pg.wait_for_function("() => !document.getElementById('ghOn').hidden", timeout=8000); pg.wait_for_timeout(500)
+    js = GH['files'].get('label-check-backup.json', {}).get('bytes', b'').decode('utf-8')
+    ok(pg.inner_text('#ghOkTitle') == 'Свързано: harisonbd/label-check-backup' and code in js and 'photos/%s.jpg' % code in GH['puts'],
+       'connected (a full GitHub address also works): first backup + the product photo are on GitHub (%s)' % GH['puts'])
+    ok(KEY not in js and 'github_pat' not in js and pg.input_value('#ghToken') == '', 'the key is never in the backup, and the field is emptied')
+    ok('Само всеки ден' in pg.inner_text('#ghSub') and 'продукти: ' in pg.inner_text('#ghOkSub') and 'снимки: 1' in pg.inner_text('#ghOkSub'), 'the card says when and what (%s)' % pg.inner_text('#ghOkSub'))
+    n = len(GH['puts'])
+    pg.evaluate("LC.ghMaybe()"); pg.wait_for_timeout(500)
+    ok(len(GH['puts']) == n, 'by itself: not again on the same day')
+    pg.evaluate("(() => { const g = JSON.parse(localStorage.getItem('lc.gh')); g.tried = Date.now() - 25 * 3600e3; localStorage.setItem('lc.gh', JSON.stringify(g)); })()")
+    pg.evaluate("LC.ghMaybe()"); pg.wait_for_timeout(700)
+    ok(len(GH['puts']) == n, 'by itself after a day, but nothing changed: nothing is sent')
+    pg.evaluate("(() => { const g = JSON.parse(localStorage.getItem('lc.gh')); g.tried = Date.now() - 25 * 3600e3; localStorage.setItem('lc.gh', JSON.stringify(g)); })()")
+    pg.fill('#avoidInput', 'палмово масло') if pg.is_visible('#avoidInput') else None
+    pg.evaluate("LC.state.avoid.push({ id: 'x1', text: 'палмово масло' }); localStorage.setItem('lc.avoid', JSON.stringify(LC.state.avoid)); LC.ghMaybe()"); pg.wait_for_timeout(800)
+    ok(GH['puts'][n:] == ['label-check-backup.json'], 'after a day with a change: only the backup file is sent again, not the photo (%s)' % GH['puts'][n:])
+    pg.click('#ghNow'); pg.wait_for_timeout(800)
+    ok(GH['puts'][-1] == 'label-check-backup.json' and len(GH['puts']) == n + 2, '"Копирай сега" sends at once')
+    pg.click('.tabbar button[data-go=scan]'); pg.wait_for_timeout(200)
+    ok(pg.is_hidden('#bkNote'), 'with the GitHub backup working there is no "Още нямаш резервно копие" note')
+    pg.evaluate("(() => { const g = JSON.parse(localStorage.getItem('lc.gh')); g.ok = Date.now() - 9 * 864e5; g.at = g.ok; localStorage.setItem('lc.gh', JSON.stringify(g)); })()")
+    reload_ready(pg); pg.wait_for_timeout(300)
+    ok(pg.is_visible('#bkNote') and 'не работи от 9 дни' in pg.inner_text('#bkNote') and pg.inner_text('#bkSave') == 'Отвори', 'not working for 9 days: the start note says so; "Отвори" (%s)' % pg.inner_text('#bkNote'))
+    pg.click('#bkSave'); pg.wait_for_timeout(400)
+    ok(pg.eval_on_selector('#ghCard', 'd => d.open'), '"Отвори" opens the GitHub card')
+    GH['key'] = 'github_pat_' + 'X' * 40
+    pg.click('#ghNow'); pg.wait_for_timeout(800)
+    ok(pg.is_visible('#ghErr') and 'не работи' in pg.inner_text('#ghErr') and 'Не работи' in pg.inner_text('#ghSub'), 'the key ended: the card says what to do (%s)' % pg.inner_text('#ghErr'))
+    GH['key'] = KEY
+    ok(no_side_scroll(pg), 'no sideways scroll')
+    pg.screenshot(path=os.path.join(SHOTS, 'v244-github-bg.png'), full_page=True)
+    ctx.close()
+    # a new phone (or the APK): connect -> "restore?" -> yes
+    ctx, pg = new_page(b, base, 'bg-BG', dark=True)
+    ctx.route('https://api.github.com/**', gh_route)
+    n = len(GH['puts'])
+    pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(200); open_card(pg, 'ghCard')
+    msgs = []
+    pg.on('dialog', lambda d: (msgs.append(d.message), d.accept()))
+    connect('harisonbd/label-check-backup', KEY); pg.wait_for_function("(c) => !!LC.frontOf(c)", arg=code, timeout=8000)
+    ok(msgs and 'копие от' in msgs[0] and pg.evaluate("!!LC.state.products['%s'] && LC.state.avoid.some(a => a.text === 'палмово масло')" % code),
+       'a new phone: "В хранилището има копие ... Да го върна?" -> products, list and photo come back (%s)' % msgs[:1])
+    ok(len(GH['puts']) == n, 'restoring sends nothing (the backup on GitHub is not overwritten)')
+    msgs.clear(); pg.click('#ghOff'); pg.wait_for_timeout(300)
+    ok(msgs and pg.is_visible('#ghSetup') and pg.evaluate("localStorage.getItem('lc.gh')") in (None, 'null'), '"Изключи" asks, then deletes the key from the phone')
+    ctx.close()
+    for lang, w in (('en-GB', 320), ('de-AT', 320)):
+        ctx, pg = new_page(b, base, lang, dark=False, width=w)
+        pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(200)
+        open_card(pg, 'packCard'); open_card(pg, 'ghCard'); pg.wait_for_timeout(300)
+        ok(no_side_scroll(pg) and pg.is_visible('#ghConnect'), '%s %d px: the country and GitHub cards fit' % (lang, w))
+        pg.screenshot(path=os.path.join(SHOTS, 'v244-cards-%s-%d.png' % (lang[:2], w)), full_page=True)
+        ctx.close()
 
     for lang, w, dark in (('en-GB', 320, False), ('de-AT', 390, False)):
         ctx, pg = new_page(b, base, lang, dark=dark, width=w)

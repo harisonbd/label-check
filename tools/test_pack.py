@@ -21,6 +21,13 @@ with tempfile.TemporaryDirectory() as d:
         row(code='12ab', product_name='bad code', countries_tags='en:austria', ingredients_text='x'),
         row(code='5900000000000', product_name='Polish only', countries_tags='en:poland', ingredients_text='mąka'),
         row(code='5940000000001', product_name='Biscuiți', countries_tags='en:romania', ingredients_text='făină de grâu, zahăr, ouă', allergens='en:gluten,en:eggs'),
+        # v2.44: more countries
+        row(code='8000000000016', product_name='Grissini', countries_tags='en:italy,en:germany', ingredients_text='farina di grano, olio, sale'),
+        row(code='5990000000013', product_name='Pick szalámi', countries_tags='en:hungary', ingredients_text='sertéshús, só, fűszerek'),
+        row(code='8590000000011', product_name='Jen jméno', countries_tags='en:czech-republic'),                            # CZ without ingredients: left out
+        row(code='8590000000028', product_name='Tatranky', countries_tags='en:czech-republic', ingredients_text='pšeničná mouka, cukr'),
+        row(code='3850000000019', product_name='Ajvar', countries_tags='en:croatia', ingredients_text='paprika, patlidžan, ulje'),
+        row(code='8000000000023', product_name='Pasta AT IT', countries_tags='en:austria,en:italy', ingredients_text='semola di grano duro'),
         'only\tthree\tfields',
     ]
     with gzip.open(off, 'wt', encoding='utf-8') as f:
@@ -37,13 +44,18 @@ with tempfile.TemporaryDirectory() as d:
             lines = [json.loads(l) for l in f if l.strip()]
         return lines[0], {x[0]: x for x in lines[1:]}
     hm, main = load('pack-main.ndjson.gz'); hd, de = load('pack-de.ndjson.gz')
-    ok(hm == {'v': 1, 'part': 'main', 'date': '2026-12-02', 'n': 4} and sorted(main) == ['3800123456789', '5940000000001', '9001234567890', '9008700000000'], 'main pack: AT, BG, RO + the cosmetic (%s)' % sorted(main))
+    ok(hm == {'v': 1, 'part': 'main', 'date': '2026-12-02', 'n': 5} and sorted(main) == ['3800123456789', '5940000000001', '8000000000023', '9001234567890', '9008700000000'], 'main pack: AT, BG, RO + the cosmetic (%s)' % sorted(main))
     k = main['9001234567890']
     ok(k == ['9001234567890', 'f', 'Kekse Vollkorn', 'Manner', 'Weizenmehl, Zucker, Palmfett, Emulgator: Lecithine (Soja)', 'gluten,soybeans', 'milk,nuts', 'e322,e322i'], 'record: spaces tidied, first brand, allergens, traces, additives (%s)' % k)
     ok(main['3800123456789'] == ['3800123456789', 'f', 'Лютеница'], 'name-only product: short record, Cyrillic kept')
     ok(main['9008700000000'][1] == 'c', 'cosmetic from Open Beauty Facts has kind "c"')
-    ok(sorted(de) == ['4000000000017'] and hd['n'] == 1, 'Germany pack: only German products with ingredients, not those already in the main pack')
-    ok(info['parts']['main']['n'] == 4 and info['parts']['main']['ni'] == 3 and info['parts']['main']['bytes'] > 0 and info['parts']['main']['cosmetic'] == 1, 'pack-info counts (%s)' % info['parts']['main'])
+    ok(sorted(de) == ['4000000000017', '8000000000016'] and hd['n'] == 2, 'Germany pack: only German products with ingredients, not those already in the main pack (%s)' % sorted(de))
+    _, it = load('pack-it.ndjson.gz'); _, hu = load('pack-hu.ndjson.gz'); _, cz = load('pack-cz.ndjson.gz'); _, hr = load('pack-hr.ndjson.gz')
+    ok(sorted(it) == ['8000000000016'] and sorted(hu) == ['5990000000013'] and sorted(cz) == ['8590000000028'] and sorted(hr) == ['3850000000019'],
+       'v2.44: one file per country; a product sold in IT and DE is in both; AT+IT only in main; no name-only products (%s %s %s %s)' % (sorted(it), sorted(hu), sorted(cz), sorted(hr)))
+    ok('8000000000023' in main and sorted(info['parts']) == ['cz', 'de', 'hr', 'hu', 'it', 'main'] and info['parts']['it']['file'] == 'pack-it.ndjson.gz',
+       'v2.44: pack-info.json lists all 6 parts (%s)' % sorted(info['parts']))
+    ok(info['parts']['main']['n'] == 5 and info['parts']['main']['ni'] == 4 and info['parts']['main']['bytes'] > 0 and info['parts']['main']['cosmetic'] == 1, 'pack-info counts (%s)' % info['parts']['main'])
     ok('"bad": 1' in r.stdout, 'a broken line is counted and skipped')
     ok('ODbL' in open(os.path.join(out, 'README.md')).read(), 'README.md names the licence')
 print('ALL PASSED' if not fails else '%d FAILED' % len(fails))

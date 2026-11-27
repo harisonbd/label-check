@@ -1300,3 +1300,38 @@ details.lcard[open] > summary .lct small { white-space: normal; }
 .twin.known { background: color-mix(in srgb, var(--green) 12%, var(--card)); }
 .dot.mk:not([data-m="p"])::before { content: attr(data-m); }
 .dot.mk svg { width: 15px; height: 15px; stroke-width: 3; }
+
+/* ---------- v2.44: product photo, country switches + updates by themselves, GitHub backup ---------- */
+.qn .qph { width: 52px; height: 52px; flex: none; padding: 0; border: 0; border-radius: 12px; overflow: hidden; background: var(--card2, var(--card)); display: grid; place-items: center; margin-right: 6px; color: var(--muted); cursor: pointer; }
+.qn .qph img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.qn .qph.add { border: 2px dashed var(--muted); background: transparent; font-size: 0.7rem; font-weight: 700; line-height: 1.1; text-align: center; align-content: center; gap: 2px; }
+.qn .qph.add svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; display: block; margin: 0 auto; }
+.hrow .thumb { position: relative; width: 40px; height: 40px; flex: none; border-radius: 10px; background: var(--card2, var(--card)); display: grid; place-items: center; overflow: hidden; color: var(--muted); }
+.hrow .thumb svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.hrow .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.hrow .open { min-width: 0; flex: 1 1 auto; }
+.packauto { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 12px; background: var(--card2, var(--card)); margin: 8px 0 4px; }
+.packauto[hidden] { display: none; }
+.packauto svg { width: 20px; height: 20px; flex: none; fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; margin-top: 2px; }
+.packauto b { display: block; }
+.packauto small { display: block; color: var(--muted); }
+.packset .grow { min-width: 0; }
+.packset .sub, #ghCard .sub { font-size: 0.84rem; }
+#packRows .packset:last-child { border-bottom: 0; }
+.ghsteps { margin: 10px 0 4px; padding: 0; list-style: none; counter-reset: s; }
+.ghsteps li { counter-increment: s; display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.ghsteps li::before { content: counter(s); width: 24px; height: 24px; flex: none; border-radius: 50%; background: var(--accent); color: var(--bg); font-weight: 800; display: grid; place-items: center; font-size: 0.85rem; }
+.ghsteps a { color: var(--accent); font-weight: 600; }
+.ghsteps small { display: block; color: var(--muted); overflow-wrap: anywhere; }
+.ghform label { display: block; font-weight: 600; margin: 10px 0 4px; }
+.ghform input { width: 100%; box-sizing: border-box; }
+.ghform .btn { width: 100%; margin-top: 12px; }
+.ghsafe { color: var(--muted); font-size: 0.84rem; margin: 10px 0 0; }
+.ghsafe::before { content: "🔒 "; }
+.ghok { padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--green, #3fb950) 16%, transparent); margin: 8px 0; }
+.ghok b { display: block; overflow-wrap: anywhere; }
+.ghok b::before { content: "✓ "; }
+.ghok small { color: var(--muted); display: block; }
+.ghwarn { margin: 8px 0 0; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--red, #e5534b) 16%, transparent); font-size: 0.88rem; }
+.ghwarn[hidden] { display: none; }
+.ghbtns { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }

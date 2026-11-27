@@ -87,13 +87,16 @@
       } catch (e) { return fallback; }
     },
     set(key, value) {
+      if (BACKED.has(key)) try { ghSoon(); } catch (e) { /* the app is still starting */ }             // v2.44: a change -> the GitHub backup (if set up) runs within a minute, at most once a day
       try { localStorage.setItem('lc.' + key, JSON.stringify(value)); return true; }
       catch (e) { toast(t('toast.saveFail')); return false; }
     },
     trySet(key, value) {                       // v2.28: no toast (the caller makes room and tries again)
+      if (BACKED.has(key)) try { ghSoon(); } catch (e) { /* the app is still starting */ }
       try { localStorage.setItem('lc.' + key, JSON.stringify(value)); return true; } catch (e) { return false; }
     }
   };
+  const BACKED = new Set(['avoid', 'history', 'products', 'favs', 'names', 'taught', 'allergens', 'avoidFragrance', 'vegan', 'typedNames']);
 
   const state = {
     avoid: store.get('avoid', []),           // [{id, text}]
@@ -728,7 +731,7 @@
     return null;
   }
 
-  const isOwn = q => !!q && (q.source === 'label' || q.readOk || q.claude || (q.accepted && q.accepted.length));
+  const isOwn = q => !!q && (q.source === 'label' || q.readOk || q.claude || q.front || (q.accepted && q.accepted.length));
   function saveProduct(p) {
     state.products[p.code] = p;
     verdictCache.delete(p.code);
@@ -830,6 +833,7 @@
   }
   const ICON = {
     chev: 'M9 6l6 6-6 6',
+    cam: 'M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.5-2h6l1.5 2h2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5zM12 16.5a3.5 3.5 0 1 0 0-7a3.5 3.5 0 0 0 0 7z',
     info: 'M21 12a9 9 0 1 1-18 0a9 9 0 1 1 18 0zM12 11v6M12 7.5h.01',
     again: 'M4 12a8 8 0 0 1 13.7-5.6L20 8.7M20 4v4.7h-4.7M20 12a8 8 0 0 1-13.7 5.6L4 15.3M4 20v-4.7h4.7',
     heart: 'M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z',
@@ -1258,8 +1262,14 @@
 
   // v2.34: a small line on top: the name (tap = rename) · the type, and the ⋯ menu.
   function nameRow(p) {
-    const nm = p.name || t('ph.unnamed');
+    const nm = p.name || t('ph.unnamed'), own = frontOf(p.code), src = own || p.image;
+    const camTile = b => { b.classList.add('add'); b.append(icon(ICON.cam), el('span', { text: t('front.short') })); };
+    // v2.44: the product photo (a tap takes a new one); no photo: a dashed "Photo" tile
+    const ph = el('button', { class: 'qph', type: 'button', id: 'frontBtn', 'aria-label': t(own ? 'front.change' : 'front.add'), onclick: () => askFront(p) },
+      src ? el('img', { src, alt: '', onerror: e => { const b = e.target.parentNode; e.target.remove(); camTile(b); } }) : null);
+    if (!src) camTile(ph);
     return el('div', { class: 'qn' },
+      ph,
       p.name
         ? el('button', { class: 'nameedit', type: 'button', id: 'nameBtn', 'aria-label': t('name.edit') + ': ' + nm, onclick: () => editName(p) },
             el('span', { text: nm }), p.nameFrom === 'photo' ? el('small', { class: 'fromphoto', text: t('name.fromPhoto') }) : null, icon(ICON.pen))
@@ -1284,6 +1294,8 @@
         item('mName', ICON.pen, t(p.name ? 'name.edit' : 'name.add'), () => editName(p)),
         item('favBtn', ICON.heart, t(isFav ? 'btn.unfav' : 'btn.fav'), () => toggleFav(p), { 'aria-pressed': String(isFav), class: 'mitem' + (isFav ? ' on' : '') }),
         item('mShare', ICON.share, t('btn.share'), shareResult),
+        item('mFront', ICON.cam, t(frontOf(p.code) ? 'front.change' : 'front.add'), () => askFront(p)),
+        frontOf(p.code) ? item('mFrontRm', ICON.close, t('front.remove'), () => removeFront(p)) : null,
         a && a.verdict !== 'unknown' ? item('mDetails', ICON.info, t('qa.details'), () => toggleDetails(true, true)) : null,
         label && photo && a && a.verdict !== 'unknown' ? item('mSecond', ICON.again, t('btn.second'), () => secondPhoto(p)) : null,
         label && isBarcode(p.code) ? item('mOnline', ICON.globe, t('btn.lookupOnline'), () => lookup(p.code, true)) : null,
@@ -1866,7 +1878,7 @@
     if (opts.start) {
       return el('li', { class: 'srow' },
         el('button', { class: 'open', type: 'button', onclick: () => openSaved(item.code), 'aria-label': name + ', ' + t('v.' + v.verdict) },
-          el('span', { class: 'thumb' }, icon(ICON[KIND_ICON[p.kind] || 'food']), p.image ? el('img', { src: p.image, alt: '', loading: 'lazy', onerror: e => e.target.remove() }) : null),
+          thumbOf(p),
           el('span', { class: 'tx' }, el('strong', { text: name }), el('span', { class: 'sub', text: fmtDay(opts.time) })),
           el('span', { class: 'vv v-' + v.verdict }, el('span', { class: 'dot ' + VERDICT_DOT[v.verdict], 'aria-hidden': 'true' }), el('span', { text: t('v.' + v.verdict) }))));
     }
@@ -1875,6 +1887,7 @@
       : v.verdict === 'partial' ? t('hist.partial') : v.verdict === 'unknown' ? t('v.unknown') : null;
     return el('li', { class: 'hrow' },
       el('span', { class: 'dot ' + VERDICT_DOT[v.verdict], 'aria-hidden': 'true' }),
+      thumbOf(p),                                   // v2.44: product photo
       el('button', { class: 'open', type: 'button', onclick: () => openSaved(item.code), 'aria-label': name + ', ' + t('v.' + v.verdict) },
         el('strong', { text: name }),
         el('span', { class: 'sub', text: [opts.time ? fmtDay(opts.time) : p.brand, extra].filter(Boolean).join(' · ') })),
@@ -1928,10 +1941,13 @@
     $('recent').hidden = !items.length;
     $('recentList').replaceChildren(...items.map(h => productListItem(h, { start: true, time: h.time })));
     // Backup note: everything personal lives only on this phone.
-    const last = store.get('lastBackup', 0), later = store.get('backupLater', 0), now = Date.now();
-    const due = (state.history.length || state.avoid.length || state.favs.length) && now - last > 30 * 864e5 && now - later > 7 * 864e5;
+    const last = store.get('lastBackup', 0), later = store.get('backupLater', 0), now = Date.now(), g = ghCfg();
+    // v2.44: with the GitHub backup the note shows only when it has not worked for 7 days
+    const due = g ? now - (g.ok || g.at || 0) > 7 * 864e5 && now - later > 7 * 864e5
+      : (state.history.length || state.avoid.length || state.favs.length) && now - last > 30 * 864e5 && now - later > 7 * 864e5;
     $('bkNote').hidden = !due;
-    if (due) $('bkTitle').textContent = last ? t('bk.old', { days: Math.floor((now - last) / 864e5) }) : t('bk.never');
+    $('bkSave').textContent = t(g ? 'bk.open' : 'bk.save');
+    if (due) $('bkTitle').textContent = g ? t('bk.ghFail', { days: Math.floor((now - (g.ok || g.at || 0)) / 864e5) }) : last ? t('bk.old', { days: Math.floor((now - last) / 864e5) }) : t('bk.never');
     $('bkLast').textContent = last ? t('bk.last', { date: fmtDate(last) }) : '';
   }
 
@@ -3870,6 +3886,7 @@
     state.history = state.history.filter(h => h.code !== code).map(h => h.code === old ? Object.assign({}, h, { code }) : h); store.set('history', state.history);
     saveProduct(q);
     try { const ph = await getPhotos(old); if (ph.length) { const db = await photoDb(), tx = db.transaction('p', 'readwrite'); tx.objectStore('p').put({ at: Date.now(), list: ph }, code); tx.objectStore('p').delete(old); await idbDone(tx); } } catch (e) { /* no photos */ }
+    try { const fb = await getFront(old); if (fb) { await putFront(code, fb); await delFront(old); } } catch (e) { /* no product photo */ }
     toast(t('link.done', { code }));
     openSaved(code);
   }
@@ -4239,13 +4256,25 @@
   }
 
   // ---------- Backup ----------
-  function exportBackup() {
-    const data = {
+  // v2.44: the same data for the file and for GitHub (never the GitHub key). packWant: your countries, so a new phone downloads them by itself.
+  function backupData() {
+    return {
       app: 'label-check', version: 2, exportedAt: new Date().toISOString(),
       avoid: state.avoid, favs: state.favs, names: state.names, taught: state.taught, allergens: state.allergens, avoidFragrance: state.avoidFragrance, vegan: state.vegan,
       lang: state.lang, theme: state.theme, bigText: state.bigText, vibrate: state.vibrate, typedNames: typedNames(), camStart: !!store.get('camStart', false),
-      history: state.history, products: state.products
+      packWant: packWanted(), history: state.history, products: state.products
     };
+  }
+  function dataToBlob(u) {                          // no fetch(): the page rules (CSP) do not allow data: addresses for fetch
+    const i = u.indexOf(','), bin = atob(u.slice(i + 1)), a = new Uint8Array(bin.length);
+    for (let k = 0; k < bin.length; k++) a[k] = bin.charCodeAt(k);
+    return new Blob([a], { type: (u.slice(5, i).split(';')[0]) || 'image/jpeg' });
+  }
+  const blobToData = b => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(b); });
+  async function exportBackup() {
+    const data = backupData();
+    data.fronts = {};                                // v2.44: your product photos (small JPEGs) go into the file too
+    for (const code of frontUrls.keys()) { const b = await getFront(code); if (b) data.fronts[code] = await blobToData(b); }
     const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' });
     const a = el('a', { href: URL.createObjectURL(blob), download: 'label-check-backup-' + new Date().toISOString().slice(0, 10) + '.json' });
     document.body.append(a);
@@ -4313,6 +4342,10 @@
     catch (err) { toast(t('toast.notBackup')); return; }
     if (!data || data.app !== 'label-check') { toast(t('toast.notBackup')); return; }
     if (!confirm(t('confirm.import'))) return;
+    await applyBackup(data);
+    toast(t('toast.imported'));
+  }
+  async function applyBackup(data) {
     state.avoid = Array.isArray(data.avoid) ? data.avoid.filter(i => i && typeof i.text === 'string') : [];
     state.history = Array.isArray(data.history) ? data.history.slice(0, MAX_HISTORY) : [];
     if (data.products && typeof data.products === 'object') Object.assign(state.products, data.products);
@@ -4346,6 +4379,13 @@
       store.set('typedNames', m);
     }
     if (typeof data.camStart === 'boolean') store.set('camStart', data.camStart);
+    if (Array.isArray(data.packWant)) store.set('packWant', data.packWant.filter(p => PACK_PARTS.includes(p)));
+    if (data.fronts && typeof data.fronts === 'object') {
+      for (const [c, u] of Object.entries(data.fronts)) {
+        if (typeof u !== 'string' || !u.startsWith('data:image/') || u.length > 3e6) continue;
+        try { await putFront(c, dataToBlob(u)); } catch (e) { /* skip this photo */ }
+      }
+    }
     for (const k of ['avoid', 'history', 'products', 'favs', 'names', 'taught', 'allergens', 'avoidFragrance', 'vegan', 'lang', 'theme', 'bigText', 'vibrate']) store.set(k, state[k]);
     verdictCache.clear();
     syncSettingsControls();
@@ -4354,7 +4394,182 @@
     LANG = pickLang();
     applyTexts();
     renderAll();
-    toast(t('toast.imported'));
+    setTimeout(packAuto, 500);
+  }
+
+  // ---------- v2.44: automatic backup to a PRIVATE GitHub repo (user OK, picture 20) ----------
+  // You make the repo and a key (fine-grained token, only this repo, Contents: read and write) once and paste the key here.
+  // The key stays on this phone (never in a backup). The app refuses a public repo (your list and allergens must not be public).
+  // It backs up by itself at most once a day, and only when something changed. Photos are separate files (photos/<code>.jpg), sent once.
+  const GH_API = 'https://api.github.com/repos/', GH_FILE = 'label-check-backup.json';
+  let ghBusy = false, ghTimer = null;
+  const ghCfg = () => { const g = store.get('gh', null); return g && g.repo && g.token ? g : null; };
+  const ghSave = g => { store.set('gh', g); renderGh(); renderStart(); };
+  const ghPath = p => p.split('/').map(encodeURIComponent).join('/');
+  function ghFetch(g, path, opt) {
+    opt = opt || {};
+    const headers = { Authorization: 'Bearer ' + g.token, Accept: opt.raw ? 'application/vnd.github.raw+json' : 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+    if (opt.body) headers['Content-Type'] = 'application/json';
+    return fetch(GH_API + g.repo + path, { method: opt.method || 'GET', headers, cache: 'no-store', body: opt.body ? JSON.stringify(opt.body) : undefined });
+  }
+  function b64(bytes) {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+  async function hashOf(text) {
+    try { const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)); return b64(new Uint8Array(d)); }
+    catch (e) { let h = 0; for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0; return 'h' + h + ':' + text.length; }
+  }
+  const ghErr = r => { const e = new Error('gh ' + (r ? r.status : 'net')); e.status = r ? r.status : 0; return e; };
+  // one file: read its "sha" first (needed to replace it), then write it
+  async function ghPut(g, path, bytes, msg) {
+    const p = '/contents/' + ghPath(path);
+    const r0 = await ghFetch(g, p);
+    if (!r0.ok && r0.status !== 404) throw ghErr(r0);
+    const sha = r0.ok ? (await r0.json()).sha : undefined;
+    const r = await ghFetch(g, p, { method: 'PUT', body: { message: msg, content: b64(bytes), sha } });
+    if (!r.ok) throw ghErr(r);
+  }
+  function ghText(e) {
+    const st = e && e.status;
+    return st === 401 ? t('gh.e401') : st === 403 || st === 404 ? t('gh.e403') : st === 422 || st === 409 ? t('gh.eBusy') : t('gh.eNet');
+  }
+  const frontCodes = () => [...frontUrls.keys()].filter(c => state.products[c]);
+  // force: also when nothing changed ("Back up now"); loud: show a toast
+  async function ghBackup(force, loud) {
+    const g = ghCfg();
+    if (!g || ghBusy) return;
+    ghBusy = true; renderGh();
+    g.tried = Date.now(); store.set('gh', g);
+    try {
+      const data = backupData(); data.frontCodes = frontCodes();
+      const text = JSON.stringify(data, null, 1), h = await hashOf(JSON.stringify(Object.assign({}, data, { exportedAt: '' })));
+      g.photos = g.photos || {};
+      for (const code of data.frontCodes) {                       // new or changed photos only
+        const b = await getFront(code), at = (state.products[code] && state.products[code].front) || 1;
+        if (!b || g.photos[code] === at) continue;
+        await ghPut(g, 'photos/' + code + '.jpg', new Uint8Array(await b.arrayBuffer()), 'Label Check photo ' + code);
+        g.photos[code] = at; store.set('gh', g);
+      }
+      if (force || h !== g.hash) await ghPut(g, GH_FILE, new TextEncoder().encode(text), 'Label Check backup ' + data.exportedAt.slice(0, 10));
+      Object.assign(g, { hash: h, ok: Date.now(), err: null, n: Object.keys(state.products).length, np: data.frontCodes.length });
+      store.set('gh', g); store.set('lastBackup', Date.now());
+      if (loud) toast(t('gh.done'));
+    } catch (e) {
+      g.err = { at: Date.now(), text: ghText(e) }; store.set('gh', g);
+      if (loud) toast(g.err.text);
+    }
+    ghBusy = false;
+    renderGh(); renderStart();
+  }
+  // by itself: once a day (again after 1 hour when the last try failed); after a change it waits a minute (more changes may follow)
+  function ghMaybe() {
+    const g = ghCfg();
+    if (!g || ghBusy || navigator.onLine === false) return;
+    const since = Date.now() - (g.tried || 0);
+    if (since > 864e5 || (g.err && since > 3600e3)) ghBackup(false, false);
+  }
+  function ghSoon() { if (!ghCfg()) return; clearTimeout(ghTimer); ghTimer = setTimeout(ghMaybe, 60e3); }
+  function ghRepoOf(v) {
+    const m = String(v || '').trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/i, '').replace(/\/+$/, '').match(/^([\w.-]+)\/([\w.-]+)$/);
+    return m ? m[1] + '/' + m[2] : null;
+  }
+  async function ghReadBackup(g) {
+    const r = await ghFetch(g, '/contents/' + GH_FILE, { raw: true });
+    if (r.status === 404) return null;
+    if (!r.ok) throw ghErr(r);
+    const data = JSON.parse(await r.text());
+    return data && data.app === 'label-check' ? data : null;
+  }
+  async function ghGetPhotos(g, codes) {
+    let n = 0;
+    for (const code of codes || []) {
+      if (!/^[\w.-]+$/.test(code)) continue;
+      try {
+        const r = await ghFetch(g, '/contents/photos/' + encodeURIComponent(code) + '.jpg', { raw: true });
+        if (!r.ok) continue;
+        await putFront(code, new Blob([await r.arrayBuffer()], { type: 'image/jpeg' })); n++;
+        g.photos = g.photos || {}; g.photos[code] = (state.products[code] && state.products[code].front) || 1;
+      } catch (e) { /* skip this photo */ }
+    }
+    return n;
+  }
+  async function ghConnect() {
+    const repo = ghRepoOf($('ghRepo').value), token = $('ghToken').value.trim();
+    const say = k => { $('ghMsg').textContent = t(k); $('ghMsg').hidden = false; };
+    $('ghMsg').hidden = true;
+    if (!repo) return say('gh.badRepo');
+    if (!/^(github_pat_|ghp_)[\w]{20,}$/.test(token)) return say('gh.badKey');
+    const g = { repo, token, at: Date.now(), photos: {} };
+    $('ghConnect').disabled = true;
+    try {
+      const r = await ghFetch(g, '');
+      if (r.status === 401) return say('gh.e401');
+      if (r.status === 404 || r.status === 403) return say('gh.noRepo');
+      if (!r.ok) throw ghErr(r);
+      const info = await r.json();
+      if (info.private !== true) return say('gh.public');          // never a public repo
+      const remote = await ghReadBackup(g);
+      if (remote) {
+        const n = Object.keys(remote.products || {}).length, date = remote.exportedAt ? fmtDate(Date.parse(remote.exportedAt)) : '?';
+        if (confirm(t('gh.askRestore', { date, n }))) {
+          await applyBackup(remote);
+          await ghGetPhotos(g, remote.frontCodes);
+          const data = backupData(); data.frontCodes = frontCodes();
+          Object.assign(g, { hash: await hashOf(JSON.stringify(Object.assign({}, data, { exportedAt: '' }))), ok: Date.now(), tried: Date.now(), n: Object.keys(state.products).length, np: data.frontCodes.length });
+          $('ghToken').value = ''; ghSave(g); renderAll();
+          toast(t('gh.restored'));
+          return;
+        }
+        if (!confirm(t('gh.askReplace'))) return;
+      }
+      $('ghToken').value = ''; ghSave(g);
+      await ghBackup(true, true);
+    } catch (e) {
+      say(e && e.status ? 'gh.noRepo' : 'gh.eNetKey');
+    } finally { $('ghConnect').disabled = false; }
+  }
+  async function ghRestore() {
+    const g = ghCfg();
+    if (!g || ghBusy) return;
+    ghBusy = true; renderGh();
+    try {
+      const remote = await ghReadBackup(g);
+      if (!remote) { toast(t('gh.none')); return; }
+      const date = remote.exportedAt ? fmtDate(Date.parse(remote.exportedAt)) : '?';
+      if (!confirm(t('gh.confirmRestore', { date, n: Object.keys(remote.products || {}).length }))) return;
+      await applyBackup(remote);
+      await ghGetPhotos(g, remote.frontCodes);
+      store.set('gh', g); renderAll();
+      toast(t('gh.restored'));
+    } catch (e) { toast(ghText(e)); }
+    finally { ghBusy = false; renderGh(); }
+  }
+  function ghOff() {
+    if (!ghCfg() || !confirm(t('gh.offAsk'))) return;
+    store.set('gh', null); renderGh(); renderStart();
+  }
+  function fmtWhen(ms) {
+    if (!ms) return '';
+    let tm = '';
+    try { tm = new Date(ms).toLocaleTimeString(LOCALE[LANG], { hour: '2-digit', minute: '2-digit' }); } catch (e) { /* no time */ }
+    return (fmtDay(ms) + ' ' + tm).trim();
+  }
+  function renderGh() {
+    if (!$('ghCard')) return;
+    const g = ghCfg();
+    $('ghSetup').hidden = !!g; $('ghOn').hidden = !g;
+    if (!g) {
+      $('ghSub').textContent = t('gh.subNo');
+      if (!$('ghRepo').value) { const o = /\.github\.io$/i.test(location.hostname) ? location.hostname.split('.')[0] : ''; $('ghRepo').value = o ? o + '/label-check-backup' : ''; }
+      return;
+    }
+    $('ghSub').textContent = ghBusy ? t('gh.busy') : g.err ? t('gh.subErr') : g.ok ? t('gh.subOk', { when: fmtWhen(g.ok) }) : t('gh.subWait');
+    $('ghOkTitle').textContent = t('gh.on', { repo: g.repo });
+    $('ghOkSub').textContent = g.ok ? t('gh.onSub', { when: fmtWhen(g.ok), n: g.n || 0, p: g.np || 0 }) : t('gh.subWait');
+    $('ghErr').hidden = !g.err; $('ghErr').textContent = g.err ? g.err.text : '';
+    $('ghNow').disabled = $('ghRestore').disabled = ghBusy;
   }
 
   function syncSettingsControls() {
@@ -4544,7 +4759,7 @@
       clearTimeout(kindTimer); kindTimer = setTimeout(updateKindGuess, 400);
       clearTimeout(fixTimer); fixTimer = setTimeout(renderFixes, 700);
     });
-    $('bkSave').addEventListener('click', exportBackup);
+    $('bkSave').addEventListener('click', () => { if (!ghCfg()) { exportBackup(); return; } go('list'); $('ghCard').open = true; setTimeout(() => $('ghCard').scrollIntoView({ block: 'start', behavior: smooth() }), 80); });
     $('bkLater').addEventListener('click', () => { store.set('backupLater', Date.now()); renderStart(); });
     $('updReload').addEventListener('click', () => location.reload());
     $('shareClaude').addEventListener('click', () => { if (ocrFile) shareToClaude(ocrFile); else { claudeNext = true; $('photoInput').click(); } });
@@ -4582,15 +4797,17 @@
     $('chkSend').addEventListener('click', sendCheck);
     $('chkFile').addEventListener('change', async e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) importAnswer(await f.text()); });
     $('chkPasteBtn').addEventListener('click', () => { if (importAnswer($('chkPaste').value)) { $('chkPaste').value = ''; $('chkPasteFold').open = false; } });
-    $('packMainBtn').addEventListener('click', () => packDownload('main'));
-    $('packDeBtn').addEventListener('click', () => packDownload('de'));
-    $('packMainRm').addEventListener('click', () => packRemove('main'));
-    $('packDeRm').addEventListener('click', () => packRemove('de'));
     $('packCard').addEventListener('toggle', () => { if ($('packCard').open) packInfo().then(renderPack); });
     $('camStartSwitch').addEventListener('change', e => { store.set('camStart', e.target.checked); setTimeout(renderListCards, 0); });
     $('vibSwitch').addEventListener('change', e => { state.vibrate = e.target.checked; store.set('vibrate', state.vibrate); if (state.vibrate) buzz('ok'); });
     try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme); } catch (e) { /* old browser */ }
     $('exportBtn').addEventListener('click', exportBackup);
+    $('frontInput').addEventListener('change', onFrontFile);
+    $('ghConnect').addEventListener('click', ghConnect);
+    $('ghNow').addEventListener('click', () => ghBackup(true, true));
+    $('ghRestore').addEventListener('click', ghRestore);
+    $('ghOff').addEventListener('click', ghOff);
+    $('ghCard').addEventListener('toggle', () => { if ($('ghCard').open) renderGh(); });
     $('importInput').addEventListener('change', importBackup);
     $('shareProdBtn').addEventListener('click', shareProducts);
     $('prodInput').addEventListener('change', importProducts);
@@ -4609,7 +4826,12 @@
     renderFavs();
     renderHistory();
     renderRules();
-    Promise.all([dbReady, ownReady]).then(() => { renderRules(); renderAllergens(); renderTaught(); renderFavs(); renderHistory(); renderPack(); renderToCheckRow(); });
+    Promise.all([dbReady, ownReady, frontLoad()]).then(() => { renderRules(); renderAllergens(); renderTaught(); renderFavs(); renderHistory(); renderPack(); renderToCheckRow(); renderGh(); });
+    // v2.44: the pack updates and the GitHub backup run by themselves (a few seconds after the start, when back online, when you come back to the app)
+    const autoJobs = () => { packAuto(); ghMaybe(); };
+    setTimeout(autoJobs, 4000);
+    window.addEventListener('online', () => setTimeout(autoJobs, 1500));
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(autoJobs, 1500); });
 
     if ('serviceWorker' in navigator) {
       // A new version took over (after a push): offer a reload. Not on the very first install.
@@ -4625,15 +4847,16 @@
   // ---------- v2.37: offline product pack (Open Food Facts / Open Beauty Facts, ODbL) ----------
   // A GitHub job builds it once a month (tools/build_pack.py) and puts it on the branch "pack". The app keeps it in IndexedDB:
   // one store per part ("main" = AT, BG, RO, SK; "de" = Germany, optional). Lookup order: your own products -> pack -> online.
+  // v2.44: more countries (hu, cz, hr, it); one switch per part; the parts you switched on update by themselves once a week.
   const PACK_BASE = 'https://raw.githubusercontent.com/harisonbd/label-check/pack/';
-  const PACK_PARTS = ['main', 'de'];
+  const PACK_PARTS = ['main', 'de', 'hu', 'cz', 'hr', 'it'];
   let packDbP = null, packInfoCache = null, packBusy = null, packMetaCache = null;
   function packDb() {
     if (!packDbP) {
       packDbP = new Promise((res, rej) => {
         if (!('indexedDB' in window)) { rej(new Error('no indexedDB')); return; }
-        const rq = indexedDB.open('lc-pack', 1);
-        rq.onupgradeneeded = () => { const db = rq.result; for (const p of PACK_PARTS) db.createObjectStore(p); db.createObjectStore('meta'); };
+        const rq = indexedDB.open('lc-pack', 2);   // v2.44: version 2 adds the stores of the new countries; the data of version 1 stays
+        rq.onupgradeneeded = () => { const db = rq.result; for (const p of PACK_PARTS.concat('meta')) if (!db.objectStoreNames.contains(p)) db.createObjectStore(p); };
         rq.onsuccess = () => res(rq.result);
         rq.onerror = () => rej(rq.error);
       });
@@ -4700,10 +4923,10 @@
     } catch (e) { return packInfoCache ? packInfoCache.info : null; }
     return packInfoCache.info;
   }
-  async function packDownload(part) {
+  async function packDownload(part, quiet) {
     if (packBusy) return;
-    if (!('DecompressionStream' in window)) { toast(t('pack.old')); return; }
-    packBusy = { part, got: 0, total: 0 };
+    if (!('DecompressionStream' in window)) { if (!quiet) toast(t('pack.old')); return; }
+    packBusy = { part, got: 0, total: 0, cancel: false };
     renderPack();
     try {
       const info = await packInfo(true), pi = info && info.parts && info.parts[part];
@@ -4719,11 +4942,13 @@
       let buf = '', head = null, batch = [], n = 0;
       const flush = async () => {
         if (!batch.length) return;
+        if (packBusy.cancel) throw new Error('cancel');
         const tx = db.transaction(part, 'readwrite'), s = tx.objectStore(part);
         for (const x of batch) s.put(x.slice(1), String(x[0]));
         await idbDone(tx); n += batch.length; batch = [];
       };
       for (;;) {
+        if (packBusy.cancel) { try { reader.cancel(); } catch (e) { /* ignore */ } throw new Error('cancel'); }
         const { value, done } = await reader.read();
         if (value) buf += value;
         let i;
@@ -4742,9 +4967,9 @@
       const meta = Object.assign({}, await packMeta(true), { [part]: { date: head.date, n, bytes: packBusy.total } });
       const tx = db.transaction('meta', 'readwrite'); tx.objectStore('meta').put(meta, 'parts'); await idbDone(tx);
       packMetaCache = meta;
-      toast(tn('pack.done', n, { n: fmtNum(n) }));
+      if (!quiet) toast(tn('pack.done', n, { n: fmtNum(n) }));
     } catch (e) {
-      toast(t('pack.fail'));
+      if (!quiet && !packBusy.cancel) toast(t('pack.fail'));
     }
     packBusy = null;
     renderPack();
@@ -4767,25 +4992,79 @@
     bar.hidden = !packBusy;
     if (packBusy && packBusy.total) bar.value = Math.min(100, Math.round(packBusy.got / packBusy.total * 100));
   }
-  async function renderPack() {
-    if (!$('packCard')) return;
-    const meta = await packMeta(), info = packInfoCache ? packInfoCache.info : null;
-    let sub = '';
-    for (const part of PACK_PARTS) {
-      const have = meta[part], pi = info && info.parts && info.parts[part];
-      const st = $(part === 'main' ? 'packMainState' : 'packDeState'), btn = $(part === 'main' ? 'packMainBtn' : 'packDeBtn'), rm = $(part === 'main' ? 'packMainRm' : 'packDeRm');
-      const busy = packBusy && packBusy.part === part;
-      const newer = have && pi && pi.file && info.date > have.date;
-      st.textContent = busy ? t('pack.busy') : have ? tn('pack.have', have.n, { n: fmtNum(have.n), date: fmtDate(Date.parse(have.date)) }) + (newer ? ' · ' + t('pack.newer') : '')
-        : pi ? t('pack.no', { mb: fmtMB(pi.bytes) }) : info === null && packInfoCache ? t('pack.notReady') : t('pack.noInfo');
-      btn.hidden = !busy && ((have && !newer) || (!have && !pi));
-      btn.disabled = !!packBusy;
-      btn.textContent = have ? t('pack.update', { mb: pi ? fmtMB(pi.bytes) : '' }) : t('pack.get', { mb: pi ? fmtMB(pi.bytes) : '' });
-      rm.hidden = !have || busy;
-      if (part === 'main') sub = have ? tn('pack.have', have.n, { n: fmtNum(have.n), date: fmtDate(Date.parse(have.date)) }) : t('pack.subNo');
-      else if (have) sub += ' · ' + t('pack.plusDe');
+  // v2.44: which parts you want (your switches). Before v2.44 there were no switches: the parts on the phone count as switched on.
+  function packWanted() {
+    const w = store.get('packWant', null);
+    return Array.isArray(w) ? PACK_PARTS.filter(p => w.includes(p)) : PACK_PARTS.filter(p => packMetaCache && packMetaCache[p]);
+  }
+  async function packToggle(part, on, input) {
+    await packMeta();
+    const want = packWanted().filter(p => p !== part);
+    if (on) {
+      store.set('packWant', want.concat(part));
+      renderPack();
+      packRun();                                   // you asked for it: download now, also on mobile data
+      return;
     }
+    const meta = await packMeta();
+    if ((meta[part] || (packBusy && packBusy.part === part)) && !confirm(t('pack.rmAsk', { name: t('pack.' + part) }))) { input.checked = true; return; }
+    store.set('packWant', want);
+    if (packBusy && packBusy.part === part) packBusy.cancel = true;
+    await packRemove(part);
+  }
+  // Downloads every switched-on part that is missing or has a newer version on GitHub, one after the other.
+  let packRunning = false, packRunAgain = false;
+  async function packRun() {
+    if (packRunning) { packRunAgain = true; return; }
+    packRunning = true;
+    try {
+      do {
+        packRunAgain = false;
+        if (!packWanted().length || navigator.onLine === false) break;
+        const info = await packInfo(true);
+        if (!info) break;
+        store.set('packCheck', Date.now());
+        for (const part of packWanted()) {
+          const meta = await packMeta(true), pi = info.parts[part], have = meta[part];
+          if (!pi || !packWanted().includes(part)) continue;
+          if (!have || info.date > have.date) await packDownload(part, !!have);
+        }
+      } while (packRunAgain);
+    } catch (e) { /* try again next time */ }
+    packRunning = false;
+    renderPack();
+  }
+  // Once a week (and at once for a part you switched on that is not on the phone yet). Updates only on Wi-Fi when the browser tells.
+  async function packAuto() {
+    const meta = await packMeta(), want = packWanted();
+    if (!want.length || navigator.onLine === false || packRunning) return;
+    const missing = want.some(p => !meta[p]), c = navigator.connection;
+    if (!missing && c && (c.type === 'cellular' || c.saveData)) return;
+    if (missing || Date.now() - store.get('packCheck', 0) > 7 * 864e5) packRun();
+  }
+  async function renderPack() {
+    if (!$('packRows')) return;
+    const meta = await packMeta(), info = packInfoCache ? packInfoCache.info : null, want = packWanted();
+    $('packRows').replaceChildren(...PACK_PARTS.map(part => {
+      const have = meta[part], pi = info && info.parts && info.parts[part], on = want.includes(part);
+      const busy = packBusy && packBusy.part === part, newer = have && pi && pi.file && info.date > have.date;
+      const st = busy ? t('pack.busy')
+        : have ? tn('pack.have', have.n, { n: fmtNum(have.n), date: fmtDate(Date.parse(have.date)) }) + (newer ? ' · ' + t('pack.newer') : '')
+        : pi ? (on ? t('pack.wait') + ' · ' + fmtMB(pi.bytes) : t('pack.no', { mb: fmtMB(pi.bytes) }))
+        : info && packInfoCache ? (on ? t('pack.wait') : t('pack.notReady'))
+        : info === null && packInfoCache ? t('pack.notReady') : on ? t('pack.wait') : t('pack.noInfo');
+      return el('div', { class: 'setting packset', 'data-part': part },
+        el('label', { class: 'grow', for: 'packSw-' + part }, el('span', { text: t('pack.' + part) }), el('span', { class: 'sub', id: 'packState-' + part, text: st })),
+        el('span', { class: 'switch' }, el('input', { type: 'checkbox', role: 'switch', id: 'packSw-' + part, checked: on || null,
+          onchange: e => packToggle(part, e.target.checked, e.target) })));
+    }));
+    const extra = PACK_PARTS.filter(p => p !== 'main' && meta[p]).map(p => t('pack.' + p));
+    let sub = meta.main ? tn('pack.have', meta.main.n, { n: fmtNum(meta.main.n), date: fmtDate(Date.parse(meta.main.date)) }) : extra.length ? '' : t('pack.subNo');
+    if (extra.length) sub += (sub ? ' · ' : '') + '+ ' + extra.join(', ');
     $('packSub').textContent = sub;
+    const last = store.get('packCheck', 0);
+    $('packAuto').hidden = !want.length;
+    $('packAutoSub').textContent = t('pack.autoSub', { when: last ? fmtDay(last) : t('pack.notYet') });
     renderPackBar();
   }
 
@@ -4827,6 +5106,71 @@
   }
   async function dropPhotos(codes) {
     try { const db = await photoDb(), tx = db.transaction('p', 'readwrite'), s = tx.objectStore('p'); codes.forEach(c => s.delete(c)); await idbDone(tx); } catch (e) { /* ignore */ }
+  }
+
+  // ---------- v2.44: product photo (user OK, picture 21) ----------
+  // Your own front photo of a product (about 360 px, 15-30 KB), in "lc-photos" under "f:<code>". Shown in the result, History and
+  // "Последни". No own photo: the Open Food Facts photo (products from the internet), else the icon. A product with a photo is your own
+  // product (never removed by the limit). The photos go into the backup file and the GitHub backup.
+  const frontUrls = new Map();
+  let frontFor = null;
+  const frontOf = code => frontUrls.get(code) || null;
+  async function frontLoad() {
+    try {
+      const db = await photoDb(), s = db.transaction('p').objectStore('p'), range = IDBKeyRange.bound('f:', 'f:\uffff');
+      const [keys, vals] = await Promise.all([idbReq(s.getAllKeys(range)), idbReq(s.getAll(range))]);
+      keys.forEach((k, i) => { if (vals[i] && vals[i].b && !frontUrls.has(k.slice(2))) frontUrls.set(k.slice(2), URL.createObjectURL(vals[i].b)); });
+    } catch (e) { /* no photo store: no photos */ }
+  }
+  async function frontBlob(file) {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, 360 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    return new Promise(res => c.toBlob(res, 'image/jpeg', 0.75));
+  }
+  async function putFront(code, blob) {
+    const db = await photoDb(), tx = db.transaction('p', 'readwrite');
+    tx.objectStore('p').put({ at: Date.now(), b: blob }, 'f:' + code); await idbDone(tx);
+    const old = frontUrls.get(code); if (old) URL.revokeObjectURL(old);
+    frontUrls.set(code, URL.createObjectURL(blob));
+  }
+  async function getFront(code) {
+    try { const db = await photoDb(), v = await idbReq(db.transaction('p').objectStore('p').get('f:' + code)); return (v && v.b) || null; } catch (e) { return null; }
+  }
+  async function delFront(code) {
+    try { const db = await photoDb(), tx = db.transaction('p', 'readwrite'); tx.objectStore('p').delete('f:' + code); await idbDone(tx); } catch (e) { /* ignore */ }
+    const old = frontUrls.get(code); if (old) URL.revokeObjectURL(old);
+    frontUrls.delete(code);
+  }
+  function askFront(p) { frontFor = p; const i = $('frontInput'); i.value = ''; i.click(); }
+  async function onFrontFile(e) {
+    const file = e.target.files && e.target.files[0], p = frontFor;
+    frontFor = null; e.target.value = '';
+    if (!file || !p) return;
+    try {
+      const blob = await frontBlob(file);
+      if (!blob) throw new Error('no photo');
+      await putFront(p.code, blob);
+      const q = state.products[p.code] || p;
+      q.front = Date.now(); saveProduct(q);
+      afterFront(q); toast(t('front.saved'));
+    } catch (err) { toast(t('front.fail')); }
+  }
+  async function removeFront(p) {
+    await delFront(p.code);
+    const q = state.products[p.code] || p;
+    delete q.front; saveProduct(q); afterFront(q);
+  }
+  function afterFront(q) {
+    const cur = state.current && state.current.p, old = document.querySelector('#answer .qn');
+    if (cur && cur.code === q.code && old && !$('result').hidden) old.replaceWith(nameRow(q));
+    renderHistory();
+  }
+  // the small picture in lists: your photo > Open Food Facts photo > icon
+  function thumbOf(p) {
+    const src = frontOf(p.code) || p.image;
+    return el('span', { class: 'thumb' }, icon(ICON[KIND_ICON[p.kind] || 'food']), src ? el('img', { src, alt: '', loading: 'lazy', onerror: e => e.target.remove() }) : null);
   }
   function renderToCheckRow() {
     const row = $('toCheckRow');
@@ -4995,7 +5339,7 @@
   }
 
   // Small test hook (used only by automated checks).
-  window.LC = { markOf: (r, g) => markOf(r, g), findTwin: p => findTwin(p), showTwin: p => showTwin(p), isOwn: q => isOwn(q), saveProduct: p => saveProduct(p), packInfo: f => packInfo(f), renderPack: () => renderPack(), packFind: c => packFind(c), analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
+  window.LC = { markOf: (r, g) => markOf(r, g), findTwin: p => findTwin(p), showTwin: p => showTwin(p), isOwn: q => isOwn(q), saveProduct: p => saveProduct(p), packInfo: f => packInfo(f), renderPack: () => renderPack(), packAuto: () => packAuto(), ghMaybe: () => ghMaybe(), ghBackup: (f, l) => ghBackup(f, l), frontOf: c => frontOf(c), packFind: c => packFind(c), analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
     buildReport, tsvPieces, listPieces, getRep: () => rep, repairNames, fixMixed, leftOut, garbledName, isSupplementText, cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, nameIdent, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart, sameCatSaved, suggestAlternatives, catScore, altCache, altTimes };
 
   init();
