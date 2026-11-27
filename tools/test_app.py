@@ -280,8 +280,8 @@ with sync_playwright() as p:
     pg.click('#foodAlgList label:has-text("Mustard") input')
     pg.click('#moreFold summary')
     pg.click('#veganSwitch')
-    pg.click('#picks .frag-chip')
-    ok(pg.eval_on_selector('#picks .frag-chip', 'b => b.getAttribute("aria-pressed")') == 'true' and pg.inner_text('#picks .frag-chip').startswith('✓'), 'fragrance chip is pressed after a tap')
+    pg.click('#profCos .pchip[data-p=frag]')
+    ok(pg.eval_on_selector('#profCos .pchip[data-p=frag]', 'b => b.getAttribute("aria-pressed")') == 'true' and pg.inner_text('#profCos .pchip[data-p=frag]').startswith('✓'), 'fragrance chip (Profile) is pressed after a tap')
     pg.click('.tabbar button[data-go=history]')
     ok(pg.locator('#historyList .dot.g-red').count() == 3, 'history: all red after mustard, fragrance and vegan')
     pg.click('#historyList li:has-text("Extrawurst") .open')
@@ -563,7 +563,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.40' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.41' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -589,12 +589,12 @@ with sync_playwright() as p:
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(150)
         h = pg.evaluate("document.getElementById('tab-list').getBoundingClientRect().height")
-        ok(h < 1700 and no_side_scroll(pg), '%s: My list is short (%d px, was about 4500; v2.12/13 added "Taught names" + vibration) and has no sideways scroll' % (tag, h))
-        ok(pg.locator('#fragSwitch').count() == 0 and pg.locator('#picks .frag-chip').count() == 1, '%s: fragrance is the first Quick pick chip, no separate switch' % tag)
+        ok(h < 2700 and no_side_scroll(pg), '%s: Profile is short (%d px, was about 4500; v2.41 added the profile chips, about 900 px) and has no sideways scroll' % (tag, h))
+        ok(pg.locator('#fragSwitch').count() == 0 and pg.locator('#profCos .pchip[data-p=frag]').count() == 1, '%s: fragrance is a Profile chip (v2.41), no separate switch' % tag)
         ok(all(not pg.eval_on_selector(f, 'd => d.open') for f in ('#foodAlgBox', '#cosAlgBox', '#rulesFold', '#moreFold')), '%s: allergens, "What the app checks" and "More" start closed' % tag)
         ok('ODbL' in pg.text_content('#rulesFold') and pg.text_content('#moreFold summary').strip() != '', '%s: credit line (ODbL) is still in "What the app checks"; "More" has a title' % tag)
-        pg.click('#picks .frag-chip'); pg.click('#picks .frag-chip')
-        ok(pg.eval_on_selector('#picks .frag-chip', 'b => b.getAttribute("aria-pressed")') == 'false' and pg.evaluate("!LC.state.avoidFragrance"), '%s: second tap switches fragrance off again' % tag)
+        pg.click('#profCos .pchip[data-p=frag]'); pg.click('#profCos .pchip[data-p=frag]')
+        ok(pg.eval_on_selector('#profCos .pchip[data-p=frag]', 'b => b.getAttribute("aria-pressed")') == 'false' and pg.evaluate("!LC.state.avoidFragrance"), '%s: second tap switches fragrance off again' % tag)
         pg.click('#rulesFold summary')
         ok(pg.is_visible('#rulesBox .levels'), '%s: tapping "What the app checks" opens it' % tag)
         pg.evaluate("document.querySelector('#rulesFold').open = false; scrollTo(0, 0)")
@@ -1038,7 +1038,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v58')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v59')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1596,16 +1596,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v58'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v59'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v58' not in keys: break
+        if 'label-check-v59' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v58' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v59' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1766,7 +1766,7 @@ with sync_playwright() as p:
         ok(cards == [['avoidCard', True], ['algCard', False], ['packCard', False], ['setCard', False], ['rulesFold', False], ['moreFold', False]], '%s: My list = 6 cards (v2.37: + products without internet), only the avoid list open; "Taught names" hidden while empty (%s)' % (lang, cards))
         subs = [pg.inner_text(q) for q in ('#avoidSub', '#algSub', '#setSub')]
         ok(subs[0].endswith('+1') and subs[0].count(',') == 2 and ('+ 1' in subs[1]) and '·' in subs[2], '%s: the closed cards say what is inside (%s)' % (lang, subs))
-        ok(no_side_scroll(pg) and pg.evaluate("document.documentElement.scrollHeight") < 1500, '%s %d px: no sideways scroll; the page is short (%d px)' % (lang, w, pg.evaluate("document.documentElement.scrollHeight")))
+        ok(no_side_scroll(pg) and pg.evaluate("document.documentElement.scrollHeight") < 2500, '%s %d px: no sideways scroll; the page is short (%d px; v2.41: + profile chips)' % (lang, w, pg.evaluate("document.documentElement.scrollHeight")))
         if lang == 'bg-BG':
             ok(subs[1].startswith('Глутен, Мляко') and subs[2].startswith('Езикът на телефона · Като телефона'), 'BG: "Глутен, Мляко …" and "Езикът на телефона · Като телефона"')
             open_card(pg, 'setCard'); pg.select_option('#themeSelect', 'light'); pg.wait_for_timeout(100)
@@ -1990,6 +1990,41 @@ with sync_playwright() as p:
     pg.click('#toCheckRow'); pg.wait_for_timeout(300)
     ok(pg.inner_text('#chkSend') == '1 an Claude senden' and no_side_scroll(pg) and pg.evaluate("document.getElementById('chkSend').getBoundingClientRect().height") <= 80, 'DE 320 px: "1 an Claude senden" fits')
     ctx.close()
+
+    # ---- v2.41: Profile tab (user 27 Nov: allergens and things to avoid, "like seed oils, gluten", easy to open) ----
+    print('v2.41: Profile tab')
+    for lang, w, dark in (('bg-BG', 390, True), ('de-AT', 320, False), ('en-GB', 320, False)):
+        ctx, pg = new_page(b, base, lang, dark=dark, width=w)
+        pg.evaluate("localStorage.setItem('lc.avoid', JSON.stringify([{id:'a1', text:'palm oil, palmöl, палмово масло'}])); 0"); reload_ready(pg)
+        tabname = {'bg-BG': 'Профил', 'de-AT': 'Profil', 'en-GB': 'Profile'}[lang]
+        ok(pg.inner_text('.tabbar button[data-go=list]').strip() == tabname, '%s: the tab is called "%s"' % (lang, tabname))
+        pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(300)
+        ok(pg.inner_text('#tab-list > h2') == tabname and pg.locator('#profAlg .pchip:not(.more)').count() == 8 and pg.is_visible('#profAlgMore')
+           and pg.locator('#profFood .pchip[data-p]').count() == 6 and pg.locator('#profCos .pchip[data-p]').count() == 5 and pg.locator('#profDiet .pchip').count() == 1,
+           '%s: chips on top: 8 allergens + "more", 6 food groups + own word, 5 cosmetics, vegan' % lang)
+        ok(pg.eval_on_selector('#profFood .pchip[data-p=palm]', 'b => b.getAttribute("aria-pressed")') == 'true', '%s: an old "palm oil" list entry shows as the ticked "palm oil" chip' % lang)
+        ok(no_side_scroll(pg) and pg.evaluate("[...document.querySelectorAll('#profile .pchip')].every(b => b.getBoundingClientRect().height >= 40 && b.getBoundingClientRect().right <= innerWidth)"), '%s %d px: chips fit, at least 40 px high' % (lang, w))
+        if lang == 'bg-BG':
+            pg.click('#profFood .pchip[data-p=seed]'); pg.wait_for_timeout(200)
+            it = pg.evaluate("LC.state.avoid.find(i => i.preset === 'seed')")
+            ok(it and it['text'].startswith('семенни масла, sunflower oil') and 'слънчогледово масло' in it['text'] and 'семенни масла' in pg.inner_text('#avoidList').lower(), 'Семенни масла: one tap adds one list entry with all the oil names (EN/DE/BG/RO)')
+            ctx2 = None
+            pg.click('.tabbar button[data-go=scan]'); pg.wait_for_timeout(200)
+            read_label(pg, 'Съставки: пшенично брашно, слънчогледово масло, сол', 'food')
+            ok(word(pg) == 'Избягвай' and 'Твоят списък: Семенни масла' in pg.inner_text('#qList'), 'a product with sunflower oil is now "Избягвай" ("Твоят списък: Семенни масла")')
+            pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(200)
+            pg.click('#profFood .pchip[data-p=seed]'); pg.wait_for_timeout(200)
+            ok(not pg.evaluate("LC.state.avoid.some(i => i.preset === 'seed')") and pg.eval_on_selector('#profFood .pchip[data-p=seed]', 'b => b.getAttribute("aria-pressed")') == 'false', 'a second tap removes it')
+            pg.click('#profAlg .pchip[data-p=gluten]'); pg.wait_for_timeout(200)
+            ok(pg.evaluate("LC.state.allergens.food.includes('gluten')") and pg.inner_text('#algSub').startswith('Глутен'), 'allergen chip "Глутен" ticks gluten (the Allergens card says it too)')
+            pg.click('#profAlgMore'); pg.wait_for_timeout(150)
+            ok(pg.locator('#profAlg .pchip:not(.more)').count() == 14 and pg.locator('#profAlgMore').count() == 0, '"+ още 6": all 14 EU allergens')
+            pg.click('#profDiet .pchip[data-p=vegan]'); pg.wait_for_timeout(150)
+            ok(pg.evaluate("LC.state.vegan") and pg.evaluate("document.getElementById('veganSwitch').checked"), 'Веган chip = the vegan switch')
+            pg.click('#profOwn'); pg.wait_for_timeout(500)
+            ok(pg.evaluate("document.activeElement.id") == 'avoidInput' and pg.eval_on_selector('#avoidCard', 'd => d.open'), '"+ моя дума" opens your list and puts the cursor in the field')
+            pg.screenshot(path=os.path.join(SHOTS, 'v241-profile-bg.png'), full_page=True)
+        ctx.close()
 
     for lang, w, dark in (('en-GB', 320, False), ('de-AT', 390, False)):
         ctx, pg = new_page(b, base, lang, dark=dark, width=w)

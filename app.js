@@ -36,6 +36,25 @@
     'sodium lauryl sulfate, sodium laureth sulfate, sls, sles'
   ];
 
+  // v2.41: profile chips. One tap adds or removes a whole group of names in your avoid list (EN / DE / BG / RO names).
+  const PRESETS = {
+    food: [
+      { key: 'seed', name: { en: 'Seed oils', de: 'Saatenöle', bg: 'Семенни масла' }, terms: 'sunflower oil, sunflower seed oil, rapeseed oil, canola oil, soybean oil, soya oil, soya bean oil, corn oil, maize oil, cottonseed oil, grapeseed oil, grape seed oil, safflower oil, rice bran oil, sonnenblumenöl, rapsöl, sojaöl, maiskeimöl, maisöl, baumwollsaatöl, traubenkernöl, distelöl, reiskeimöl, слънчогледово масло, рапично масло, рапицово масло, соево масло, царевично масло, памучно масло, гроздово масло, шафраново масло, оризово масло, ulei de floarea-soarelui, ulei de rapiță, ulei de soia, ulei de porumb' },
+      { key: 'palm', legacy: 'palm oil', name: { en: 'Palm oil', de: 'Palmöl', bg: 'Палмово масло' }, terms: QUICK_PICKS[0] },
+      { key: 'sugar', name: { en: 'Added sugar', de: 'Zugesetzter Zucker', bg: 'Добавена захар' }, terms: 'sugar, cane sugar, brown sugar, glucose syrup, glucose-fructose syrup, fructose-glucose syrup, dextrose, fructose, invert sugar, corn syrup, zucker, rohrzucker, glukosesirup, glucosesirup, glukose-fruktose-sirup, fruktose, invertzucker, захар, тръстикова захар, кафява захар, глюкозен сироп, глюкозо-фруктозен сироп, фруктозо-глюкозен сироп, декстроза, фруктоза, инвертна захар, zahăr, sirop de glucoză' },
+      { key: 'sweet', name: { en: 'Sweeteners', de: 'Süßstoffe', bg: 'Подсладители' }, terms: 'aspartame, acesulfame*, sucralose, saccharin*, cyclamat*, steviol*, sorbitol, maltitol, xylitol, erythritol, isomalt, mannitol, lactitol, neotame, aspartam, acesulfam*, sorbit, maltit, xylit, erythrit, аспартам, ацесулфам*, сукралоза, захарин, цикламат*, стевиол*, сорбитол, малтитол, ксилитол, еритритол, изомалт, манитол, лактитол' },
+      { key: 'msg', name: { en: 'Glutamate (E621)', de: 'Glutamat (E621)', bg: 'Глутамат (E621)' }, terms: 'e621, monosodium glutamate, mononatriumglutamat, natriumglutamat, мононатриев глутамат, натриев глутамат, glutamat monosodic' },
+      { key: 'nitrite', name: { en: 'Nitrites and nitrates', de: 'Nitrite und Nitrate', bg: 'Нитрити и нитрати' }, terms: 'e249, e250, e251, e252, sodium nitrite, potassium nitrite, sodium nitrate, potassium nitrate, natriumnitrit, kaliumnitrit, natriumnitrat, kaliumnitrat, nitritpökelsalz, натриев нитрит, калиев нитрит, натриев нитрат, калиев нитрат, nitrit de sodiu, nitrat de potasiu' }
+    ],
+    cos: [
+      { key: 'alcohol', legacy: 'alcohol denat', name: { en: 'Alcohol (denat.)', de: 'Alkohol (denat.)', bg: 'Алкохол (денат.)' }, terms: QUICK_PICKS[2] },
+      { key: 'silicones', legacy: 'silicones', name: { en: 'Silicones', de: 'Silikone', bg: 'Силикони' }, terms: QUICK_PICKS[3] },
+      { key: 'sls', legacy: 'sodium lauryl sulfate', name: { en: 'SLS / SLES', de: 'SLS / SLES', bg: 'SLS / SLES' }, terms: QUICK_PICKS[4] },
+      { key: 'parabens', name: { en: 'Parabens', de: 'Parabene', bg: 'Парабени' }, terms: 'parabens, *paraben, parabene, парабен*' }
+    ]
+  };
+  const ALG_TOP = ['gluten', 'milk', 'eggs', 'nuts', 'peanuts', 'soybeans', 'sesame-seeds', 'fish'];
+
   // Vegan check (food): allergens that always come from animals, and animal ingredient words (EN / DE / BG).
   const ANIMAL_ALLERGENS = ['milk', 'eggs', 'fish', 'crustaceans', 'molluscs'];
   const ANIMAL_TERMS = [
@@ -1540,6 +1559,7 @@
   // Short coloured tag on the right of a row.
   function chipOf(r) {
     if (r.accepted) return t('qa.acceptedLine');   // v2.39
+    if (r.why === 'mine' && r.mine && r.mine.item && r.mine.item.preset) return t('chip.mine') + ': ' + cap(r.mine.name);   // v2.41: "Твоят списък: Семенни масла"
     const k = r.ask ? 'chip.ask' : r.why === 'b' ? 'chip.b' : r.why === 'use' ? 'chip.use' : r.why === 'mine' ? 'chip.mine' : r.why === 'allergen' ? (r.traceOnly ? 'chip.traces' : 'chip.yourAlg')
       : r.why === 'fragrance' ? 'chip.frag' : r.why === 'vegan' ? 'chip.vegan' : r.banCos ? 'chip.banCos'
       : r.group === 'orange' ? (r.level === 'u' ? 'chip.u' : 'chip.c')
@@ -3889,6 +3909,7 @@
     }));
     $('avoidEmpty').hidden = state.avoid.length > 0;
     renderListCards();
+    renderProfile();
 
     const have = new Set(state.avoid.map(i => i.text.split(',')[0].trim().toLowerCase()));
     // First chip = "I avoid fragrance" (same as the old switch: perfume + the fragrance allergens turn red)
@@ -3930,6 +3951,43 @@
     store.set('avoid', state.avoid);
     renderAvoid();
     settingsChanged();
+  }
+
+  // ---------- v2.41: profile chips (top of the Profile tab) ----------
+  const presetItem = ps => state.avoid.find(i => i.preset === ps.key || (ps.legacy && termsOf(i)[0].toLowerCase() === ps.legacy));
+  function togglePreset(ps) {
+    const it = presetItem(ps);
+    if (it) { removeAvoid(it.id); return; }
+    const nm = (ps.name[LANG] || ps.name.en).toLowerCase();
+    state.avoid.push({ id: 'a' + Date.now() + Math.random().toString(36).slice(2, 6), text: nm + ', ' + ps.terms, preset: ps.key });
+    store.set('avoid', state.avoid);
+    renderAvoid();
+    settingsChanged();
+    toast(t('toast.added', { name: ps.name[LANG] || ps.name.en }));
+  }
+  function pchip(on, label, onclick, extra) {
+    return el('button', Object.assign({ type: 'button', class: 'pchip' + (on ? ' on' : ''), 'aria-pressed': String(!!on), onclick }, extra || {}),
+      el('span', { class: 'pmark', 'aria-hidden': 'true', text: on ? '✓' : '+' }), label);
+  }
+  let profAllAlg = false;
+  function renderProfile() {
+    if (!$('profile')) return;
+    if (DBINFO) {
+      const all = LCDB.foodAllergens(LANG), mine = state.allergens.food;
+      const show = profAllAlg ? all : all.filter(x => ALG_TOP.includes(x.id) || mine.includes(x.id)).sort((x, y) => (ALG_TOP.indexOf(x.id) + 99) % 99 - (ALG_TOP.indexOf(y.id) + 99) % 99);
+      $('profAlg').replaceChildren(...show.map(x => pchip(mine.includes(x.id), cap(x.name), () => {
+        state.allergens.food = mine.includes(x.id) ? mine.filter(i => i !== x.id) : mine.concat(x.id);
+        store.set('allergens', state.allergens);
+        renderAllergens(); renderProfile(); settingsChanged();
+      }, { 'data-p': x.id })),
+        all.length > show.length ? el('button', { type: 'button', class: 'pchip more', id: 'profAlgMore', text: t('prof.more', { n: all.length - show.length }), onclick: () => { profAllAlg = true; renderProfile(); } }) : null);
+    }
+    $('profFood').replaceChildren(...PRESETS.food.map(ps => pchip(!!presetItem(ps), ps.name[LANG] || ps.name.en, () => togglePreset(ps), { 'data-p': ps.key })),
+      el('button', { type: 'button', class: 'pchip more', id: 'profOwn', text: t('prof.own'), onclick: () => {
+        $('avoidCard').open = true; $('avoidCard').scrollIntoView({ block: 'start', behavior: 'smooth' }); setTimeout(() => $('avoidInput').focus(), 350); } }));
+    $('profCos').replaceChildren(pchip(!!state.avoidFragrance, t('prof.frag'), () => setFragrance(!state.avoidFragrance), { 'data-p': 'frag' }),
+      ...PRESETS.cos.map(ps => pchip(!!presetItem(ps), ps.name[LANG] || ps.name.en, () => togglePreset(ps), { 'data-p': ps.key })));
+    $('profDiet').replaceChildren(pchip(!!state.vegan, t('prof.vegan'), () => { $('veganSwitch').checked = !state.vegan; $('veganSwitch').dispatchEvent(new Event('change')); }, { 'data-p': 'vegan' }));
   }
 
   // ---------- My list: allergens ----------
@@ -3993,6 +4051,7 @@
     $('cosAlgCount').textContent = '(' + (state.allergens.cos.length ? t('alg.ticked', { n: state.allergens.cos.length }) + ' / ' : '') + COS_ALLERGENS.length + ')';
     $('cosAlgClear').hidden = state.allergens.cos.length === 0;
     renderListCards();
+    renderProfile();
   }
 
   // ---------- My list: what the app checks ----------
@@ -4393,6 +4452,7 @@
     $('veganSwitch').addEventListener('change', e => {
       state.vegan = e.target.checked;
       store.set('vegan', state.vegan);
+      renderProfile();
       settingsChanged();
     });
     $('cosAlgSearch').addEventListener('input', filterCosAllergens);

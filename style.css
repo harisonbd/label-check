@@ -1255,3 +1255,15 @@ details.lcard[open] > summary .lct small { white-space: normal; }
 #chkPasteFold textarea { width: 100%; margin: 8px 0; }
 .chkbar .filebtn { cursor: pointer; }
 .qbar.chkbar .btn { flex: 1 1 0; min-width: 0; padding: 8px 10px; text-align: center; justify-content: center; white-space: normal; font-weight: 650; }
+
+/* v2.41: Profile tab: chips on top (allergens, things to avoid, diet) */
+.prof { background: var(--card); border-radius: 20px; padding: 14px; margin: 0 0 12px; }
+.prof-lead { margin: 0 0 4px; color: var(--muted); font-size: 0.88rem; }
+.prof-h { margin: 14px 0 8px; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.pchips { display: flex; flex-wrap: wrap; gap: 8px; }
+.pchip { font: inherit; font-size: 0.92rem; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 6px 14px 6px 10px;
+  border-radius: 999px; border: 1px solid var(--line); background: var(--card2, var(--card)); color: var(--ink); cursor: pointer; }
+.pchip .pmark { width: 20px; height: 20px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 0.8rem; background: var(--bg); color: var(--muted); flex: none; }
+.pchip.on { background: color-mix(in srgb, var(--accent) 22%, var(--card)); border-color: var(--accent); }
+.pchip.on .pmark { background: var(--accent); color: var(--accent-ink); }
+.pchip.more { border-style: dashed; color: var(--muted); padding: 6px 14px; }
