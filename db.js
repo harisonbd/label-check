@@ -278,6 +278,94 @@
     return rows;
   }
 
+  // ---------- v2.48: supplement doses vs. the EU upper limits for adults
+  // EFSA "Overview on Tolerable Upper Intake Levels", version 11 (August 2025): ULs, and "safe levels" where no UL was set
+  // (iron, manganese, fluoride). Only nutrients with a number. Amounts on an EU supplement label are per daily dose
+  // (Directive 2002/46/EC, Art. 8); with two columns (1 capsule / daily dose) the highest number is the daily dose.
+  const VIT = '(?:vitamine?|vitamina|vitamín|vit\\.?|витамин)[\\s-]+';
+  const NB = '(?![\\p{L}\\p{N}])';
+  const DOSE = [
+    // id, names (regex), limit, unit (mg | ug), EFSA kind ('ul' | 'safe'), mineral (salt words right after the name = a compound weight)
+    ['vitA', VIT + 'a' + NB + '|retinol|ретинол', 3000, 'ug', 'ul', false],
+    ['vitD', VIT + 'd\\s?[23]?' + NB + '|cholecalciferol|colecalciferol|холекалциферол|ergocalciferol', 100, 'ug', 'ul', false],
+    ['vitE', VIT + 'e' + NB + '|(?:d-|dl-)?(?:alpha|α)-?tocopherol|токоферол', 300, 'mg', 'ul', false],
+    ['vitB6', VIT + 'b\\s?6' + NB + '|pyridoxin(?:e|hydrochlorid|e hydrochloride)?|пиридоксин', 12, 'mg', 'ul', false],
+    ['niacin', VIT + 'b\\s?3' + NB + '|niacin(?:amid(?:e)?)?|nicotinamid(?:e)?|nikotinamid|ниацин|никотинамид|nicotinic acid|nikotinsäure|никотинова киселина', 900, 'mg', 'ul', false],
+    ['folate', VIT + 'b\\s?9' + NB + '|fol(?:ic acid|säure|sav|ová kyselina|na kiselina|ato|at|ate)|фолиева киселина|фолат', 1000, 'ug', 'ul', false],
+    ['calcium', 'calcium|kalzium|kalcium|калций|vápník|kalcij|calcio', 2500, 'mg', 'ul', true],
+    ['magnesium', 'magnesium|magnézium|магнезий|hořčík|magnezij|magnesio', 250, 'mg', 'ul', true],
+    ['zinc', 'zinc|zink|цинк|cink|zinek|zinco', 25, 'mg', 'ul', true],
+    ['iron', 'iron|eisen|желязо|vas|železo|željezo|ferro', 40, 'mg', 'safe', true],
+    ['selenium', 'selenium|selen|селен|szelén|selenio', 255, 'ug', 'ul', true],
+    ['iodine', 'iodine|jod|йод|jód|iodio', 600, 'ug', 'ul', true],
+    ['copper', 'copper|kupfer|мед|réz|měď|bakar|rame', 5, 'mg', 'ul', true],
+    ['manganese', 'manganese|mangan|манган|mangán', 8, 'mg', 'safe', true],
+    ['molybdenum', 'molybdenum|molybdän|молибден|molibdén|molybden|molibden|molibdeno', 600, 'ug', 'ul', true],
+    ['boron', 'boron|bor|бор|bór|boro', 10, 'mg', 'ul', true],
+    ['fluoride', 'fluorid(?:e)?|флуор(?:ид)?|fluor', 3.3, 'mg', 'safe', true]
+  ].map(([id, names, limit, unit, kind, mineral]) => ({ id, re: new RegExp('(^|[^\\p{L}\\p{N}])(?:' + names + ')' + NB, 'giu'), limit, unit, kind, mineral }));
+  const DOSE_NAMES = {
+    vitA: { en: 'Vitamin A', de: 'Vitamin A', bg: 'Витамин A' }, vitD: { en: 'Vitamin D', de: 'Vitamin D', bg: 'Витамин D' },
+    vitE: { en: 'Vitamin E', de: 'Vitamin E', bg: 'Витамин E' }, vitB6: { en: 'Vitamin B6', de: 'Vitamin B6', bg: 'Витамин B6' },
+    niacin: { en: 'Niacin', de: 'Niacin', bg: 'Ниацин' }, folate: { en: 'Folic acid', de: 'Folsäure', bg: 'Фолиева киселина' },
+    calcium: { en: 'Calcium', de: 'Calcium', bg: 'Калций' }, magnesium: { en: 'Magnesium', de: 'Magnesium', bg: 'Магнезий' },
+    zinc: { en: 'Zinc', de: 'Zink', bg: 'Цинк' }, iron: { en: 'Iron', de: 'Eisen', bg: 'Желязо' }, selenium: { en: 'Selenium', de: 'Selen', bg: 'Селен' },
+    iodine: { en: 'Iodine', de: 'Jod', bg: 'Йод' }, copper: { en: 'Copper', de: 'Kupfer', bg: 'Мед' }, manganese: { en: 'Manganese', de: 'Mangan', bg: 'Манган' },
+    molybdenum: { en: 'Molybdenum', de: 'Molybdän', bg: 'Молибден' }, boron: { en: 'Boron', de: 'Bor', bg: 'Бор' }, fluoride: { en: 'Fluoride', de: 'Fluorid', bg: 'Флуорид' }
+  };
+  const AMT = '(\\d+(?:[.,]\\d+)?)\\s*(mg|µg|μg|mcg|ug|i\\.\\s?e\\.|iu|ie|ме)(?![\\p{L}])';
+  const SALT_AFTER = /^[\s-]*(?:citr|oxid|oxide|carbon|lact|lakt|bisglycin|glycin|glucon|picolin|sulfat|sulphat|chlorid|malat|orot|taurat|threon|fumar|aspart|phosph|acetat|ascorb|pidolat|цитрат|оксид|карбонат|лактат|бисглицинат|глицинат|глюконат|пиколинат|сулфат|хлорид|малат|аспартат|фосфат)/i;
+  const PER100_RE = /(?:pro|per|je|на|за|na|per)\s*100\s?(?:g|ml|г|мл)(?![\p{L}])/iu;
+  function toUnit(n, unit, id, to) {
+    const u = unit.toLowerCase().replace(/[\s.]/g, '');
+    if (u === 'iu' || u === 'ie' || u === 'ме') {   // international units -> µg / mg (vitamin D 40 IU = 1 µg; A 1 IU = 0.3 µg retinol; E 1 IU = 0.67 mg)
+      if (id === 'vitD') return to === 'ug' ? n / 40 : n / 40000;
+      if (id === 'vitA') return to === 'ug' ? n * 0.3 : n * 0.0003;
+      if (id === 'vitE') return to === 'mg' ? n * 0.67 : n * 670;
+      return null;
+    }
+    const ug = u === 'mg' ? n * 1000 : n;   // µg, μg, mcg, ug
+    return to === 'ug' ? ug : ug / 1000;
+  }
+  // -> [{ id, name, amount (in the limit unit), unit, limit, kind, pct, over }] or [] (no numbers, or a per-100 g table)
+  function checkDoses(text, lang) {
+    const s = String(text || '');
+    if (!s || PER100_RE.test(s)) return [];
+    const nicotinic = /nicotinic acid|nikotinsäure|никотинова киселина|kyselina nikotinová/i.test(s);
+    const found = new Map();
+    const take = (d, n, unit) => {
+      const v = toUnit(parseFloat(n.replace(',', '.')), unit, d.id, d.unit);
+      if (v == null || !(v > 0)) return;
+      const old = found.get(d.id);
+      if (!old || v > old) found.set(d.id, v);
+    };
+    for (const d of DOSE) {
+      d.re.lastIndex = 0;
+      let m;
+      while ((m = d.re.exec(s))) {
+        const after = s.slice(m.index + m[0].length, m.index + m[0].length + 60);
+        if (d.mineral && SALT_AFTER.test(after)) continue;                     // "Magnesium citrate 500 mg" is the salt, not the magnesium
+        if (d.id === 'vitA' && /carot|каротин/i.test(after.slice(0, 30))) continue;   // beta-carotene: no UL
+        // name -> amount: "Magnesium 375 mg", "Vitamin D3 (Cholecalciferol) 25 µg", "ELEMENTAL MAGNESIUM, 140 MG"
+        const a = new RegExp('^[^\\d;\\n]{0,30}?' + AMT, 'iu').exec(after);
+        if (a) { take(d, a[1], a[2]); continue; }
+        // amount -> name: "150 mg Magnesium", "25 µg Vitamin D3"
+        const before = s.slice(Math.max(0, m.index - 24), m.index + m[1].length);
+        const b = new RegExp(AMT + '\\s*(?:elementa\\p{L}*\\s+)?$', 'iu').exec(before);
+        if (b) take(d, b[1], b[2]);
+      }
+    }
+    const out = [];
+    for (const d of DOSE) {
+      if (!found.has(d.id)) continue;
+      const limit = d.id === 'niacin' && nicotinic ? 10 : d.limit;
+      const amount = Math.round(found.get(d.id) * 100) / 100;
+      out.push({ id: d.id, name: (DOSE_NAMES[d.id][lang] || DOSE_NAMES[d.id].en), amount, unit: d.unit === 'ug' ? 'µg' : 'mg', limit, kind: d.kind,
+        pct: Math.round(amount / limit * 100), over: amount > limit });
+    }
+    return out;
+  }
+
   // ---------- food
   function termRegex(term) {
     const t = norm(term.replace(/\*/g, ' zzstarzz ')).replace(/ ?zzstarzz/g, '*');
@@ -754,6 +842,6 @@
     return out;
   }
 
-  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, suggestCosmetic, closest, wordGuess, guessCosmetic, closestFood, splitGlued, findInside, findNames, checkFood, knownFood, suggestNames, cosAllergens, foodAllergens, search, foodToCosmetic, meta: () => META, SEV };
+  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, checkDoses, suggestCosmetic, closest, wordGuess, guessCosmetic, closestFood, splitGlued, findInside, findNames, checkFood, knownFood, suggestNames, cosAllergens, foodAllergens, search, foodToCosmetic, meta: () => META, SEV };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.LCDB = api;
 })(typeof window !== 'undefined' ? window : globalThis);

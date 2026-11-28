@@ -562,7 +562,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.47' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.48' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -1050,7 +1050,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v65')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v66')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1176,7 +1176,7 @@ with sync_playwright() as p:
     ctx.close(); ctx, pg = new_page(b, base, 'en-GB')
     read_label(pg, 'Food supplement. 2 tablets 500 mg magnesium bisglycinate 14% elemental magnesium 70 mg. Other ingredients: microcrystalline cellulose, magnesium stearate, silicon dioxide', 'food')
     open_details(pg)
-    ok('only the other ingredients are checked' in pg.inner_text('#suppNote'), 'v2.21.3: a supplement result says "only the other ingredients are checked" (%s)' % pg.inner_text('#dtop')[:80])
+    ok('compared with the EU upper limits for adults' in pg.inner_text('#suppNote'), 'v2.21.3/v2.48: a supplement result says the amounts are compared with the EU upper limits (%s)' % pg.inner_text('#dtop')[:80])
     ctx.close(); ctx, pg = new_page(b, base, 'en-GB')
     read_label(pg, 'Sugar, wheat flour, palm oil, salt', 'food')
     open_details(pg)
@@ -1184,7 +1184,7 @@ with sync_playwright() as p:
     ctx.close(); ctx, pg = new_page(b, base, 'bg-BG')
     read_label(pg, 'Хранителна добавка. Други съставки: целулоза, магнезиев стеарат', 'food')
     open_details(pg)
-    ok('само другите съставки' in pg.inner_text('#suppNote'), 'v2.21.3: the supplement note is in Bulgarian too')
+    ok('горните граници за възрастни' in pg.inner_text('#suppNote'), 'v2.21.3: the supplement note is in Bulgarian too')
     ctx.close(); ctx, pg = new_page(b, base, 'en-GB')
     # v2.22: tick-list for names the app cannot match, the capture hint and the closest-name helper
     ok(pg.evaluate("() => LCDB.closest('Glyxerxn', 3)") == ['GLYCERIN'] and pg.evaluate("() => LCDB.closest('Aqua', 3)") == [], 'v2.22: closest() gives the nearest known name, and nothing for a known or very short name')
@@ -1608,16 +1608,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v65'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v66'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v65' not in keys: break
+        if 'label-check-v66' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v65' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v66' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
 
@@ -2031,6 +2031,31 @@ with sync_playwright() as p:
     pg.set_input_files('#importInput', files=[{'name': 'label-check-answer.json', 'mimeType': 'application/json', 'buffer': json.dumps(ans1, ensure_ascii=False).encode('utf-8')}]); pg.wait_for_timeout(600)
     p0 = pg.evaluate("LC.state.products['label-t0']")
     ok(p0.get('claude') and p0['ingredientsText'] == 'Zutaten: Weizenmehl, Käse (Milch), Salz', 'v2.47: "Import backup" also takes Claude\'s answer file')
+    ctx.close()
+
+    # ---- v2.48: supplement doses vs. EU upper limits (user 28 Nov: orange above, blue "close" from 80 %) ----
+    print('v2.48: supplement doses')
+    SUPP = 'Zutaten: Magnesiumcitrat, Zinkgluconat, Pyridoxinhydrochlorid. Nahrungsergänzungsmittel. Pro Tagesdosis (2 Kapseln): Magnesium 400 mg (107 %*), Zink 22 mg (220 %*), Vitamin B6 1,4 mg (100 %*).'
+    for lang, w in (('en-GB', 390), ('de-AT', 320), ('bg-BG', 390)):
+        ctx, pg = new_page(b, base, lang, dark=lang != 'de-AT', width=w)
+        read_label(pg, SUPP, 'food')
+        ql = pg.inner_text('#qList')
+        ok(word(pg) == {'en-GB': 'Check', 'de-AT': 'Prüfen', 'bg-BG': 'Провери'}[lang] and pg.locator('#qList .dot.g-orange[data-m="!"]').count() == 1 and pg.locator('#qList .dot.g-info[data-m=i]').count() == 1,
+           '%s: Magnesium 400 mg = orange !, Zinc 22 mg (88 %%) = blue i, verdict Check (%s)' % (lang, ql.replace('\n', ' | ')))
+        ok(no_side_scroll(pg) and card_fits(pg), '%s %d px: the dose rows fit' % (lang, w))
+        if lang == 'en-GB':
+            ok('Above the EU limit · 400 mg a day (limit 250 mg)' in ql and 'Close to the EU limit · 22 mg a day (limit 25 mg)' in ql and pg.locator('#qList .qaccbtn').count() == 1,
+               'EN: "Above the EU limit · 400 mg a day (limit 250 mg)", "Close to the EU limit · 22 mg a day (limit 25 mg)"; "OK for me" only on the orange row')
+            open_details(pg)
+            ok(pg.inner_text('#dtop .qr') == 'Reason: the daily dose is above the EU upper limit for adults (EFSA).' and pg.inner_text('#doseAll') == 'Daily dose vs. EU upper limit (adults): Magnesium 400 mg (160 %), Zinc 22 mg (88 %), Vitamin B6 1.4 mg (12 %)',
+               'Details: the reason, and all doses with %% of the limit, biggest first (%s)' % pg.inner_text('#doseAll'))
+            pg.click('#detBtn'); pg.wait_for_timeout(200)
+            pg.click('#qList .qaccbtn'); pg.wait_for_timeout(400)
+            ok(word(pg) == 'No warnings' or pg.locator('#qList .dot.g-orange').count() == 0, '"OK for me" on Magnesium: no orange left (%s)' % word(pg))
+        ctx.close()
+    ctx, pg = new_page(b, base, 'en-GB', width=390)
+    read_label(pg, 'Ingredients: oats, sugar, salt. Nutrition per 100 g: magnesium 300 mg, iron 14 mg', 'food')
+    ok(pg.locator('#qList .dot.g-orange').count() == 0 and pg.locator('#doseAll').count() == 0, 'a food with a "per 100 g" table: no dose rows')
     ctx.close()
 
     # ---- v2.41: Profile tab (user 27 Nov: allergens and things to avoid, "like seed oils, gluten", easy to open) ----

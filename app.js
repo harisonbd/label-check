@@ -283,6 +283,13 @@
         traces = { all, mine: all.filter(x => state.allergens.food.includes(x.id)), n: tr.length };
       }
     }
+    // v2.48: a food supplement: a daily dose above the EU upper limit for adults (EFSA) is a concern (orange !)
+    let doses = null;
+    const doseText = [text].concat(p.readDropped || []).join('. ');   // a dose table you took out of the list still counts
+    if (p.kind !== 'cosmetic' && p.kind !== 'household' && isSupplementText(doseText)) {
+      doses = LCDB.checkDoses(doseText, LANG).sort((x, y) => y.pct - x.pct);
+      for (const d of doses) if (d.over || d.pct >= DOSE_NEAR) rows.push(doseRow(d));   // user 28 Nov: also "close" (blue i)
+    }
     rows.sort((x, y) => (x.pos || 999) - (y.pos || 999));
     rows.forEach((r, i) => { r.i = i; });
     // v2.39 (user 27 Nov, "only on this product"): an orange name you accepted in THIS product is shown for information, not as a concern
@@ -305,7 +312,7 @@
     const weak = (p.read && p.read.photo && !noList ? weakRead(text, total + (traces ? traces.n : 0), p.read.conf) : '') || (garbledN >= 2 && garbledN / Math.max(1, total) >= 0.2 ? 'Blur' : '');
     const verdict = counts.red ? 'avoid' : counts.orange || (traces && traces.mine.length) ? 'check' : rows.length ? (partial || noList || weak ? 'partial' : 'ok') : 'unknown';
     return {
-      verdict, rows, counts, known, unknown, noList, weak, traces, supplement: p.kind !== 'cosmetic' && p.kind !== 'household' && isSupplementText(text),
+      verdict, rows, counts, known, unknown, noList, weak, traces, doses, supplement: p.kind !== 'cosmetic' && p.kind !== 'household' && isSupplementText(text),
       summary: summarize(verdict, rows, counts, { n: known, of: listed.length, noList, weak, total }, traces)
         + (rows.some(r => r.accepted) ? ' ' + t('sum.accepted', { names: rows.filter(r => r.accepted).map(r => r.label).join(', ') }) : ''),
       total,
@@ -366,6 +373,15 @@
     return null;
   }
 
+  const numL = x => String(x).replace('.', LANG === 'en' ? '.' : ',');
+  const DOSE_NEAR = 80;   // % of the EU limit from which a dose shows as "close to the limit"
+  function doseRow(d) {   // v2.48: above the limit = orange !, 80-100 % = blue i (information, no warning)
+    const near = !d.over;
+    return {
+      pos: null, kind: 'extra', label: d.name, text: '', level: near ? 'r' : 'c', group: near ? 'info' : 'orange', why: near ? 'doseNear' : 'dose', dose: d,
+      sub: { lvl: { text: t(near ? 'tag.doseNear' : 'tag.dose'), g: near ? 'info' : 'orange' }, parts: [t('dose.line', { n: numL(d.amount), u: d.unit, max: numL(d.limit) })] }
+    };
+  }
   function personalRow(mine) {
     return {
       pos: null, kind: 'extra', label: cap(mine.name), text: '', level: 'n', group: 'red', why: 'mine', mine,
@@ -672,6 +688,7 @@
       if (!counts.orange && traces && traces.mine.length) return t('sum.may', { names: traces.mine.map(x => cap(x.name)).join(', ') });   // v2.47
       if (counts.orange > 1) return t('sum.orN', { n: counts.orange });
       const r = rows.find(x => x.group === 'orange');
+      if (r.why === 'dose') return t('sum.dose', { name: r.label });   // v2.48
       if (r.ask) return t('sum.ask', { name: niceName(r.ask.to) });
       return t(r.level === 'u' ? 'sum.or1.u' : 'sum.or1.c', { name: shortName(r) });
     }
@@ -1063,7 +1080,7 @@
           el('i', { 'aria-hidden': 'true' }), el('span', {}, el('b', { text: String(a.counts[g]) }), ' ' + t('legend.' + g))))));
     }
     // v2.34: the red and orange names, each with a short "why"; a tap opens the ingredient
-    const hot = a.rows.filter(r => r.group === 'red').concat(a.rows.filter(r => r.group === 'orange'));
+    const hot = a.rows.filter(r => r.group === 'red').concat(a.rows.filter(r => r.group === 'orange'), a.rows.filter(r => r.why === 'doseNear'));   // v2.48: + doses close to the limit
     if (hot.length) {
       const shown = hot.slice(0, HOT_MAX);
       card.append(el('ul', { class: 'qlist', id: 'qList' },
@@ -1187,7 +1204,9 @@
           el('span', {}, el('i', { class: 'g-' + g, 'aria-hidden': 'true' }), el('b', { text: String(a.counts[g]) }), ' ' + t('legend.' + g))))
       : null;
     const may = a.traces && a.traces.all.length ? el('p', { class: 'qk1 mayall', id: 'mayAll', text: t('may.all', { names: a.traces.all.map(x => x.name).join(', ') }) }) : null;   // v2.47
-    return el('div', { class: 'dtop', id: 'dtop' }, ...answerLines(a, p), may, knownLine(p, a), a.supplement ? el('p', { class: 'qk1', id: 'suppNote', text: t('note.supp') }) : null, stripOf(a), legend);
+    // v2.48: every dose the app found, against the EU upper limit (adults)
+    const doseAll = a.doses && a.doses.length ? el('p', { class: 'qk1', id: 'doseAll', text: t('dose.all', { list: a.doses.map(d => d.name + ' ' + numL(d.amount) + ' ' + d.unit + ' (' + d.pct + ' %)').join(', ') }) }) : null;
+    return el('div', { class: 'dtop', id: 'dtop' }, ...answerLines(a, p), may, knownLine(p, a), doseAll, a.supplement ? el('p', { class: 'qk1', id: 'suppNote', text: t('note.supp') }) : null, stripOf(a), legend);
   }
 
   // The colour strip (label order; a tap jumps to the ingredient). v2.34: at the top of "Details" (it was on the answer card).
@@ -1229,7 +1248,7 @@
     if (a.verdict === 'check') {
       const or = a.rows.filter(r => r.group === 'orange');
       if (!or.length && a.traces && a.traces.mine.length) return [el('p', { class: 'qy', text: t('qa.mayContain', { names: a.traces.mine.map(x => cap(x.name)).join(', ') }) })];   // v2.47
-      return [el('p', { class: 'qy', text: names(or) }), el('p', { class: 'qr', text: t(or.every(r => r.ask) ? 'qa.orReasonAsk' : or.every(r => r.banCos) ? 'qa.orReasonCos' : 'qa.orReason') })];
+      return [el('p', { class: 'qy', text: names(or) }), el('p', { class: 'qr', text: t(or.every(r => r.ask) ? 'qa.orReasonAsk' : or.every(r => r.banCos) ? 'qa.orReasonCos' : or.every(r => r.why === 'dose') ? 'qa.orReasonDose' : 'qa.orReason') })];
     }
     if (a.verdict === 'ok') return [checkedLine(p)];
     if (a.verdict === 'partial' && a.noList && !a.unknown) {
@@ -1626,7 +1645,7 @@
   function chipOf(r) {
     if (r.accepted) return t('qa.acceptedLine');   // v2.39
     if (r.why === 'mine' && r.mine && r.mine.item && r.mine.item.preset) return t('chip.mine') + ': ' + cap(r.mine.name);   // v2.41: "Твоят списък: Семенни масла"
-    const k = r.ask ? 'chip.ask' : r.why === 'b' ? 'chip.b' : r.why === 'use' ? 'chip.use' : r.why === 'mine' ? 'chip.mine' : r.why === 'allergen' ? (r.traceOnly ? 'chip.traces' : 'chip.yourAlg')
+    const k = r.ask ? 'chip.ask' : r.why === 'dose' ? 'tag.dose' : r.why === 'doseNear' ? 'tag.doseNear' : r.why === 'b' ? 'chip.b' : r.why === 'use' ? 'chip.use' : r.why === 'mine' ? 'chip.mine' : r.why === 'allergen' ? (r.traceOnly ? 'chip.traces' : 'chip.yourAlg')
       : r.why === 'fragrance' ? 'chip.frag' : r.why === 'vegan' ? 'chip.vegan' : r.banCos ? 'chip.banCos'
       : r.group === 'orange' ? (r.level === 'u' ? 'chip.u' : 'chip.c')
       : r.group === 'info' ? (r.level === 'r' ? 'chip.r' : r.traceOnly ? 'chip.traces' : r.allergen || (r.allergens && r.allergens.length) ? 'chip.alg' : 'chip.maybeVegan') : null;

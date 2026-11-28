@@ -224,6 +224,23 @@ const ok = (cond, msg) => { if (!cond) { fails++; console.log('  FAIL: ' + msg);
     ok(!de.includes('CI 16150') && !de.includes('CI 14700'), 'Ponceau 4R (E124) is not Ponceau SX / 2R');
   }
 
+  console.log('\n19 v2.48: supplement doses vs. EU upper limits (EFSA, adults)');
+  {
+    const dz = (t, lang) => LCDB.checkDoses(t, lang || 'en').map(x => x.id + ':' + x.amount + x.unit + (x.over ? '!' : '')).sort().join(' ');
+    ok(dz('Pro Tagesdosis (1 Kapsel): Magnesium 375 mg (100 %*), Vitamin D3 (Cholecalciferol) 25 µg (500 %*). Zutaten: Magnesiumcitrat, Gelatine') === 'magnesium:375mg! vitD:25µg', 'Magnesium 375 mg is over 250 mg; vitamin D3 25 µg is not; "Magnesiumcitrat" (no number) is ignored (' + dz('Pro Tagesdosis (1 Kapsel): Magnesium 375 mg (100 %*), Vitamin D3 (Cholecalciferol) 25 µg (500 %*). Zutaten: Magnesiumcitrat, Gelatine') + ')');
+    ok(dz('4 TABLETS (2000 MG): 1000 MG MAGNESIUM BISGLYCINATE (PROVIDING 14% ELEMENTAL MAGNESIUM, 140 MG), 1000 MG MAGNESIUM LACTATE (PROVIDING 10% ELEMENTAL MAGNESIUM, 100 MG)') === 'magnesium:140mg', 'salt weights (1000 mg bisglycinate) are not magnesium; the elemental amount counts (Magnemix)');
+    ok(dz('Magnesiumcitrat 1000 mg (entspricht 150 mg Magnesium)') === 'magnesium:150mg', '"150 mg Magnesium" (amount before the name) counts, the citrate weight does not');
+    ok(dz('Vitamin B6 50 mg, Vitamin B12 500 µg, Folsäure 400 µg, Niacin 160 mg NE') === 'folate:400µg niacin:160mg vitB6:50mg!', 'B6 50 mg is over 12 mg; B12 has no limit; niacin compares with 900 mg (nicotinamide)');
+    ok(dz('Nicotinic acid 50 mg, Vitamin C 500 mg') === 'niacin:50mg!', 'niacin as nicotinic acid: limit 10 mg');
+    ok(dz('Vitamin D3 4000 I.E. täglich, Zink 25 mg, Selen 200 µg') === 'selenium:200µg vitD:100µg zinc:25mg', '4000 I.E. = 100 µg vitamin D (at the limit, not over); zinc 25 mg not over');
+    ok(dz('Vitamin A (als Beta-Carotin) 1600 µg, Vitamin E 400 IE') === 'vitE:268mg', 'vitamin A as beta-carotene has no limit; vitamin E 400 IU = 268 mg');
+    ok(dz('Протеин. На 100 г: магнезий 300 mg, витамин B6 1,4 mg') === '', 'a "per 100 g" table is not compared');
+    ok(dz('Хранителна добавка. Една таблетка съдържа: Витамин C 1000 mg, Цинк 15 mg, Мед 2 mg, Желязо 14 mg.', 'bg') === 'copper:2mg iron:14mg zinc:15mg', 'Bulgarian names: цинк, мед, желязо');
+    ok(dz('Vitamina D 25 µg') === 'vitD:25µg', '"Vitamina D" (Italian) is vitamin D, not vitamin A');
+    ok(dz('Zutaten: Zucker, Magnesium, Zink') === '', 'no number, no dose');
+    ok(LCDB.checkDoses('Magnesium 400 mg, Vitamin B6 1,4 mg', 'de').find(x => x.id === 'magnesium').pct === 160, 'percent of the limit (400 / 250 = 160 %)');
+  }
+
   console.log(fails ? `\n${fails} FAILED` : '\nALL PASSED');
   process.exit(fails ? 1 : 0);
 })();
