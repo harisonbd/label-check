@@ -1,3 +1,4 @@
+import re
 """Label Check v2 – app test in a phone-size browser (390 x 844).
 Run from the repo root:  python tools/test_app.py
 Needs: pip install playwright && playwright install chromium
@@ -561,7 +562,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.50' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.51' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -1049,7 +1050,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v68')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v69')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1607,16 +1608,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v68'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v69'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v68' not in keys: break
+        if 'label-check-v69' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v68' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v69' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1736,7 +1737,7 @@ with sync_playwright() as p:
                                                                     'Съставки: Пшенично брашно, палмово масло, сол, суроватка на прах (от Мляко), оцветител (паприка екстракт). МОЖЕ ДА СЪДЪРЖА ЯЙЦА, сОЯ.'])
     ok(all(n in names for n in ('сол', 'СиРеНЕ на прах 0,1%', 'оцветител (паприка екстракт)', 'МОЖЕ ДА СЪДЪРЖА ЯЙЦА', 'СОЯ')) and not any('mestu' in n for n in names), 'merge keeps "сол", "СиРеНЕ на прах", the colour before ". ", the "may contain" line and "СОЯ"; drops the text after it (%s)' % names)
     names = pg.evaluate("(r) => LC.consensusNames(r, " + ctxm + ")", ['Ingredients: rice, olive oil, rosemary extract]. Packaged in a protective atmosphere: nitrogen. Store in a dry and cool place', 'Ingredients: rice, olive oil, salt'])
-    ok('rice' in names and 'rosemary extract]' in names and not any('Store' in n or 'Packaged' in n for n in names), 'label sentences after a ". " are still dropped (%s)' % names)
+    ok('rice' in names and 'rosemary extract' in names and not any('Store' in n or 'Packaged' in n for n in names), 'label sentences after a ". " are still dropped; v2.51: no stray "]" at the end (%s)' % names)
     ctx.close()
 
     # ---- v2.36: typing mode (user 26 Nov: "while typing the screen becomes very small") ----
@@ -2117,6 +2118,39 @@ with sync_playwright() as p:
     if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
     read_label(pg, 'Ingredients: Aqua, Glycerin, Methylparaben, Parfum.', 'cosmetic')
     ok(pg.locator('#medAll').count() == 0 and pg.locator('#qList .dot.g-info[data-m=i]').count() == 0, 'a cosmetic (no medicine words): no filler rows')
+    ctx.close()
+
+    # ---- v2.51: "may contain" for barcode products, supplement forms, photo-read fixes (user OK 28 Nov) ----
+    print('v2.51: barcode traces, supplement forms, photo merge')
+    ctxm_v251 = "{ split: tx => LCDB.splitIngredients(tx), known: LC.nameKnown, dice: LC.bigramDice, ident: LC.nameIdent, allergen: x => LCDB.checkFood(x).allergens.length > 0, trace: x => /може да съдържа|may contain/i.test(x) }"
+    import time as _t
+    WAF = {'4006040000017': {'code': '4006040000017', 'kind': 'food', 'source': 'off', 'name': 'Hazelnut wafers', 'brand': 'Example', 'image': '',
+           'ingredientsText': 'Weizenmehl, Zucker, Palmfett, Haselnüsse 12%, fettarmer Kakao, Emulgator: Lecithine, Salz. Kann Spuren von Milch enthalten.',
+           'texts': ['Weizenmehl, Zucker, Palmfett, Haselnüsse 12%, fettarmer Kakao, Emulgator: Lecithine, Salz. Kann Spuren von Milch enthalten.'],
+           'tags': [], 'allergens': ['en:gluten', 'en:nuts'], 'traces': ['en:milk', 'en:peanuts', 'en:soybeans', 'en:nuts'], 'analysis': [], 'cats': [], 'fetchedAt': int(_t.time() * 1000)}}
+    for lang, w in (('en-GB', 390), ('bg-BG', 320)):
+        ctx, pg = new_page(b, base, lang, dark=True, width=w)
+        pg.evaluate("s => { localStorage.setItem('lc.products', JSON.stringify(s)); localStorage.setItem('lc.allergens', JSON.stringify({ food: ['milk', 'peanuts'], cos: [] })); }", WAF); reload_ready(pg)
+        pg.evaluate("LC.showProduct(LC.state.products['4006040000017'])"); pg.wait_for_selector('#result:not([hidden]) #answer'); pg.wait_for_timeout(300)
+        qm = pg.inner_text('#qMay')
+        ok(word(pg) == {'en-GB': 'Check', 'bg-BG': 'Провери'}[lang] and pg.locator('#qMay li').count() == 2 and no_side_scroll(pg),
+           '%s %d px: a barcode product with "may contain milk, peanuts, soy" (database) = Check, one row each for milk and peanuts; milk is not counted twice (%s)' % (lang, w, qm.replace('\n', ' | ')))
+        if lang == 'en-GB':
+            open_details(pg)
+            ma = pg.inner_text('#mayAll').lower()
+            ok('soy' in ma and 'peanut' in ma and 'nuts' not in ma.replace('peanuts', ''), 'Details: all traces from the database (soy too); nuts are an ingredient, not a trace (%s)' % ma)
+        ctx.close()
+    ctx, pg = new_page(b, base, 'en-GB', width=390)
+    read_label(pg, 'Nahrungsergänzungsmittel. Zutaten: Magnesiumorotat, Magnesiumcitrat, Zinkgluconat, Magnesiumstearat. Pro Tagesdosis (2 Kapseln): Magnesium 150 mg, Zink 5 mg.', 'food')
+    ql = pg.inner_text('#qList')
+    ok('Magnesiumorotat' in ql and 'Not on the EU list for supplements · Directive 2002/46/EC, Annex II' in ql and pg.locator('#qList .dot.g-info[data-m=i]').count() == 1 and 'citrat' not in ql.lower() and 'stearat' not in ql.lower(),
+       'a supplement with magnesium orotate: one blue i row; citrate, gluconate and the filler magnesium stearate give nothing (%s)' % ql.replace('\n', ' | '))
+    fr = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures', 'chips-frames.json'), encoding='utf-8'))
+    names = pg.evaluate("(fr) => LC.consensusNames(LC.oneListLang(fr.map(f => ({ text: f.clean }))).map(x => x.text), " + ctxm_v251 + ")", fr)
+    low = [n.lower() for n in names]
+    ok(not any(re.search('[\u0400-\u04FF]', n) for n in names) and all(x in low for x in ('citric acid', 'tomato powder', 'sea salt', 'flavouring blend 6%', 'sugar'))
+       and not any(x in low for x in ('itric acid', 'mato powder', 'olive ol', 'atric acid', 'osphae')),
+       'Protein Chips report (7 photos, BG + EN): only the English list is joined; edge pieces are gone; the "[ ]" list gives its own names (%d names)' % len(names))
     ctx.close()
 
     # ---- v2.41: Profile tab (user 27 Nov: allergens and things to avoid, "like seed oils, gluten", easy to open) ----

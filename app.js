@@ -11,7 +11,7 @@
     'code', 'product_name', 'product_name_de', 'product_name_en', 'product_name_bg', 'generic_name', 'brands',
     'image_front_small_url', 'image_small_url',
     'ingredients_text', 'ingredients_text_de', 'ingredients_text_en', 'ingredients_text_bg',
-    'ingredients_tags', 'additives_tags', 'allergens_tags', 'ingredients_analysis_tags',
+    'ingredients_tags', 'additives_tags', 'allergens_tags', 'traces_tags', 'ingredients_analysis_tags',
     'nutriscore_grade', 'nova_group', 'last_modified_t', 'nutriments', 'categories_tags'
   ].join(',');
   const CACHE_DAYS = 7;
@@ -282,6 +282,18 @@
         const all = [...seen.values()];
         traces = { all, mine: all.filter(x => state.allergens.food.includes(x.id)), n: tr.length };
       }
+      // v2.51: a product from the database (barcode) has its own "may contain" list (Open Food Facts traces)
+      const dbTr = (Array.isArray(p.traces) ? p.traces : []).map(x => String(x).replace(/^en:/, ''));
+      if (dbTr.length) {
+        const names = new Map(LCDB.foodAllergens(LANG).map(x => [x.id, x.name]));
+        const inIngr = new Set(rows.flatMap(r => (r.allergens || []).map(x => x.id)));
+        const add = dbTr.filter(id => names.has(id) && !inIngr.has(id) && !(traces && traces.all.some(x => x.id === id))).map(id => ({ id, name: names.get(id), trace: true, fromDb: true }));
+        if (add.length) {
+          traces = traces || { all: [], mine: [], n: 0 };
+          traces.all = traces.all.concat(add);
+          traces.mine = traces.all.filter(x => state.allergens.food.includes(x.id));
+        }
+      }
     }
     // v2.48: a food supplement: a daily dose above the EU upper limit for adults (EFSA) is a concern (orange !)
     let doses = null;
@@ -289,6 +301,8 @@
     if (p.kind !== 'cosmetic' && p.kind !== 'household' && isSupplementText(doseText)) {
       doses = LCDB.checkDoses(doseText, LANG).sort((x, y) => y.pct - x.pct);
       for (const d of doses) if (d.over || d.pct >= DOSE_NEAR) rows.push(doseRow(d));   // user 28 Nov: also "close" (blue i)
+      // v2.51: a mineral or vitamin form that is not on the EU list for food supplements (blue i, information)
+      for (const f of LCDB.checkSupplementForms(doseText)) rows.push(formRow(f));
     }
     // v2.50: a medicine: fillers with a known effect (EU list, EMA). Your allergens among them = a red person row
     // (only when no row has that allergen yet); every filler with its EU warning is in Details.
@@ -411,6 +425,9 @@
       pos: null, kind: 'extra', label: m.name, text: '', level: 'n', group: 'red', why: 'allergen', med: m, allergens: ticked, tickedAllergens: ticked,
       sub: { lvl: { text: t('tag.allergenYours'), g: 'red' }, parts: ticked.map(x => cap(x.name)).concat([t('med.filler')]) }
     };
+  }
+  function formRow(f) {   // v2.51: a supplement form that is not on the EU list (Directive 2002/46/EC, Annex II)
+    return { pos: null, kind: 'extra', label: cap(f.form), text: '', level: 'r', group: 'info', why: 'formNotEU', form: f, sub: { lvl: { text: t('tag.formNotEU'), g: 'info' }, parts: [t('form.src')] } };
   }
   function medInfoRow(m) {   // v2.50: a medicine filler with an EU warning (blue i, information)
     const first = (m.warn.match(/^.*?(?<![\s(.]\p{L})[.!?](?=\s+\p{Lu}\p{Ll})/u) || [m.warn])[0];   // first sentence; "e.g.", "z. B.", "напр." do not end it
@@ -756,6 +773,7 @@
       texts: [text, p.ingredients_text_de, p.ingredients_text_bg, p.ingredients_text_en].filter((x, i, all) => x && all.indexOf(x) === i),
       tags: [].concat(p.ingredients_tags || [], p.additives_tags || []),
       allergens: p.allergens_tags || [],
+      traces: kind === 'food' ? (Array.isArray(p.traces_tags) ? p.traces_tags : []) : undefined,   // v2.51: "may contain" from the database
       analysis: p.ingredients_analysis_tags || [],
       nutriscore: /^[a-e]$/.test(p.nutriscore_grade || '') ? p.nutriscore_grade : null,
       nova: p.nova_group || null,
@@ -852,7 +870,8 @@
     const cached = state.products[code];
     const own = !forceOnline && !(cached && cached.source === 'label') && ownBy(code);
     if (own) { showProduct(own); return; }
-    const noCats = cached && (cached.source === 'off' || cached.source === 'obf') && !Array.isArray(cached.cats) && navigator.onLine !== false;
+    const noCats = cached && (cached.source === 'off' || cached.source === 'obf') && navigator.onLine !== false
+      && (!Array.isArray(cached.cats) || (cached.source === 'off' && !Array.isArray(cached.traces)));   // v2.51: once more for the "may contain" list
     const fresh = cached && !forceOnline && !noCats &&
       (cached.source === 'label' || Date.now() - cached.fetchedAt < CACHE_DAYS * 864e5);
     if (fresh) { await showProduct(cached); if (isOwn(cached)) showKnown(cached); return; }
@@ -1118,7 +1137,7 @@
           el('i', { 'aria-hidden': 'true' }), el('span', {}, el('b', { text: String(a.counts[g]) }), ' ' + t('legend.' + g))))));
     }
     // v2.34: the red and orange names, each with a short "why"; a tap opens the ingredient
-    const hot = a.rows.filter(r => r.group === 'red').concat(a.rows.filter(r => r.group === 'orange'), a.rows.filter(r => r.why === 'doseNear' || r.why === 'medInfo'));   // v2.48: + doses close to the limit; v2.50: + medicine fillers
+    const hot = a.rows.filter(r => r.group === 'red').concat(a.rows.filter(r => r.group === 'orange'), a.rows.filter(r => r.why === 'doseNear' || r.why === 'medInfo' || r.why === 'formNotEU'));   // v2.48: + doses close to the limit; v2.50: + medicine fillers
     if (hot.length) {
       const shown = hot.slice(0, HOT_MAX);
       card.append(el('ul', { class: 'qlist', id: 'qList' },
@@ -1687,7 +1706,7 @@
   function chipOf(r) {
     if (r.accepted) return t('qa.acceptedLine');   // v2.39
     if (r.why === 'mine' && r.mine && r.mine.item && r.mine.item.preset) return t('chip.mine') + ': ' + cap(r.mine.name);   // v2.41: "Твоят списък: Семенни масла"
-    const k = r.ask ? 'chip.ask' : r.why === 'dose' ? 'tag.dose' : r.why === 'doseNear' ? 'tag.doseNear' : r.why === 'medInfo' ? 'tag.medInfo' : r.why === 'b' ? 'chip.b' : r.why === 'use' ? 'chip.use' : r.why === 'mine' ? 'chip.mine' : r.why === 'allergen' ? (r.traceOnly ? 'chip.traces' : 'chip.yourAlg')
+    const k = r.ask ? 'chip.ask' : r.why === 'dose' ? 'tag.dose' : r.why === 'doseNear' ? 'tag.doseNear' : r.why === 'medInfo' ? 'tag.medInfo' : r.why === 'formNotEU' ? 'tag.formNotEU' : r.why === 'b' ? 'chip.b' : r.why === 'use' ? 'chip.use' : r.why === 'mine' ? 'chip.mine' : r.why === 'allergen' ? (r.traceOnly ? 'chip.traces' : 'chip.yourAlg')
       : r.why === 'fragrance' ? 'chip.frag' : r.why === 'vegan' ? 'chip.vegan' : r.banCos ? 'chip.banCos'
       : r.group === 'orange' ? (r.level === 'u' ? 'chip.u' : 'chip.c')
       : r.group === 'info' ? (r.level === 'r' ? 'chip.r' : r.traceOnly ? 'chip.traces' : r.allergen || (r.allergens && r.allergens.length) ? 'chip.alg' : 'chip.maybeVegan') : null;
@@ -3223,6 +3242,7 @@
     // "may contain" line after it; other sentences after it are still dropped (label text such as "Store in a dry place")
     ctx.split(String(text || '').replace(HEAD, '')).flatMap(raw => { const pp = raw.split(/\.\s+(?=\p{L})/u); return pp.length < 2 ? [raw] : [pp[0], ...pp.slice(1).filter(x => ctx.trace && ctx.trace(x))]; }).forEach((raw, pos) => {
       let name = raw.replace(HEAD, '').replace(/^[\s:;,.\-–]+|[\s:;,.]+$/g, '').trim().replace(/^[^:()\[\]]{1,25}:\s+/, '');
+      if ((name.match(/[)\]]/g) || []).length > (name.match(/[(\[]/g) || []).length) name = name.replace(/[)\]]+$/, '').trim();   // v2.51: "rosemary extract]" (the end of a sub-list)
       const letters = (name.match(/\p{L}/gu) || []).length;
       // v2.35: short names (сол, соя, Salz) are kept when the data knows them, they name an allergen, or 2+ photos read them
       const allergen = ctx.allergen ? ctx.allergen(name) : false, trace = ctx.trace ? ctx.trace(name) : false;
@@ -3255,6 +3275,18 @@
     if (c.short && !(c.best.q >= 3 || c.allergen || c.frames.size >= 2)) return false;
     if (c.best.q >= 3 || c.allergen || /\bE\s?\d{3}/.test(c.best.name)) return true;
     const mine = c.best.name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+    // v2.51: a piece cut at the edge of a photo ("itric acid", "mato powder", "atric acid", "olive ol", "osphae") is a part of
+    // a better name from another photo: same letters, or one letter different, inside that name
+    const nearIn = (ok, m) => {
+      for (let i = 0; i + m.length <= ok.length; i++) {
+        let d = 0;
+        for (let j = 0; j < m.length && d <= 1; j++) if (ok[i + j] !== m[j]) d++;
+        if (d <= 1) return true;
+      }
+      return false;
+    };
+    if (mine.length >= 5 && clusters.some(o => o !== c && o.best.q >= c.best.q && (o.best.q >= 3 || o.frames.size >= c.frames.size)
+      && (o.best.name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')).length > mine.length && nearIn(o.best.name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, ''), mine))) return false;
     if (mine.length < 8) return true;
     const g = gramsOf(mine);
     return !clusters.some(o => {
@@ -3308,7 +3340,7 @@
     rep = { frames: (base && rep ? rep.frames : []).concat(got.map(x => x.fr)), photos: (base && rep ? rep.photos : []).concat(files) };
     // frames that are too blurry (a sweep) add only junk: keep reads with confidence 50+ and some text
     const keep = got.filter(x => x.conf >= 50 && x.text.replace(/[^\p{L}]/gu, '').length >= 15);
-    const use = keep.length ? keep : got;
+    const use = oneListLang(keep.length ? keep : got);
     let text = base && base.text ? base.text : '';
     for (const x of use) text = text ? joinParts(text, x.text) : x.text;
     if (use.length + (base && base.text ? 1 : 0) > 1) {
@@ -3328,6 +3360,18 @@
     ocrStatus('');
     buzzNext = true;
     onCheckLabel();
+  }
+  // v2.51 (user's rule: the English list first, then the Cyrillic one, other languages left out): when the photos of one
+  // label read lists in different languages (a sweep over a BG + EN label), only the photos of one list language are joined.
+  function oneListLang(reads) {
+    const cyr = x => (x.text.match(/[\u0400-\u04FF]/g) || []).length > (x.text.match(/[a-z]/gi) || []).length;
+    const langs = reads.map(x => headingLang(x.text) || (cyr(x) ? 'bul' : null));
+    const has = new Set(langs.filter(Boolean));
+    if (has.size < 2) return reads;
+    const pick = has.has('eng') ? 'eng' : has.has('bul') ? 'bul' : [...has].sort((a, b) => langs.filter(l => l === b).length - langs.filter(l => l === a).length)[0];
+    const pickCyr = pick === 'bul';
+    const out = reads.filter((x, i) => langs[i] === pick || (!langs[i] && cyr(x) === pickCyr));
+    return out.length ? out : reads;
   }
   function loadPhoto(file) {
     ocrFile = file;
@@ -5470,7 +5514,7 @@
   }
 
   // Small test hook (used only by automated checks).
-  window.LC = { markOf: (r, g) => markOf(r, g), findTwin: p => findTwin(p), showTwin: p => showTwin(p), isOwn: q => isOwn(q), saveProduct: p => saveProduct(p), packInfo: f => packInfo(f), renderPack: () => renderPack(), packAuto: () => packAuto(), ghMaybe: () => ghMaybe(), ghBackup: (f, l) => ghBackup(f, l), frontOf: c => frontOf(c), packFind: c => packFind(c), analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
+  window.LC = { markOf: (r, g) => markOf(r, g), oneListLang: r => oneListLang(r), findTwin: p => findTwin(p), showTwin: p => showTwin(p), isOwn: q => isOwn(q), saveProduct: p => saveProduct(p), packInfo: f => packInfo(f), renderPack: () => renderPack(), packAuto: () => packAuto(), ghMaybe: () => ghMaybe(), ghBackup: (f, l) => ghBackup(f, l), frontOf: c => frontOf(c), packFind: c => packFind(c), analyze, termRe, matchAvoid, niceName, parseClaudeAnswer, state, lookup, showProduct, dbReady, t, setLanguage, openSearch,
     buildReport, tsvPieces, listPieces, getRep: () => rep, repairNames, fixMixed, leftOut, garbledName, isSupplementText, cleanOcr, joinParts, dedupeNames, consensusNames, nameKnown, nameIdent, bigramDice, lastRead: () => lastRead, headingLang, guessKind, lastFind: () => lastFind, nameHint: () => nameHint, detergentTerm, alternatives, setName, renderStart, sameCatSaved, suggestAlternatives, catScore, altCache, altTimes };
 
   init();

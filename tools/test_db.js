@@ -261,6 +261,23 @@ const ok = (cond, msg) => { if (!cond) { fails++; console.log('  FAIL: ' + msg);
     ok(cz.join('|') === 'PANTHENOL|ARACHIS HYPOGAEA OIL|LANOLIN', 'medicine names: Dexpanthenol 50 mg/g = PANTHENOL, Arachidis oleum = ARACHIS HYPOGAEA OIL, Wollwachs = LANOLIN (' + cz + ')');
   }
 
+  console.log('\n21 v2.51: supplement forms (EU list), "[ ]" sub-lists, E160d');
+  {
+    const fm = t => LCDB.checkSupplementForms(t).map(x => x.form).join('|');
+    ok(fm('Zutaten: Magnesiumcitrat, Magnesiumoxid, Magnesiumstearat, Zinkgluconat, Eisen(II)-fumarat, Kupfer(II)-oxid, Natriumselenit, Chrom(III)-chlorid, trimagnesium dicitrate, magnesium glycinate, zinc picolinate') === '',
+      'forms on the EU list (and the filler magnesium stearate) give nothing (' + fm('Magnesiumcitrat, Magnesiumoxid, Magnesiumstearat') + ')');
+    ok(fm('MAGNESIUM BISGLYCINATE (PROVIDING 14% ELEMENTAL MAGNESIUM, 140 MG), MAGNESIUM LACTATE') === '', 'the Magnemix forms (bisglycinate, lactate) are on the list');
+    ok(fm('Magnesium orotate, zinc orotate, chromium polynicotinate, boron citrate, lithium orotate, Magnesiumaspartat, benfotiamine, calcium folinate') === 'Magnesium orotate|zinc orotate|chromium polynicotinate|boron citrate|lithium orotate|Magnesiumaspartat|benfotiamine|calcium folinate',
+      'forms not on the EU list are named (' + fm('Magnesium orotate, zinc orotate, chromium polynicotinate, boron citrate, lithium orotate, Magnesiumaspartat, benfotiamine, calcium folinate') + ')');
+    ok(fm('магнезиев оксид, магнезиев оротат, цинков пиколинат, железен бисглицинат') === 'магнезиев оротат', 'Bulgarian: only "магнезиев оротат"');
+    const sp = t => LCDB.splitIngredients(t).join('|');
+    ok(sp('olive oil, flavouring blend 6% [sugar, sea salt, spices (paprika, cayenne), acidity regulator: citric acid]. Packed in a protective atmosphere.') === 'olive oil|flavouring blend 6%|sugar|sea salt|spices (paprika, cayenne)|acidity regulator: citric acid|Packed in a protective atmosphere.',
+      '"[ … ]" with a list inside: the blend and each name are pieces (' + sp('olive oil, flavouring blend 6% [sugar, sea salt, spices (paprika, cayenne), acidity regulator: citric acid]. Packed.') + ')');
+    ok(sp('Aqua [Water], Parfum [Fragrance], Titanium Dioxide [nano]') === 'Aqua [Water]|Parfum [Fragrance]|Titanium Dioxide [nano]' && sp("1,1'-Methylenbis[3-(3-hydroxymethyl-2,5-dioxoimidazolidin-4-yl)harnstoff], Wasser").split('|').length === 2,
+      '"Aqua [Water]" and a chemical name with "[…]" stay one piece');
+    ok(LCDB.checkFood('tomato powder', 'en').additives.length === 0 && LCDB.checkFood('lycopene', 'en').additives.map(a => a.e).join() === 'E160D', '"tomato powder" is no E160d; "lycopene" still is');
+  }
+
   console.log(fails ? `\n${fails} FAILED` : '\nALL PASSED');
   process.exit(fails ? 1 : 0);
 })();

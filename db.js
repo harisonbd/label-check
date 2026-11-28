@@ -66,7 +66,9 @@
   }
   // "May contain traces" (v2.9): the part of a label after these words lists traces, not ingredients.
   const TRACES_RE = /(kann\s+spuren|kann\s+[^.;]{0,40}?spuren|kann\s+(?=[^.;]{0,300}?\benthalten\b)|spuren\s+von|may\s+contain|traces\s+of|can\s+contain\s+traces|може\s+да\s+съдържа|следи\s+от|nyomokban|tartalmazhat|může\s+obsahovat|môže\s+obsahovať|lahko\s+vsebuje|sledi|poate\s+con[tțţ]ine|urme\s+de)/i;   // v2.35: + Romanian
-  const additiveNames = (a, lang) => (a.n[lang] || []).concat((EXTRA_ADDITIVE_NAMES[a.e] || {})[lang] || []);
+  // v2.51: words split off "Lycopene (synthetic, tomato, …)" in the data are no names of E160d ("tomato powder" is no colour)
+  const BAD_ADDITIVE_NAMES = new Set(['tomato', 'synthetic']);
+  const additiveNames = (a, lang) => (a.n[lang] || []).concat((EXTRA_ADDITIVE_NAMES[a.e] || {})[lang] || []).filter(n => !BAD_ADDITIVE_NAMES.has(String(n).trim().toLowerCase()));
   // Plant fats called "butter" are not milk: "cocoa butter" -> "cocoa" before the allergen check.
   const PLANT_BUTTER = / (cocoa|cacao|shea|mango|kokum|illipe|sal|peanut|almond|cashew|hazelnut|nut|seed) butter(?= )/g;
   // Fragrance that the EU list does not mark (move into build_db.py later):
@@ -184,8 +186,22 @@
   function splitIngredients(text) {
     const s = stripClaims(medHeads(stripLabelWord(text))), out = [];
     let depth = 0, cur = '';
+    let afterSub = false;
+    const subEnd = new Set();   // v2.51: "flavouring blend [sugar, salt, spices (…)]" -> the blend and each of its names are pieces
     for (let i = 0; i < s.length; i++) {
       const ch = s[i];
+      if (ch === '[' && depth === 0 && /\s/.test(s[i - 1] || ' ')) {   // not "Methylenbis[3-(…-2,5-dioxo…)]" (one chemical name)
+        let d = 0, j = i;
+        for (; j < s.length; j++) { if (s[j] === '[') d++; else if (s[j] === ']' && --d === 0) break; }
+        const inner = s.slice(i + 1, j).replace(/\([^()]*\)/g, '');
+        if (j < s.length && /[,;]\s*\p{L}/u.test(inner)) {
+          if (cur.trim()) out.push(cur.trim());
+          cur = ''; subEnd.add(j); continue;
+        }
+      }
+      if (subEnd.has(i)) { if (cur.trim()) out.push(cur.trim()); cur = ''; afterSub = true; continue; }
+      if (afterSub && !cur.trim() && /[.:\s]/.test(ch)) continue;   // ". Packed in …" after the sub-list: no leading dot
+      afterSub = false;
       if ('([{'.includes(ch)) depth++;
       else if (')]}'.includes(ch)) depth = Math.max(0, depth - 1);
       const digitComma = ch === ',' && /\d/.test(s[i - 1] || '') && /\d/.test(s[i + 1] || '');
@@ -374,6 +390,55 @@
         pct: Math.round(amount / limit * 100), over: amount > limit });
     }
     return out;
+  }
+
+  // ---------- v2.51: food supplements: forms of minerals and vitamins on the EU list (Directive 2002/46/EC, Annex II,
+  // consolidated 26.11.2025). Only a form the app can name (mineral + a known salt word) is checked; an unknown word is
+  // never flagged. Technological additives (magnesium stearate …) have salt words outside the list below and are ignored.
+  const ANION = {
+    acetate: 'acetat(?:e)?|ацетат', ascorbate: '(?:l-)?ascorbat(?:e)?|аскорбат', aspartate: '(?:l-)?aspartat(?:e)?|аспартат',
+    bisglycinate: '(?:bis)?glycinat(?:e)?|(?:бис)?глицинат', carbonate: 'carbonat(?:e)?|karbonat|карбонат', chloride: 'chlorid(?:e)?|хлорид',
+    citrate: '(?:di|tri)?citrat(?:e)?|цитрат', gluconate: 'gluconat(?:e)?|glukonat|глюконат', glycerophosphate: 'glycerophosphat(?:e)?|глицерофосфат',
+    lactate: 'lactat(?:e)?|laktat|лактат', pyruvate: 'pyruvat(?:e)?|пируват', phosphate: '(?:ortho|di|pyro)?phosphat(?:e)?|фосфат',
+    succinate: 'succinat(?:e)?|сукцинат', hydroxide: 'hydroxid(?:e)?|хидроксид', lysinate: '(?:l-)?lysinat(?:e)?|лизинат', malate: '(?:l-)?malat(?:e)?|малат',
+    oxide: 'oxid(?:e)?|оксид', pidolate: '(?:l-)?pidolat(?:e)?|пидолат', threonate: '(?:l-)?threonat(?:e)?|треонат', sulphate: 'sul(?:ph|f)at(?:e)?|сулфат',
+    taurate: '(?:acetyl ?)?taurat(?:e)?|таурат', orotate: 'orotat(?:e)?|оротат', picolinate: 'picolinat(?:e)?|pikolinat|пиколинат', fumarate: 'fumarat(?:e)?|фумарат',
+    saccharate: 'saccharat(?:e)?', nitrate: 'nitrat(?:e)?|нитрат', polynicotinate: 'polynicotinat(?:e)?|полиникотинат', histidinate: 'histidinat(?:e)?|хистидинат',
+    arginate: 'arginat(?:e)?', fructoborate: 'fructoborat(?:e)?', methionine: '(?:mono-?l-)?methionin(?:e)?(?: sul(?:ph|f)ate)?', diphosphate: 'diphosphat(?:e)?|pyrophosphat(?:e)?'
+  };
+  const MINERAL = {
+    calcium: ['calcium|kalzium|calcium|калциев|калций', 'acetate ascorbate bisglycinate carbonate chloride citrate gluconate glycerophosphate lactate pyruvate phosphate succinate hydroxide lysinate malate oxide pidolate threonate sulphate'],
+    magnesium: ['magnesium|magnézium|магнезиев|магнезий', 'acetate ascorbate bisglycinate carbonate chloride citrate gluconate glycerophosphate phosphate lactate lysinate hydroxide malate oxide pidolate pyruvate succinate sulphate taurate threonate'],
+    iron: ['ferrous|ferric|iron|eisen(?:\\s?\\((?:ii|iii)\\))?|железен|железн[оа]', 'carbonate citrate gluconate fumarate lactate sulphate diphosphate phosphate saccharate bisglycinate pidolate taurate'],
+    copper: ['cupric|copper|kupfer(?:\\s?\\(ii\\))?|меден', 'carbonate citrate gluconate sulphate aspartate bisglycinate lysinate oxide'],
+    zinc: ['zinc|zink|цинков|цинк', 'acetate ascorbate aspartate bisglycinate chloride citrate gluconate lactate lysinate malate methionine oxide carbonate pidolate picolinate sulphate'],
+    manganese: ['manganese|mangan|манганов|манган', 'ascorbate aspartate bisglycinate carbonate chloride citrate gluconate glycerophosphate pidolate sulphate'],
+    chromium: ['chromium|chrom(?:\\s?\\(iii\\))?|хромов|хром', 'chloride lactate nitrate picolinate sulphate'],
+    boron: ['boron|бор', ''],
+    lithium: ['lithium|литиев|литий', ''], strontium: ['strontium|стронциев', ''], vanadium: ['vanadium|vanadyl|ванадиев', '']
+  };
+  const FORM_RX = Object.entries(MINERAL).map(([m, [names, ok]]) => ({
+    m, ok: new Set(ok.split(' ').filter(Boolean)),
+    rx: new RegExp('(^|[^\\p{L}])(?:mono|di|tri|tetra)?(?:' + names + ')[\\s-]*(?:\\((?:ii|iii)\\)[\\s-]*)?(' + Object.values(ANION).join('|') + ')(?![\\p{L}])', 'giu')
+  }));
+  const VIT_FORM_BAD = /(^|[^\p{L}])(benfotiamin(?:e)?|sulbutiamin(?:e)?|folins[äa]ure|folinic acid|(?:calcium|kalzium)[\s-]?folinat(?:e)?|фолинова киселина)(?![\p{L}])/giu;
+  // -> [{ form, kind: 'mineral' | 'vitamin' }]: forms that are not on the EU list
+  function checkSupplementForms(text) {
+    const s = String(text || ''), out = [], seen = new Set();
+    for (const f of FORM_RX) {
+      f.rx.lastIndex = 0;
+      let m;
+      while ((m = f.rx.exec(s))) {
+        const an = Object.keys(ANION).find(k => new RegExp('^(?:' + ANION[k] + ')$', 'iu').test(m[2]));
+        if (!an || f.ok.has(an) || (an === 'diphosphate' && f.ok.has('phosphate'))) continue;
+        const form = m[0].replace(/^[^\p{L}]+/u, '').trim(), k = form.toLowerCase();
+        if (!seen.has(k)) { seen.add(k); out.push({ form, kind: 'mineral', at: m.index }); }
+      }
+    }
+    VIT_FORM_BAD.lastIndex = 0;
+    let v;
+    while ((v = VIT_FORM_BAD.exec(s))) { const k = v[2].toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push({ form: v[2], kind: 'vitamin', at: v.index }); } }
+    return out.sort((x, y) => x.at - y.at);
   }
 
   // ---------- v2.50: medicines: fillers (excipients) with a known effect, EMA list
@@ -874,7 +939,7 @@
     return out;
   }
 
-  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, checkDoses, isMedicine, checkExcipients, emaSource: () => EMA && EMA.source,
+  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, checkDoses, checkSupplementForms, isMedicine, checkExcipients, emaSource: () => EMA && EMA.source,
     excipientMatch: (id, s) => { const it = EMA && EMA.items.find(x => x.id === id); return !!(it && it.rx.test(String(s || ''))); }, suggestCosmetic, closest, wordGuess, guessCosmetic, closestFood, splitGlued, findInside, findNames, checkFood, knownFood, suggestNames, cosAllergens, foodAllergens, search, foodToCosmetic, meta: () => META, SEV };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.LCDB = api;
 })(typeof window !== 'undefined' ? window : globalThis);
