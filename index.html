@@ -15,7 +15,7 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>Label Check <span class="ver">v2.46</span></h1>
+    <h1>Label Check <span class="ver">v2.47</span></h1>
     <button class="iconbtn topsearch" id="topSearch" type="button" data-t-aria="card.search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg></button>
     <div class="langsw" id="langSwitch" role="group" aria-label="Language">
       <button type="button" data-lang="en" lang="en" aria-pressed="false">EN</button>
@@ -408,6 +408,12 @@
     <!-- HISTORY TAB -->
     <section class="tab" id="tab-history" data-tab="history" hidden>
       <h2 data-t="hist.title">History</h2>
+      <!-- v2.47: "To check by Claude" stays reachable here after sending (the start screen shows it only while something waits to be sent) -->
+      <button class="srow tocheck" id="histCheckRow" type="button" hidden>
+        <span class="lci" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h7"/><path d="M15 16.5l2 2 4-4.5"/></svg></span>
+        <span class="lct"><strong data-t="chk.row">To check by Claude</strong><small id="histCheckSub"></small></span>
+        <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+      </button>
       <div class="hcount" id="histCount" role="group" data-t-aria="hist.countAria"></div>
       <div class="hsrow">
         <div class="hsearch">

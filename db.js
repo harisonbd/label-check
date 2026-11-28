@@ -12,8 +12,11 @@
   let cosIndex = null, eIndex = null, foodNames = null, allergenNames = null;
 
   // Lower case, ß -> ss, no accents, keep a-z, 0-9 and Cyrillic. Same rule on both sides of a match.
+  // v2.47: Bulgarian labels often write E-numbers with the Cyrillic letter ("Е621"): it becomes the Latin "e621".
+  // Capital "Е" also with a space ("Е 621"); small "е" only right before the digits ("е621"), because "е 100 г" is normal Bulgarian.
+  const latinE = s => String(s || '').replace(/(^|[^\p{L}\p{N}])Е(?=[\s‐-―-]?\d{3})/gu, '$1E').replace(/(^|[^\p{L}\p{N}])е(?=-?\d{3})/gu, '$1e');
   function norm(s) {
-    return String(s || '').toLowerCase().replace(/ß/g, 'ss').replace(/ё/g, 'е')
+    return latinE(s).toLowerCase().replace(/ß/g, 'ss').replace(/ё/g, 'е')
       .normalize('NFD').replace(/[̀-ͯ]/g, '')
       .replace(/[^a-z0-9а-я]+/g, ' ').trim();
   }
@@ -62,7 +65,7 @@
     return null;
   }
   // "May contain traces" (v2.9): the part of a label after these words lists traces, not ingredients.
-  const TRACES_RE = /(kann\s+spuren|kann\s+[^.;]{0,40}?spuren|spuren\s+von|may\s+contain|traces\s+of|can\s+contain\s+traces|може\s+да\s+съдържа|следи\s+от|nyomokban|tartalmazhat|může\s+obsahovat|môže\s+obsahovať|lahko\s+vsebuje|sledi|poate\s+con[tțţ]ine|urme\s+de)/i;   // v2.35: + Romanian
+  const TRACES_RE = /(kann\s+spuren|kann\s+[^.;]{0,40}?spuren|kann\s+(?=[^.;]{0,300}?\benthalten\b)|spuren\s+von|may\s+contain|traces\s+of|can\s+contain\s+traces|може\s+да\s+съдържа|следи\s+от|nyomokban|tartalmazhat|může\s+obsahovat|môže\s+obsahovať|lahko\s+vsebuje|sledi|poate\s+con[tțţ]ine|urme\s+de)/i;   // v2.35: + Romanian
   const additiveNames = (a, lang) => (a.n[lang] || []).concat((EXTRA_ADDITIVE_NAMES[a.e] || {})[lang] || []);
   // Plant fats called "butter" are not milk: "cocoa butter" -> "cocoa" before the allergen check.
   const PLANT_BUTTER = / (cocoa|cacao|shea|mango|kokum|illipe|sal|peanut|almond|cashew|hazelnut|nut|seed) butter(?= )/g;
@@ -70,7 +73,7 @@
   // essential oils (leaf, flower, peel, bark, root, wood … oil with a fragrance function) and fragrance words on labels.
   const ESSENTIAL_OIL = /\b(LEAF|LEAVES|FLOWER|PEEL|HERB|BARK|ROOT|WOOD|NEEDLE|TWIG|BUD|RESIN|GUM|RHIZOME|STEM|PLANT|TIP|CONE|BRANCH)\b[^,]*\bOIL$/;
   const FATTY_OIL = /\b(SEED|KERNEL|NUT|FRUIT|GERM|BUTTER|BRAN|SPROUT|PULP)\b/;
-  const FRAG_FREE = /(^| )(frei|free|ohne|without|без|no)( |$)|frei$|free$/;
+  const FRAG_FREE = /(^| )(frei|free|ohne|without|без|no|fara|bez|senza|sans|sin|zonder|uten|nincs)( |$)|frei$|free$/;   // v2.47: + RO/HR/CS/IT/FR/ES/NL/NO/HU
   const FRAG_WORDS = new RegExp('(^| )(' + [
     'fragrance', 'fragrances', 'perfume', 'parfum', 'natural fragrance', 'masking fragrance', 'essential oil', 'essential oils',
     'duftstoff', 'duftstoffe', 'parfum', 'atherisches ol', 'atherische ol', 'atherische ole', 'atherischen ole', 'parfumol', 'parfumole',
@@ -81,7 +84,23 @@
   // Older INCI names seen on labels (move into build_db.py later)
   // v2.19: German names of common ingredients (label text in German -> the INCI name the data knows)
   const DE_COS_ALIASES = { 'NATRIUMCHLORID': 'SODIUM CHLORIDE', 'NATRIUMHYDROXID': 'SODIUM HYDROXIDE', 'KALIUMHYDROXID': 'POTASSIUM HYDROXIDE', 'NATRIUMSULFAT': 'SODIUM SULFATE', 'KALIUMSORBAT': 'POTASSIUM SORBATE', 'NATRIUMBENZOAT': 'SODIUM BENZOATE', 'NATRIUMCITRAT': 'SODIUM CITRATE', 'NATRIUMCARBONAT': 'SODIUM CARBONATE', 'NATRIUMHYDROGENCARBONAT': 'SODIUM BICARBONATE', 'NATRIUMLACTAT': 'SODIUM LACTATE', 'NATRIUMSALICYLAT': 'SODIUM SALICYLATE', 'MAGNESIUMSULFAT': 'MAGNESIUM SULFATE', 'CALCIUMCARBONAT': 'CALCIUM CARBONATE', 'KALIUMCHLORID': 'POTASSIUM CHLORIDE', 'ZINKOXID': 'ZINC OXIDE', 'TITANDIOXID': 'TITANIUM DIOXIDE', 'SALZSÄURE': 'HYDROCHLORIC ACID', 'ZITRONENSÄURE': 'CITRIC ACID', 'MILCHSÄURE': 'LACTIC ACID', 'BENZOESÄURE': 'BENZOIC ACID', 'SORBINSÄURE': 'SORBIC ACID', 'SALICYLSÄURE': 'SALICYLIC ACID', 'ASCORBINSÄURE': 'ASCORBIC ACID', 'ESSIGSÄURE': 'ACETIC ACID', 'STEARINSÄURE': 'STEARIC ACID', 'PALMITINSÄURE': 'PALMITIC ACID', 'ÖLSÄURE': 'OLEIC ACID', 'HYALURONSÄURE': 'HYALURONIC ACID', 'PHOSPHORSÄURE': 'PHOSPHORIC ACID', 'GLYCOLSÄURE': 'GLYCOLIC ACID', 'GEREINIGTES WASSER': 'AQUA', 'GLYCEROL': 'GLYCERIN', 'ETHANOL': 'ALCOHOL', 'ALKOHOL': 'ALCOHOL', 'ISOPROPANOL': 'ISOPROPYL ALCOHOL', 'PROPYLENGLYKOL': 'PROPYLENE GLYCOL', 'BUTYLENGLYKOL': 'BUTYLENE GLYCOL', 'PARAFFINÖL': 'PARAFFINUM LIQUIDUM', 'VASELIN': 'PETROLATUM', 'HARNSTOFF': 'UREA', 'VITAMIN E': 'TOCOPHEROL', 'VITAMIN C': 'ASCORBIC ACID', 'KOFFEIN': 'CAFFEINE', 'CAMPHER': 'CAMPHOR', 'BENZYLALKOHOL': 'BENZYL ALCOHOL', 'CETYLALKOHOL': 'CETYL ALCOHOL', 'CETYLSTEARYLALKOHOL': 'CETEARYL ALCOHOL', 'STEARYLALKOHOL': 'STEARYL ALCOHOL', 'DIMETICON': 'DIMETHICONE', 'KOKOSÖL': 'COCOS NUCIFERA OIL', 'SONNENBLUMENÖL': 'HELIANTHUS ANNUUS SEED OIL', 'JOJOBAÖL': 'SIMMONDSIA CHINENSIS SEED OIL', 'SHEABUTTER': 'BUTYROSPERMUM PARKII BUTTER', 'NATRIUMLAURYLSULFAT': 'SODIUM LAURYL SULFATE', 'NATRIUMLAURETHSULFAT': 'SODIUM LAURETH SULFATE', 'COCAMIDOPROPYLBETAIN': 'COCAMIDOPROPYL BETAINE', 'KETOCONAZOL': 'KETOCONAZOLE', 'LIMONEN': 'LIMONENE', 'CUMARIN': 'COUMARIN', 'CITRONELLOL': 'CITRONELLOL', 'MACROGOLGLYCEROLCOCOATE': 'PEG-7 GLYCERYL COCOATE', };
-  const EXTRA_COS_ALIASES = { ...DE_COS_ALIASES, 'CITRUS BERGAMIA PEEL OIL': 'CITRUS AURANTIUM BERGAMIA PEEL OIL', 'CITRUS BERGAMIA FRUIT OIL': 'CITRUS AURANTIUM BERGAMIA FRUIT OIL' };
+  // v2.47: German medicine labels (Ph.Eur. names, e.g. a ketoconazole shampoo) and food colour E-numbers on cosmetics
+  const PHEUR_COS_ALIASES = {
+    'DODECYLPOLY(OXYETHYLEN)-2-HYDROGENSULFAT, NATRIUMSALZ': 'SODIUM LAURETH SULFATE', 'DODECYLPOLY(OXYETHYLEN)-2-HYDROGENSULFAT': 'SODIUM LAURETH SULFATE',
+    'NATRIUMDODECYLPOLY(OXYETHYLEN)-2-HYDROGENSULFAT': 'SODIUM LAURETH SULFATE', 'NATRIUMDODECYLSULFAT': 'SODIUM LAURYL SULFATE',
+    'DODECYLPOLY(OXYETHYLEN)-3-HYDROGENSULFOSUCCINAT, DINATRIUMSALZ': 'DISODIUM LAURETH SULFOSUCCINATE', 'DINATRIUMDODECYLPOLY(OXYETHYLEN)-3-HYDROGENSULFOSUCCINAT': 'DISODIUM LAURETH SULFOSUCCINATE', 'DODECYLPOLY(OXYETHYLEN)-3-HYDROGENSULFOSUCCINAT': 'DISODIUM LAURETH SULFOSUCCINATE',
+    'POLY(OXYETHYLEN)-120-METHYL(D-GLUCOPYRANOSID)DIOLEAT': 'PEG-120 METHYL GLUCOSE DIOLEATE', 'MACROGOLGLYCEROLCOCOATE': 'PEG-7 GLYCERYL COCOATE',
+    "1,1'-METHYLENBIS[3-(3-HYDROXYMETHYL-2,5-DIOXOIMIDAZOLIDIN-4-YL)HARNSTOFF]": 'IMIDAZOLIDINYL UREA',
+    'N,N-BIS(2-HYDROXYETHYL)COCOSFETTSÄUREAMID': 'COCAMIDE DEA', 'COCOSFETTSÄUREDIETHANOLAMID': 'COCAMIDE DEA',
+    'CITRONENSÄURE': 'CITRIC ACID', 'NATRIUMEDETAT': 'DISODIUM EDTA', 'DINATRIUMEDETAT': 'DISODIUM EDTA', 'POLYSORBAT 80': 'POLYSORBATE 80',
+    'BUTYLHYDROXYTOLUOL': 'BHT', 'METHYL-4-HYDROXYBENZOAT': 'METHYLPARABEN', 'PROPYL-4-HYDROXYBENZOAT': 'PROPYLPARABEN',
+    'HOCHDISPERSES SILICIUMDIOXID': 'SILICA', 'WEISSES VASELIN': 'PETROLATUM', 'DICKFLÜSSIGES PARAFFIN': 'PARAFFINUM LIQUIDUM',
+    'DÜNNFLÜSSIGES PARAFFIN': 'PARAFFINUM LIQUIDUM', 'XANTHANGUMMI': 'XANTHAN GUM', 'TROMETAMOL': 'TROMETHAMINE', 'TOCOPHEROLACETAT': 'TOCOPHERYL ACETATE',
+    'PONCEAU 4R': 'CI 16255', 'E102': 'CI 19140', 'E104': 'CI 47005', 'E110': 'CI 15985', 'E120': 'CI 75470', 'E122': 'CI 14720', 'E124': 'CI 16255',
+    'E127': 'CI 45430', 'E129': 'CI 16035', 'E131': 'CI 42051', 'E132': 'CI 73015', 'E133': 'CI 42090', 'E141': 'CI 75810', 'E151': 'CI 28440',
+    'E153': 'CI 77266', 'E160A': 'CI 75130', 'E171': 'CI 77891', 'E172': 'CI 77491'
+  };
+  const EXTRA_COS_ALIASES = { ...DE_COS_ALIASES, ...PHEUR_COS_ALIASES, 'CITRUS BERGAMIA PEEL OIL': 'CITRUS AURANTIUM BERGAMIA PEEL OIL', 'CITRUS BERGAMIA FRUIT OIL': 'CITRUS AURANTIUM BERGAMIA FRUIT OIL' };
   const isFragranceWord = seg => { const n = norm(seg); return !FRAG_FREE.test(n) && (FRAG_WORDS.test(n) || PLANT_OIL_WORDS.test(n)); };
   const allergenName = (al, lang) => (ALLERGEN_LABEL[lang] && ALLERGEN_LABEL[lang][al.id]) || (al.n[lang] || al.n.en)[0];
 
@@ -140,19 +159,31 @@
   let SHORT_FOOD_N = new Set();
 
   // ---------- label splitting
+  // v2.47: "free from" claims are no ingredients ("Fără parfum, parabeni și coloranți.", "Ohne Parfum", "parfümfrei", "fragrance-free").
+  // The claim runs to the end of its sentence. Before, "parfum" in such a claim counted as fragrance.
+  const CLAIM_RE = /(^|[.;,]\s*)(?:fără|fara|ohne|frei\s+von|без|bez|senza|sans|sin|free\s+from|without|no\s+added)\s+[^.;]*/giu;
+  const CLAIM_WORD_RE = /(^|[.;,]\s*)[\p{L}-]+(?:frei|-free)(?=\s*(?:[.;,]|$))/giu;
+  const stripClaims = t => {
+    const s = String(t || ''), r = s.replace(CLAIM_RE, '$1').replace(CLAIM_WORD_RE, '$1');
+    return r === s ? s : r.replace(/([.;,])(?:\s*[.;,])+/g, '$1').replace(/[\s.;,]+$/, '');   // no ". . ." left where a claim was
+  };
   function stripLabelWord(text) {
     return String(text || '').replace(/^\s*(ingredients?|ingr[eé]dients?|inci|zutaten|inhaltsstoffe|bestandteile|hilfsstoffe|excipients?|съставки|състав|помощни вещества|други вещества|composition|összetevők|složení|zloženie|sestavine|ingrediente)\s*[:：]\s*/i, '');
   }
   // Split at , ; • · and new lines that are not inside brackets. A comma between digits (1,3-diol) does not split.
   function splitIngredients(text) {
-    const s = stripLabelWord(text), out = [];
+    const s = stripClaims(stripLabelWord(text)), out = [];
     let depth = 0, cur = '';
     for (let i = 0; i < s.length; i++) {
       const ch = s[i];
       if ('([{'.includes(ch)) depth++;
       else if (')]}'.includes(ch)) depth = Math.max(0, depth - 1);
       const digitComma = ch === ',' && /\d/.test(s[i - 1] || '') && /\d/.test(s[i + 1] || '');
-      if (depth === 0 && !digitComma && /[,;•·\n]/.test(ch)) {
+      // v2.47: "N,N-Bis(…)", "O,O'-…": a single N/O/S before and after the comma, then a hyphen = one chemical name
+      const atomComma = ch === ',' && /(^|[^\p{L}])[NOS]['’′]?$/u.test(cur) && /^\s?[NOS]['’′]?(,\s?[NOS]['’′]?)*-/.test(s.slice(i + 1));
+      // v2.47: "…-hydrogensulfat, Natriumsalz;" (German medicine labels): the salt word belongs to the name before it
+      const saltComma = ch === ',' && /^\s*(di|tri)?(natrium|kalium|calcium|magnesium|ammonium|zink)salz\b/i.test(s.slice(i + 1));
+      if (depth === 0 && !digitComma && !atomComma && !saltComma && /[,;•·\n]/.test(ch)) {
         if (cur.trim()) out.push(cur.trim());
         cur = '';
       } else cur += ch;
@@ -208,6 +239,10 @@
     const tries = [s];
     const outside = s.replace(/\([^)]*\)/g, ' ').trim();
     if (outside && outside !== s) tries.push(outside);
+    const bare = s.replace(/\([^)]*\)|\[[^\]]*\]/g, ' ').trim();   // v2.47: also without [ … ]
+    if (bare && bare !== s && bare !== outside) tries.push(bare);
+    const noPct = bare.replace(/\s*\d+(?:[.,]\d+)?\s*%/g, ' ').trim();   // v2.47: "Salzsäure 10%" -> "Salzsäure"
+    if (noPct && noPct !== bare) tries.push(noPct);
     for (const m of s.matchAll(/\(([^)]*)\)/g)) tries.push(m[1]);
     for (const t of tries.slice()) if (t.includes('/')) tries.push(...t.split('/'));
     for (const t of tries) {
@@ -267,7 +302,7 @@
     const whole = ' ' + segs.join(' | ') + ' ';
     const posOf = t => { const i = segs.findIndex(s => (' ' + s + ' ').includes(' ' + t + ' ')); return i >= 0 ? i + 1 : null; };
     const found = new Map();
-    const raw = String(text || '').toLowerCase();
+    const raw = latinE(text).toLowerCase();
     for (const m of raw.matchAll(/(?:^|[^a-z0-9])e\s?-?\s?(\d{3,4})\s?([a-z])?(?![a-z0-9])/g)) {
       const k = 'e' + m[1] + (m[2] || '');
       const a = eIndex.get(k) || eIndex.get('e' + m[1]);
@@ -301,7 +336,8 @@
       const trace = pos !== null && pos >= traceFrom;
       const old = allergens.get(al.id);
       // An allergen in the ingredients wins over the same allergen in the traces line.
-      if (!old || (old.trace && !trace)) allergens.set(al.id, { id: al.id, name: allergenName(al, lang), matched: t, pos, trace });
+      if (!old || (old.trace && !trace)) allergens.set(al.id, { id: al.id, name: allergenName(al, lang), matched: t, pos, trace, posAll: (old ? old.posAll : []).concat(pos ? [pos] : []) });
+      else if (pos && !old.posAll.includes(pos)) old.posAll.push(pos);   // v2.47: every place ("Vollmilchpulver" and "Butterreinfett" are both milk)
     };
     const segsA = segs.map(s => (' ' + s + ' ').replace(PLANT_BUTTER, ' $1'));
     for (const [t, al] of allergenNames) {

@@ -1241,6 +1241,7 @@ details.lcard[open] > summary .lct small { white-space: normal; }
 /* v2.40: "To check" row on the start screen and the "To check" screen */
 .srow.tocheck { width: 100%; display: flex; align-items: center; gap: 12px; min-height: 64px; margin: 12px 0 0; padding: 10px 14px; border: 0; border-radius: 20px;
   background: var(--card); color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.srow.tocheck .lct small { white-space: normal; }   /* v2.47: "25 sent · import the answer here" wraps on a narrow phone */
 .srow.tocheck .chev { width: 20px; height: 20px; flex: none; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 #checkPanel h2 .count { color: var(--muted); font-weight: 600; }
 .chklist .thumb { width: 44px; height: 44px; border-radius: 12px; background: var(--card2, var(--card)); display: grid; place-items: center; flex: none; }

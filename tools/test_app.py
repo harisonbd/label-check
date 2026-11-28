@@ -562,7 +562,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.46' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.47' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -674,14 +674,27 @@ with sync_playwright() as p:
     ctx, pg = new_page(b, base, 'bg-BG', dark=True, width=390)
     pg.evaluate("localStorage.setItem('lc.allergens', JSON.stringify({ food: ['soybeans', 'gluten'], cos: [] }))"); reload_ready(pg)
     read_label(pg, 'Zutaten: Zucker, Kakaobutter. Kann Spuren von Soja enthalten.', 'food')
-    ok(word(pg) == 'Избягвай' and pg.inner_text('#dtop .qy') == 'Може да съдържа следи: Соя' and 'следи от твой алерген' in pg.inner_text('#dtop .qr'),
-       'ticked soy only in "Kann Spuren von Soja": red, "Може да съдържа следи", reason "следи от твой алерген" (%s / %s)' % (pg.inner_text('#dtop .qy'), pg.inner_text('#dtop .qr')))
+    ok(word(pg) == 'Провери' and pg.inner_text('#dtop .qy') == 'Може да съдържа следи: Соя' and pg.locator('#dtop .qr').count() == 0,
+       'v2.47: ticked soy only in "Kann Spuren von Soja": orange Check (not red), "Може да съдържа следи: Соя" (%s)' % pg.inner_text('#dtop .qy'))
+    ok(pg.inner_text('#oneLine') == 'Може да съдържа 1 твой алерген' and pg.locator('#qMay li').count() == 1 and 'Соя' in pg.inner_text('#qMay') and pg.locator('#qMay .dot[data-m=p]').count() == 1,
+       'v2.47: one line under the word, one "May contain" row with the person mark (%s / %s)' % (pg.inner_text('#oneLine'), pg.inner_text('#qMay')))
     open_details(pg)
-    ok('(следи)' in pg.inner_text('.allergen-line') and pg.inner_text('#groups li:has-text("Soja") .chip') == 'Може да съдържа', 'Details: allergen line "(следи)", row chip "Може да съдържа"')
+    ok(pg.locator('.allergen-line').count() == 0 and pg.locator('#groups li:has-text("Soja")').count() == 0 and pg.inner_text('#mayAll').lower() == 'може да съдържа (следи): соя',
+       'v2.47 Details: the traces sentence is no ingredient row; one line "Може да съдържа (следи): соя" instead of the allergen line (%s)' % pg.inner_text('#mayAll'))
     pg.screenshot(path=os.path.join(SHOTS, 'v29-traces-bg.png'))
     pg.click('.tabbar button[data-go=scan]')
     read_label(pg, 'Zutaten: Hartweizengrieß, Wasser', 'food')
     ok(word(pg) == 'Избягвай' and pg.inner_text('#dtop .qy') == 'Съдържа: Глутен' and pg.inner_text('#dtop .qr') == 'Причина: твой алерген', 'Hartweizengrieß with gluten ticked: red "Съдържа: Глутен"')
+    # v2.47: fixes from the 25 photo reads (user 28 Nov)
+    pg.evaluate("localStorage.setItem('lc.allergens', JSON.stringify({ food: ['milk', 'peanuts'], cos: [] })); localStorage.setItem('lc.avoid', JSON.stringify([{ id: 'a1', text: 'msg, e621', preset: 'msg' }]))"); reload_ready(pg)
+    an = lambda kind, text: pg.evaluate("""([kind, text]) => { const a = LC.analyze({ code: 'label-x', kind, source: 'label', name: 'x', ingredientsText: text, texts: [text] });
+        return { v: a.verdict, rows: a.rows.map(r => [r.label || r.text || '', r.group]), may: a.traces ? a.traces.mine.map(x => x.id).sort() : null }; }""", [kind, text])
+    r = an('food', 'Състав: тиквено семе 98%, трапезна сол 2%. Може да съдържа следи от мляко, фъстъци, соя и сусам.')
+    ok(r['v'] == 'check' and r['may'] == ['milk', 'peanuts'] and len(r['rows']) == 2, 'v2.47: "may contain" milk + peanuts (ticked) = Check, not Avoid; the traces sentence is no ingredient row (%s)' % r)
+    r = an('food', 'Zutaten: Zucker, Magermilchpulver, Kakaobutter, Vollmilchpulver')
+    ok(r['v'] == 'avoid' and [g for t, g in r['rows'] if 'milch' in t.lower()] == ['red', 'red'], 'v2.47: milk ticked: both Magermilchpulver and Vollmilchpulver are red (%s)' % r['rows'])
+    r = an('food', 'Състав: овкусители (\u0415621), сол')
+    ok(r['v'] == 'avoid' and ['Овкусители', 'red'] in r['rows'], 'v2.47: Cyrillic "Е621" hits "MSG / E621" on your list (%s)' % r['rows'])
     ctx.close()
 
     print('v2.8: backup note, app shortcuts, text cut at a 2nd heading, 320 px')
@@ -1003,7 +1016,7 @@ with sync_playwright() as p:
     if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
     pg.evaluate("localStorage.setItem('lc.allergens', JSON.stringify({food:['soybeans', 'gluten'], cos:[]})); 0"); reload_ready(pg)
     read_label(pg, 'Zutaten: Hartweizengrieß, Zucker. Kann Spuren von Soja enthalten.', 'food')
-    ok(word(pg) == 'Избягвай' and pg.inner_text('#oneLine') == '2 червени съставки' and '(следи)' in pg.inner_text('#qList'), 'red with traces: the list marks the trace "(следи)" (%s)' % pg.inner_text('#qList'))
+    ok(word(pg) == 'Избягвай' and 'Соя' in pg.inner_text('#qMay') and 'Соя' not in pg.inner_text('#qList') and 'Hartweizengrieß' in pg.inner_text('#qList'), 'red with traces: v2.47: the real ingredient is red, the trace has its own "May contain" row (%s / %s)' % (pg.inner_text('#oneLine'), pg.inner_text('#qMay')))
     pg.click('.tabbar button[data-go=scan]')
     pg.evaluate("LC.showProduct({code:'t-nolist2', kind:'food', source:'label', ingredientsText:'Brennwert 0 kJ, Salz 0,02 g', texts:['Brennwert 0 kJ, Salz 0,02 g'], read:{photo:true, list:false}, tags:[], allergens:[], analysis:[]})")
     pg.wait_for_selector('#result:not([hidden]) #answer')
@@ -1037,7 +1050,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v64')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v65')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1264,7 +1277,7 @@ with sync_playwright() as p:
     d = pg.evaluate("LC.dedupeNames('Aqua, Glycerin, Dodecylpoly(oxyethylen)-2-hydrogensulfat, Natriumsalz; Dodecylpoly(oxyethylen)-2-hydrogensul, Natrium salz; Glycerin')")
     cn = pg.evaluate("(fr) => LC.consensusNames(fr, { split: t => LCDB.splitIngredients(t), known: LC.nameKnown, dice: LC.bigramDice, ident: LC.nameIdent })", ["Sonstige Bestandteile: Dodecylpoly(oxyethylen)-2-hydrogensulfat, Natriumsalz; Dodecylpoly(oxyethylen)-2-hydrogensulfosuccinat, Dinatriumsalz; Poly(oxyethylen)-120-methyl(D-glucopyranosid)dioleat; Macrogolglycerolcocoate (Ph.Eur.) [7 EO-Einheiten]; Natriumhydroxid; Natriumchlorid; Ponceau 4R (E124); Salzsäure 10 % (in geringen Mengen zur pH-Wert-Einstellung); Kaliumsorbat; Natriumsulfat; Phenoxyethanol; Zitronensäure; gereinigtes Wasser. Zur Anwendung auf der Haut.", "Bestandteile: Do secy Ipolyloxyethylen)-2- hydroger Na “ıumsalz; Dodecylpolyloxyethyleni 3-h drogensulfosuccinat; Dinatriums Po! ‘oxyethylen)-120-methyl(D-glucopyranosid)dioleat; Macrogolglycerolcocoate Ph.Eur.) [7 EO-Einheiten]; Natriumhydroxid; Natriumchlorid; Ponce:. RIEI24); Kaliumsorbat; Natriumsulfat; Phenoxyethanol; Zitronensäure; gereinigtes Wasser", "Atrium ethylen)-1 20-methyl(D-gluc- h i .) En Macrogolglycerolce Oat: O-Einheiten]; © fatriumsulfat; Phenoxyetha“ säure; Gereinigtes Wasser aliumsorbat. BEI24); K:; Parkungsbeilage beachten", "Tridodecylammoniumpolypeptid (MMG 2000); Moniumpolypeptid (MMG 2000); Phenoxyethar: gereinigtes Wasser; Phenoxyetha: Kaliumsorbat"])
     need = ['Natriumchlorid', 'Kaliumsorbat', 'Ponceau 4R (E124)', 'Natriumsulfat', 'Phenoxyethanol', 'Natriumhydroxid', 'Zitronensäure']
-    ok(all(x in cn for x in need) and not any('©' in x or '“' in x for x in cn) and 12 <= len(cn) <= 19 and sum(1 for z in cn if z.lower().startswith('phenoxyeth')) == 1 and not any(z.startswith('Moniumpolypeptid') for z in cn) and any(x.endswith('hydrogensulfat') for x in cn) and any(x.endswith('hydrogensulfosuccinat') for x in cn), 'v2.20: three garbled frames give clean names, none of the real names lost, Ponceau (E124) kept (%d names: %s)' % (len(cn), cn[:4]))
+    ok(all(x in cn for x in need) and not any('©' in x or '“' in x for x in cn) and 12 <= len(cn) <= 19 and sum(1 for z in cn if z.lower().startswith('phenoxyeth')) == 1 and not any(z.startswith('Moniumpolypeptid') for z in cn) and any('hydrogensulfat' in x for x in cn) and any('hydrogensulfosuccinat' in x for x in cn), 'v2.20: three garbled frames give clean names, none of the real names lost, Ponceau (E124) kept (%d names: %s)' % (len(cn), cn[:4]))
     ok(d.count('Dodecylpoly') == 1 and d.count('Glycerin') == 1 and 'Aqua' in d, 'v2.17.1: near-identical names from several pictures count once (%s)' % d)
     pg.click('#modeSweep'); pg.click('#shutter'); pg.wait_for_timeout(4200)
     ok('Move slowly' in pg.inner_text('#camHint'), 'v2.17: sweep: "Move slowly over the list · N pictures"')
@@ -1595,16 +1608,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v64'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v65'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v64' not in keys: break
+        if 'label-check-v65' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v64' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v65' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1915,7 +1928,7 @@ with sync_playwright() as p:
     ok(pg.evaluate("!!LC.state.current.p.readOk") and pg.locator('#readChips').count() == 0 and 'Проверено от теб' in pg.inner_text('#readCard') and pg.is_visible('#readShow'),
        '"Всичко е вярно": saved on the product; the card is one line "Проверено от теб" + "Покажи"')
     pg.click('#readShow'); pg.wait_for_timeout(400)
-    ok(pg.locator('#readChips .chip').count() == 4, '"Покажи" opens the card again (3 names + the "may contain" line)')
+    ok(pg.locator('#readChips .chip').count() == 3, '"Покажи" opens the card again (3 names; v2.47: the "may contain" line is no name)')
     pg.reload(); pg.evaluate('LC.dbReady'); pg.wait_for_timeout(300)
     ok(pg.evaluate("Object.values(LC.state.products).some(p => p.readOk && (p.readDropped || []).includes('Изхвърляй правилно'))"), 'kept after a reload (saved with the product)')
     ok(no_side_scroll(pg), 'no sideways scroll')
@@ -1978,6 +1991,15 @@ with sync_playwright() as p:
        'one file: the note for Claude (with the answer format), 2 products, the saved photos inside (%s)' % dl.value.suggested_filename)
     pg.wait_for_timeout(300)
     ok(pg.locator('#chkList .tag.sent').count() == 2 and pg.evaluate("document.querySelector('#chkSteps li[data-s=\"2\"]').classList.contains('done')"), 'after sending: both say "изпратено", step 2 is done')
+    pg.go_back(); pg.wait_for_timeout(300)
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]'); pg.wait_for_timeout(200)
+    ok(pg.is_hidden('#toCheckRow'), 'v2.47: after "Send", the "За проверка" row leaves the start screen')
+    pg.click('.tabbar button[data-go=history]'); pg.wait_for_timeout(300)
+    ok(pg.is_visible('#histCheckRow') and pg.inner_text('#histCheckSub') == '2 изпратени · внеси отговора тук' and no_side_scroll(pg)
+       and pg.evaluate("document.getElementById('histCheckSub').scrollWidth <= document.getElementById('histCheckSub').clientWidth + 1"),
+       'v2.47: History keeps the row: "2 изпратени · внеси отговора тук", not cut (%s)' % pg.inner_text('#histCheckSub'))
+    pg.click('#histCheckRow'); pg.wait_for_selector('#checkPanel:not([hidden])'); pg.wait_for_timeout(300)
+    ok(pg.locator('#chkList li').count() == 2, 'v2.47: the History row opens the same list (send again, import the answer)')
     ans = {'labelCheckAnswer': 1, 'products': [
         {'code': 'label-t0', 'name': 'Крекери със сирене', 'kind': 'food', 'ingredients': 'Съставки: пшенично брашно, сирене (мляко), сол', 'en': 'wheat flour, cheese (milk), salt', 'note': 'milk was missing'},
         {'code': 'label-t1', 'name': '', 'kind': 'food', 'ingredients': None, 'note': 'no photo'},
@@ -2004,6 +2026,11 @@ with sync_playwright() as p:
     pg.evaluate("s => { localStorage.setItem('lc.products', JSON.stringify(s)); }", {'label-t0': seed['label-t0']}); reload_ready(pg)
     pg.click('#toCheckRow'); pg.wait_for_timeout(300)
     ok(pg.inner_text('#chkSend') == '1 an Claude senden' and no_side_scroll(pg) and pg.evaluate("document.getElementById('chkSend').getBoundingClientRect().height") <= 80, 'DE 320 px: "1 an Claude senden" fits')
+    ans1 = {'labelCheckAnswer': 1, 'products': [{'code': 'label-t0', 'name': '', 'kind': 'food', 'ingredients': 'Zutaten: Weizenmehl, Käse (Milch), Salz', 'note': ''}]}
+    pg.go_back(); pg.wait_for_timeout(200); pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(200)
+    pg.set_input_files('#importInput', files=[{'name': 'label-check-answer.json', 'mimeType': 'application/json', 'buffer': json.dumps(ans1, ensure_ascii=False).encode('utf-8')}]); pg.wait_for_timeout(600)
+    p0 = pg.evaluate("LC.state.products['label-t0']")
+    ok(p0.get('claude') and p0['ingredientsText'] == 'Zutaten: Weizenmehl, Käse (Milch), Salz', 'v2.47: "Import backup" also takes Claude\'s answer file')
     ctx.close()
 
     # ---- v2.41: Profile tab (user 27 Nov: allergens and things to avoid, "like seed oils, gluten", easy to open) ----

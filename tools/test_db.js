@@ -203,6 +203,27 @@ const ok = (cond, msg) => { if (!cond) { fails++; console.log('  FAIL: ' + msg);
       'Romanian label: E330, E223; wheat, milk, sulphites; eggs and soy as traces (' + ro.allergens.map(a => a.id).join() + ')');
   }
 
+  console.log('\n18 v2.47: fixes from the 25 photo reads');
+  {
+    const adds = t => LCDB.checkFood(t, 'bg').additives.map(a => a.e).join();
+    ok(adds('овкусители (Е621, Е627, Е631)') === 'E621,E627,E631' && adds('е-621') === 'E621', 'Cyrillic "Е621" / "е-621" is E621 (' + adds('овкусители (Е621, Е627, Е631)') + ')');
+    ok(LCDB.knownFood('Ечемик') !== undefined && adds('Ечемик, вода') === '', 'a Cyrillic word that starts with Е is not changed');
+    const mk = LCDB.checkFood('Zutaten: Zucker, Magermilchpulver, Kakaobutter, Vollmilchpulver. Kann Spuren von Erdnüssen enthalten.', 'de').allergens.find(a => a.id === 'milk');
+    ok(mk && !mk.trace && mk.posAll.length === 2 && mk.posAll.includes(2) && mk.posAll.includes(4), 'milk keeps every place: Magermilchpulver (2) and Vollmilchpulver (4) (' + (mk && mk.posAll) + ')');
+    const pe = LCDB.checkFood('Zutaten: Haferflocken, Kakaomasse. Kann Gerste, Milch und Erdnüsse enthalten.', 'de').allergens;
+    ok(pe.filter(a => a.trace).map(a => a.id).sort().join() === 'milk,peanuts' && pe.find(a => a.id === 'gluten' && !a.trace), '"Kann … enthalten" (no word "Spuren") is a traces line; oats stay gluten (' + pe.map(a => a.id + (a.trace ? '(t)' : '')) + ')');
+    const sp = t => LCDB.splitIngredients(t);
+    ok(sp('AQUA, GLYCERIN, CAPRYLHYDROXAMIC ACID. Fără parfum, parabeni și coloranți. Ohne Parfum.').join('|') === 'AQUA|GLYCERIN|CAPRYLHYDROXAMIC ACID', 'free-from claims ("Fără parfum …", "Ohne Parfum") are not ingredients (' + sp('AQUA, GLYCERIN, CAPRYLHYDROXAMIC ACID. Fără parfum, parabeni și coloranți. Ohne Parfum.').join('|') + ')');
+    ok(sp('AQUA, GLYCERIN. Parfümfrei.').join('|') === 'AQUA|GLYCERIN' && sp('Wasser, Sonnenblumenöl, glutenfrei').join('|') === 'Wasser|Sonnenblumenöl', 'one-word claims ("Parfümfrei", "glutenfrei") are not ingredients');
+    ok(sp('N,N-Bis(2-hydroxyethyl)cocosfettsäureamid, Citronensäure').length === 2 && sp("1,1'-Methylenbis[3-(3-hydroxymethyl-2,5-dioxoimidazolidin-4-yl)harnstoff], Wasser").length === 2, '"N,N-…" and "1,1\'-…" are not split at their first comma');
+    ok(sp('Dodecylpoly(oxyethylen)-2-hydrogensulfat, Natriumsalz; Wasser')[0].includes('Natriumsalz'), '"…, Natriumsalz" stays with its name');
+    const cos = t => LCDB.checkCosmetic(t, 'de').map(r => r.found ? r.name : '?' + r.text);
+    const de = cos('Ketoconazol 20 mg/g; Dodecylpoly(oxyethylen)-2-hydrogensulfat, Natriumsalz; Dinatriumdodecylpoly(oxyethylen)-3-hydrogensulfosuccinat; Macrogolglycerolcocoate (Ph.Eur.) [7 EO-Einheiten]; 1,1\'-Methylenbis[3-(3-hydroxymethyl-2,5-dioxoimidazolidin-4-yl)harnstoff]; N,N-Bis(2-hydroxyethyl)cocosfettsäureamid; Ponceau 4R (E124); Salzsäure 10%; Citronensäure; gereinigtes Wasser');
+    ['SODIUM LAURETH SULFATE', 'DISODIUM LAURETH SULFOSUCCINATE', 'PEG-7 GLYCERYL COCOATE', 'IMIDAZOLIDINYL UREA', 'COCAMIDE DEA', 'CI 16255', 'CITRIC ACID']
+      .forEach(n => ok(de.includes(n), 'German medicine (Ph.Eur.) name -> ' + n + ' (' + de.join(' | ') + ')'));
+    ok(!de.includes('CI 16150') && !de.includes('CI 14700'), 'Ponceau 4R (E124) is not Ponceau SX / 2R');
+  }
+
   console.log(fails ? `\n${fails} FAILED` : '\nALL PASSED');
   process.exit(fails ? 1 : 0);
 })();

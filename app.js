@@ -166,7 +166,9 @@
 
   // ---------- Text matching (your list) ----------
   // Same rule as the database: lower case, no accents, Cyrillic kept. "E 250" -> "e250".
-  const joinE = s => String(s || '').replace(/\b[eE][\s\-‐-―]*(\d{3,4}[a-zA-Z]?)\b/g, 'e$1');
+  // v2.47: also the Cyrillic "Е621" / "Е 621" of Bulgarian labels (small "е" only right before the digits: "е 100 г" is a normal word)
+  const joinE = s => String(s || '').replace(/(^|[^\p{L}\p{N}])Е(?=[\s‐-―-]?\d{3})/gu, '$1E').replace(/(^|[^\p{L}\p{N}])е(?=-?\d{3})/gu, '$1e')
+    .replace(/\b[eE][\s\-‐-―]*(\d{3,4}[a-zA-Z]?)\b/g, 'e$1');
   const nrm = s => (window.LCDB ? LCDB.norm(joinE(s)) : String(s || '').toLowerCase());
 
   const reCache = new Map();
@@ -267,6 +269,20 @@
       }
     }
 
+    // v2.47 (user OK): "may contain" (traces) are no ingredients. They leave the rows; your allergens among them give one line
+    // "May contain" (orange dot with the person mark) and the verdict "Check"; Details lists all traces.
+    let traces = null;
+    if (p.kind !== 'cosmetic' && p.kind !== 'household') {
+      const tr = rows.filter(r => r.trace && r.pos);
+      if (tr.length) {
+        rows = rows.filter(r => !(r.trace && r.pos));
+        const inIngr = new Set(rows.flatMap(r => (r.allergens || []).map(x => x.id)));
+        const seen = new Map();
+        for (const r of tr) for (const x of r.allergens || []) if (!inIngr.has(x.id) && !seen.has(x.id)) seen.set(x.id, x);
+        const all = [...seen.values()];
+        traces = { all, mine: all.filter(x => state.allergens.food.includes(x.id)), n: tr.length };
+      }
+    }
     rows.sort((x, y) => (x.pos || 999) - (y.pos || 999));
     rows.forEach((r, i) => { r.i = i; });
     // v2.39 (user 27 Nov, "only on this product"): an orange name you accepted in THIS product is shown for information, not as a concern
@@ -286,11 +302,11 @@
     // v2.15: a photo read is "No warnings" only with proof of a full list: at least 3 names and an end that is not cut off.
     const total = rows.filter(r => r.pos).length;
     const garbledN = rows.filter(r => r.garbled).length;
-    const weak = (p.read && p.read.photo && !noList ? weakRead(text, total, p.read.conf) : '') || (garbledN >= 2 && garbledN / Math.max(1, total) >= 0.2 ? 'Blur' : '');
-    const verdict = counts.red ? 'avoid' : counts.orange ? 'check' : rows.length ? (partial || noList || weak ? 'partial' : 'ok') : 'unknown';
+    const weak = (p.read && p.read.photo && !noList ? weakRead(text, total + (traces ? traces.n : 0), p.read.conf) : '') || (garbledN >= 2 && garbledN / Math.max(1, total) >= 0.2 ? 'Blur' : '');
+    const verdict = counts.red ? 'avoid' : counts.orange || (traces && traces.mine.length) ? 'check' : rows.length ? (partial || noList || weak ? 'partial' : 'ok') : 'unknown';
     return {
-      verdict, rows, counts, known, unknown, noList, weak, supplement: p.kind !== 'cosmetic' && p.kind !== 'household' && isSupplementText(text),
-      summary: summarize(verdict, rows, counts, { n: known, of: listed.length, noList, weak, total })
+      verdict, rows, counts, known, unknown, noList, weak, traces, supplement: p.kind !== 'cosmetic' && p.kind !== 'household' && isSupplementText(text),
+      summary: summarize(verdict, rows, counts, { n: known, of: listed.length, noList, weak, total }, traces)
         + (rows.some(r => r.accepted) ? ' ' + t('sum.accepted', { names: rows.filter(r => r.accepted).map(r => r.label).join(', ') }) : ''),
       total,
       fragrance: rows.filter(r => r.fragrance || r.allergen).length
@@ -304,7 +320,7 @@
     g = g || (r && r.group);
     if (!r) return g === 'nodata' ? '–' : '';
     if (g === 'red') return PERSONAL.has(r.why) || r.mine ? 'p' : '✕';
-    if (g === 'orange') return r.level === 'u' || r.ask ? '?' : '!';
+    if (g === 'orange') return r.why && PERSONAL.has(r.why) ? 'p' : r.level === 'u' || r.ask ? '?' : '!';   // v2.47: "may contain" your allergen
     if (g === 'info') return r.accepted ? '✓' : 'i';
     if (g === 'nodata') return '–';
     return '';
@@ -528,8 +544,10 @@
       else { const x = blank(null, r.matched, cap(r.matched.replace(/\*/g, ''))); x.rules.push(r); extra.push(x); }
     }
     for (const al of res.allergens) {
-      const row = at(al.pos);
-      if (row) row.allergens.push(al);
+      for (const ps of new Set([al.pos].concat(al.posAll || []))) {   // v2.47: every row with the allergen, not only the first
+        const row = at(ps);
+        if (row) row.allergens.push(al);
+      }
     }
 
     // Product data from Open Food Facts: additives and allergens the text did not show.
@@ -640,7 +658,7 @@
     return row.label;
   }
 
-  function summarize(verdict, rows, counts, kn) {
+  function summarize(verdict, rows, counts, kn, traces) {
     if (verdict === 'unknown') return t('sum.unknown');
     if (verdict === 'partial' && kn.weak && !kn.noList && !(kn.of && kn.n < kn.of)) return t('sum.weak' + kn.weak, kn);
     if (verdict === 'partial') return t(kn.noList && !(kn.of && kn.n < kn.of) ? 'sum.noList' : 'sum.partial', kn);
@@ -651,6 +669,7 @@
       return t(key, { name: shortName(r) });
     }
     if (verdict === 'check') {
+      if (!counts.orange && traces && traces.mine.length) return t('sum.may', { names: traces.mine.map(x => cap(x.name)).join(', ') });   // v2.47
       if (counts.orange > 1) return t('sum.orN', { n: counts.orange });
       const r = rows.find(x => x.group === 'orange');
       if (r.ask) return t('sum.ask', { name: niceName(r.ask.to) });
@@ -1063,6 +1082,12 @@
         hot.length > shown.length ? el('li', {}, el('button', { type: 'button', class: 'qrow more', onclick: () => openGroup(hot[shown.length].group),
           text: t('qa.more', { n: hot.length - shown.length }) })) : null));
     }
+    // v2.47: your allergens in "may contain" - one row each, like the names above (orange dot with the person mark)
+    if (a.traces && a.traces.mine.length) card.append(el('ul', { class: 'qlist', id: 'qMay' }, a.traces.mine.map(x => el('li', {},
+      el('button', { type: 'button', class: 'qrow', onclick: () => { toggleDetails(true); const m = $('mayAll'); if (m) m.scrollIntoView({ block: 'center', behavior: smooth() }); } },
+        rdot({ why: 'allergen', group: 'orange' }),
+        el('span', { class: 'qtx' }, el('strong', { text: cap(x.name) }), el('small', { text: t('may.small') })),
+        icon(ICON.chev, 'chev'))))));
     // v2.39: what you accepted in this product, with "Върни"
     const accRows = a.rows.filter(r => r.accepted);
     if (accRows.length) card.append(el('ul', { class: 'qlist qacc', id: 'qAcc' }, accRows.map(r => el('li', { class: 'qacc-li' },
@@ -1148,7 +1173,7 @@
   function frontLine(a) {
     let text = null;
     if (a.verdict === 'avoid') text = tn('qa.redN', a.counts.red);
-    else if (a.verdict === 'check') text = tn('qa.orangeN', a.counts.orange);
+    else if (a.verdict === 'check') text = a.counts.orange ? tn('qa.orangeN', a.counts.orange) : a.traces && a.traces.mine.length ? tn('may.front', a.traces.mine.length) : null;   // v2.47
     else if (a.verdict === 'ok') text = a.total ? tn('qa.checkedN', a.total) : null;
     else if (a.verdict === 'partial') text = a.noList ? t('qa.recheckLine') : a.unknown ? t('qa.known', { n: a.known, of: a.known + a.unknown }) : a.weak ? t('sum.weak' + a.weak, { total: a.total }) : t('qa.recheckLine');
     else if (a.verdict === 'unknown') text = a.summary;
@@ -1161,7 +1186,8 @@
       ? el('p', { class: 'legend', id: 'legend' }, GROUPS.filter(g => a.counts[g]).map(g =>
           el('span', {}, el('i', { class: 'g-' + g, 'aria-hidden': 'true' }), el('b', { text: String(a.counts[g]) }), ' ' + t('legend.' + g))))
       : null;
-    return el('div', { class: 'dtop', id: 'dtop' }, ...answerLines(a, p), knownLine(p, a), a.supplement ? el('p', { class: 'qk1', id: 'suppNote', text: t('note.supp') }) : null, stripOf(a), legend);
+    const may = a.traces && a.traces.all.length ? el('p', { class: 'qk1 mayall', id: 'mayAll', text: t('may.all', { names: a.traces.all.map(x => x.name).join(', ') }) }) : null;   // v2.47
+    return el('div', { class: 'dtop', id: 'dtop' }, ...answerLines(a, p), may, knownLine(p, a), a.supplement ? el('p', { class: 'qk1', id: 'suppNote', text: t('note.supp') }) : null, stripOf(a), legend);
   }
 
   // The colour strip (label order; a tap jumps to the ingredient). v2.34: at the top of "Details" (it was on the answer card).
@@ -1202,6 +1228,7 @@
     }
     if (a.verdict === 'check') {
       const or = a.rows.filter(r => r.group === 'orange');
+      if (!or.length && a.traces && a.traces.mine.length) return [el('p', { class: 'qy', text: t('qa.mayContain', { names: a.traces.mine.map(x => cap(x.name)).join(', ') }) })];   // v2.47
       return [el('p', { class: 'qy', text: names(or) }), el('p', { class: 'qr', text: t(or.every(r => r.ask) ? 'qa.orReasonAsk' : or.every(r => r.banCos) ? 'qa.orReasonCos' : 'qa.orReason') })];
     }
     if (a.verdict === 'ok') return [checkedLine(p)];
@@ -1925,6 +1952,7 @@
   // v2.34: History B: three counters (tap = only that colour), search by name / brand, one list.
   const HIST_COUNT = [['avoid', 'g-red'], ['check', 'g-orange'], ['ok', 'g-green']];
   function renderHistory() {
+    renderToCheckRow();
     const vs = state.history.map(h => verdictOf(h.code, h.verdict).verdict);
     if (state.histV && !vs.includes(state.histV)) state.histV = null;
     $('histCount').replaceChildren(...HIST_COUNT.map(([v, g]) => el('button', {
@@ -2198,7 +2226,13 @@
   }
   function readAdd(p, piece) {
     if ((p.readDropped || []).includes(piece)) {                        // v2.38: a name you took out comes back
-      setText(p, insertName(p.ingredientsText || '', piece));
+      const was = (p.readDropAt || {})[piece], txt0 = p.ingredientsText || '';
+      if (was && was.at <= txt0.length) {                               // v2.47: at the same place as before
+        const head = txt0.slice(0, was.at).replace(/[\s,;]+$/, ''), tail = txt0.slice(was.at).replace(/^[\s,;]+/, '');
+        const glue = /[.!?:]$/.test(head) || !head ? ' ' : ', ';
+        setText(p, (head + glue + piece + (tail ? (/^[.!?]/.test(tail) ? '' : ', ') + tail : '')).trim());
+      } else setText(p, insertName(txt0, piece));
+      if (p.readDropAt) { delete p.readDropAt[piece]; if (!Object.keys(p.readDropAt).length) delete p.readDropAt; }
       p.readDropped = p.readDropped.filter(x => x !== piece);
       readChanged(p, t('read.addedToast', { text: piece.length > 40 ? piece.slice(0, 38) + '…' : piece }));
       return;
@@ -2224,6 +2258,8 @@
     const dot = /[.!?]\s*$/.test(s) && !after ? '.' : '';           // "захар, Изхвърляй правилно. Може да …": the sentence end stays
     setText(p, (txt.slice(0, a0) + dot + txt.slice(b0)).replace(/\s{2,}/g, ' '));
     p.readDropped = (p.readDropped || []).concat(cleanSeg(s));
+    // v2.47: remember the place. Put back at the end, a "may contain" head came after its own list and the traces looked like ingredients.
+    p.readDropAt = Object.assign({}, p.readDropAt, { [cleanSeg(s)]: { at: a0 } });
     readSel = null;
     readChanged(p, t('read.droppedToast', { text: cleanSeg(s).length > 40 ? cleanSeg(s).slice(0, 38) + '…' : cleanSeg(s) }));
   }
@@ -3252,7 +3288,7 @@
   // heading word ("Ingredients", "Zutaten", "INGREDIENTS/SASTOJCI/СЪСТАВКИ" …) gets the box. You can still move it.
   const LIST_HEAD = /^(ingredients?|ingr[eé]dients?|zutaten|inhaltsstoffe|bestandteile|sastojci|съставки|състав|inci|skład|składniki|összetevők|osszetevok|složení|slozeni|zloženie|zlozenie|sestavine|ingrediente|ingredienti|ingredientes|ingrediënten|sastav)$/i;
   const isListHead = w => String(w || '').split(/[\/:|,.;]+/).some(p => LIST_HEAD.test(p.trim()));
-  const NOT_NAME = /zutaten|ingredient|inhaltsstoff|nährwert|nahrwert|nutrition|energie|energy|brennwert|хранителна|съставки|mindestens|haltbar|verpackung|recycl|hergestellt|made in|www\.|@/i;
+  const NOT_NAME = /zutaten|ingredient|inhaltsstoff|nährwert|nahrwert|nutrition|energie|energy|brennwert|хранителна|съставки|mindestens|haltbar|verpackung|recycl|hergestellt|made in|www\.|@|фолио|пластмас|хартия|стъкло|изхвърля|нетно|опаковано|партида|произведено|folie|kunststoff|papier|glas\b|plastic|paper|glass|net\s*(?:wt|weight|quantity)|(?:^|[^\p{L}\p{N}])\d+[.,]?\d*\s?(?:g|kg|ml|l|cl|г|кг|мл|л)\s?℮?(?:e|е)?(?![\p{L}\p{N}])/iu;   // v2.47: recycling signs and the net weight are never the name ("Фолио 200ge")
   let cropTouched = false, nameHint = '', findTask = null, lastFind = null, foundScript = null;   // v2.27: the alphabet the find step saw (the crop read does not ask again)
 
   // TSV from the reader -> pieces (paragraphs) with their lines, words and box (pixels of the image that was read).
@@ -4359,8 +4395,10 @@
     e.target.value = '';
     if (!file) return;
     let data;
-    try { data = JSON.parse(await file.text()); }
-    catch (err) { toast(t('toast.notBackup')); return; }
+    let raw = '';
+    try { raw = await file.text(); data = JSON.parse(raw); }
+    catch (err) { if (raw && importAnswer(raw)) return; toast(t('toast.notBackup')); return; }
+    if (data && data.labelCheckAnswer) { importAnswer(raw); return; }   // v2.47: Claude's answer file works here too
     if (!data || data.app !== 'label-check') { toast(t('toast.notBackup')); return; }
     if (!confirm(t('confirm.import'))) return;
     await applyBackup(data);
@@ -4813,6 +4851,7 @@
     $('bigSwitch').addEventListener('change', e => { state.bigText = e.target.checked; store.set('bigText', state.bigText); applyBig(); });
     $('toCheckRow').addEventListener('click', openCheck);
     $('chkSend').addEventListener('click', sendCheck);
+    $('histCheckRow').addEventListener('click', openCheck);
     $('chkFile').addEventListener('change', async e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) importAnswer(await f.text()); });
     $('chkPasteBtn').addEventListener('click', () => { if (importAnswer($('chkPaste').value)) { $('chkPaste').value = ''; $('chkPasteFold').open = false; } });
     $('packCard').addEventListener('toggle', () => { if ($('packCard').open) packInfo().then(renderPack); });
@@ -5193,11 +5232,18 @@
   function renderToCheckRow() {
     const row = $('toCheckRow');
     if (!row) return;
-    const n = toCheck().length;
-    row.hidden = !n;
-    if (n) $('toCheckSub').textContent = tn('chk.rowSub', n);
+    // v2.47 (user 28 Nov): after "Send to Claude" the row leaves the start screen; History keeps it (send again, import the answer)
+    const all = toCheck(), wait = all.filter(p => !p.sent).length;
+    row.hidden = !wait;
+    if (wait) $('toCheckSub').textContent = tn('chk.rowSub', wait);
+    const h = $('histCheckRow');
+    if (h) {
+      h.hidden = !all.length;
+      if (all.length) $('histCheckSub').textContent = wait ? tn('chk.rowSub', wait) : tn('chk.sentSub', all.length);
+    }
   }
   function openCheck() {
+    if (currentTab !== 'scan') setTab('scan');   // v2.47: it opens from History too
     showPanel('checkPanel');
     if (!history.state || history.state.view !== 'check') pushState({ tab: 'scan', view: 'check' });
     renderCheck();
