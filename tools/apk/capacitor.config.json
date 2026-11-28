@@ -1,0 +1,16 @@
+{
+  "appId": "io.github.harisonbd.labelcheck",
+  "appName": "Label Check",
+  "webDir": "www",
+  "appendUserAgent": "LabelCheckApp/1",
+  "backgroundColor": "#121417",
+  "server": {
+    "url": "https://harisonbd.github.io/label-check/",
+    "cleartext": false,
+    "errorPath": "index.html"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
+  }
+}

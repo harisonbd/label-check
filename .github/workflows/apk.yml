@@ -1,0 +1,29 @@
+# v2.45: builds the Label Check Android app (APK) and puts it on the Releases page (Obtainium reads it from there).
+# The app opens https://harisonbd.github.io/label-check/, so new versions of the website arrive by themselves.
+# Runs when something in tools/apk/ changes on main, or when you press "Run workflow".
+# Needs 2 repository secrets (Settings -> Secrets and variables -> Actions): APK_KEYSTORE_B64 and APK_KEYSTORE_PASS
+# (the signing key: Android installs an update only when it has the same key).
+name: Build Android app
+on:
+  push:
+    branches: [main]
+    paths: ['tools/apk/**']
+  workflow_dispatch: {}
+permissions:
+  contents: write
+concurrency:
+  group: apk
+  cancel-in-progress: false
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (fixed version, like pack.yml)
+      - name: Build, sign and publish the APK
+        env:
+          APK_KEYSTORE_B64: ${{ secrets.APK_KEYSTORE_B64 }}
+          APK_KEYSTORE_PASS: ${{ secrets.APK_KEYSTORE_PASS }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN: ${{ github.run_number }}
+        run: bash tools/apk/build.sh

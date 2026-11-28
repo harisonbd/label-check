@@ -1,0 +1,13 @@
+{
+  "name": "label-check-app",
+  "private": true,
+  "version": "1.0.0",
+  "description": "v2.45: the Label Check Android app (Capacitor). Built on GitHub by tools/apk/build.sh. The app opens the website.",
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/core": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.0.0"
+  }
+}

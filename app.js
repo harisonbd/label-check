@@ -1775,6 +1775,7 @@
     lines.push('', t('share.checked'));
     if (p.url) lines.push(p.url);
     const text = lines.join('\n');
+    if (await nativeShare(null, '', text)) return;
     if (navigator.share) {
       try { await navigator.share({ title: 'Label Check', text }); return; }
       catch (e) { if (e && e.name === 'AbortError') return; }
@@ -1783,6 +1784,17 @@
   }
 
   // ---------- v2.21: Report this result (one file; the person sends it, nothing is sent by the app) ----------
+  // v2.45: inside the Android app (APK) a page cannot download files and has no Web Share. The app gives "LCNative": a file or
+  // a text goes to the Android share menu (save to Files or Drive, send to Claude ...). In the browser it is not there: nothing changes.
+  const IN_APP = /LabelCheckApp\//.test(navigator.userAgent);
+  async function nativeShare(blob, name, text) {
+    const N = window.LCNative;
+    if (!N) return false;
+    try {
+      if (!blob) return !!N.shareText(String(text || ''));
+      return !!N.shareFile(String(name || 'file'), blob.type || 'application/octet-stream', b64(new Uint8Array(await blob.arrayBuffer())), String(text || ''));
+    } catch (e) { return false; }
+  }
   async function smallPhoto(file) {
     try {
       const bmp = await createImageBitmap(file);
@@ -1814,6 +1826,7 @@
       const d = new Date(), pad = n => String(n).padStart(2, '0');
       const name = 'label-check-for-claude-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.txt';
       const file = new File([CLAUDE_NOTE + JSON.stringify(data)], name, { type: 'text/plain' });
+      if (await nativeShare(file, name)) { toast(t('rep.sent')); return; }
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         try { await navigator.share({ files: [file], title: 'Label Check' }); toast(t('rep.sent')); return; }
         catch (e) { if (e && e.name === 'AbortError') return; }
@@ -3796,6 +3809,7 @@
   // Option 2: send the same photo to Claude (old way).
   async function shareToClaude(file) {
     const copied = await copyText(PROMPT);
+    if (await nativeShare(file, file.name || 'label.jpg', PROMPT)) { toast(copied ? t('toast.qCopied') : t('toast.pickClaude')); return; }
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try {
         await navigator.share({ files: [file], text: PROMPT });
@@ -4276,10 +4290,13 @@
     data.fronts = {};                                // v2.44: your product photos (small JPEGs) go into the file too
     for (const code of frontUrls.keys()) { const b = await getFront(code); if (b) data.fronts[code] = await blobToData(b); }
     const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' });
-    const a = el('a', { href: URL.createObjectURL(blob), download: 'label-check-backup-' + new Date().toISOString().slice(0, 10) + '.json' });
-    document.body.append(a);
-    a.click();
-    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    const fname = 'label-check-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+    if (!(await nativeShare(blob, fname))) {
+      const a = el('a', { href: URL.createObjectURL(blob), download: fname });
+      document.body.append(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    }
     store.set('lastBackup', Date.now());
     renderStart();
     toast(t('toast.backupSaved'));
@@ -4297,6 +4314,7 @@
     if (!list.length) { toast(t('toast.noProducts')); return; }
     const blob = new Blob([JSON.stringify({ app: 'label-check', kind: 'products', version: 1, exportedAt: new Date().toISOString(), products: list }, null, 1)], { type: 'application/json' });
     const file = new File([blob], 'label-check-products-' + new Date().toISOString().slice(0, 10) + '.json', { type: 'application/json' });
+    if (await nativeShare(file, file.name)) { toast(t('toast.prodShared', { n: list.length })); return; }
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try { await navigator.share({ files: [file], title: 'Label Check' }); toast(t('toast.prodShared', { n: list.length })); return; }
       catch (e) { if (e && e.name === 'AbortError') return; }
@@ -4683,6 +4701,10 @@
 
   // ---------- Start ----------
   function init() {
+    // v2.45: in the Android app "LCNative" comes with the second page load (Android adds it after the first load started): reload once
+    if (IN_APP && !window.LCNative) {
+      try { if (!sessionStorage.getItem('lc.nativeReload')) { sessionStorage.setItem('lc.nativeReload', '1'); location.reload(); return; } } catch (e) { /* go on without */ }
+    }
     LANG = pickLang();
     applyTheme();
     applyBig();
@@ -5217,8 +5239,8 @@
       const d = new Date(), pad = n => String(n).padStart(2, '0');
       const name = 'label-check-to-check-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '.txt';
       const file = new File([CLAUDE_BATCH_NOTE.replace('{n}', String(products.length)) + JSON.stringify(data)], name, { type: 'text/plain' });
-      let done = false;
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      let done = await nativeShare(file, name);
+      if (!done && navigator.canShare && navigator.canShare({ files: [file] })) {
         try { await navigator.share({ files: [file], title: 'Label Check' }); done = true; }
         catch (e) { if (e && e.name === 'AbortError') return; }
       }

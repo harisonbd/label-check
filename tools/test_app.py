@@ -563,7 +563,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.44' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.45' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -1038,7 +1038,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v62')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v63')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1596,16 +1596,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v62'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v63'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v62' not in keys: break
+        if 'label-check-v63' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v62' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v63' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
 
@@ -2258,6 +2258,32 @@ with sync_playwright() as p:
         ok(no_side_scroll(pg) and pg.is_visible('#ghConnect'), '%s %d px: the country and GitHub cards fit' % (lang, w))
         pg.screenshot(path=os.path.join(SHOTS, 'v244-cards-%s-%d.png' % (lang[:2], w)), full_page=True)
         ctx.close()
+
+    # ---- v2.45: inside the Android app (APK): files and texts go to the Android share menu (LCNative) ----
+    print('v2.45: Android app bridge')
+    ctx = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, locale='bg-BG', color_scheme='dark', service_workers='block',
+                        user_agent='Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36 LabelCheckApp/1')
+    ctx.route('https://world.openfoodfacts.org/**', fake_api); ctx.route('https://world.openbeautyfacts.org/**', fake_api)
+    # like Android: the bridge is there only from the second page load
+    ctx.add_init_script("""window.__loads = (+sessionStorage.getItem('t.loads') || 0) + 1; sessionStorage.setItem('t.loads', window.__loads);
+      if (window.__loads > 1) { window.__shared = []; window.LCNative = { shareFile: (n, m, b, t) => { window.__shared.push(['file', n, m, b, t]); return true; }, shareText: t => { window.__shared.push(['text', t]); return true; } }; }""")
+    pg = ctx.new_page(); pg.on('pageerror', lambda e: errors.append(str(e)))
+    pg.goto(base); pg.wait_for_function('window.LC && window.LCNative', timeout=15000); pg.evaluate('LC.dbReady')
+    ok(pg.evaluate("window.__loads") == 2 and pg.evaluate("sessionStorage.getItem('lc.nativeReload')") == '1', 'in the app: the page reloads once until LCNative is there (loads: %s)' % pg.evaluate("window.__loads"))
+    reload_ready(pg); pg.wait_for_timeout(300)
+    ok(pg.evaluate("window.__loads") == 3 and pg.evaluate("!!window.LCNative"), 'no reload loop: the next start opens at once')
+    read_label(pg, 'Съставки: вода, захар, сол', 'food', 'Тест апп')
+    pg.click('#moreBtn'); pg.wait_for_selector('#moreMenu'); pg.click('#mShare'); pg.wait_for_timeout(400)
+    sh = pg.evaluate("window.__shared")
+    ok(sh and sh[-1][0] == 'text' and 'Тест апп' in sh[-1][1], '"Сподели" -> the Android share menu with the text')
+    pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(200); open_card(pg, 'moreFold')
+    pg.click('#exportBtn'); pg.wait_for_timeout(800)
+    sh = pg.evaluate("window.__shared")
+    import base64 as _b64b
+    f = sh[-1] if sh else None
+    ok(f and f[0] == 'file' and f[1].startswith('label-check-backup-') and f[2] == 'application/json' and json.loads(_b64b.b64decode(f[3]).decode('utf-8')).get('app') == 'label-check',
+       '"Изнеси копие" -> the backup file goes to the Android share menu (save to Files / Drive)')
+    ctx.close()
 
     for lang, w, dark in (('en-GB', 320, False), ('de-AT', 390, False)):
         ctx, pg = new_page(b, base, lang, dark=dark, width=w)
