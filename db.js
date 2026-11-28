@@ -9,7 +9,7 @@
   const SEV = { b: 5, c: 4, u: 3, r: 2, n: 1 };
   const COSING_URL = 'https://ec.europa.eu/growth/tools-databases/cosing/reference/annexes/list/';
   let META = null, COS = null, FOOD = null, FOODNAMES = null;
-  let cosIndex = null, eIndex = null, foodNames = null, allergenNames = null;
+  let cosIndex = null, eIndex = null, foodNames = null, allergenNames = null, EMA = null;
 
   // Lower case, ß -> ss, no accents, keep a-z, 0-9 and Cyrillic. Same rule on both sides of a match.
   // v2.47: Bulgarian labels often write E-numbers with the Cyrillic letter ("Е621"): it becomes the Latin "e621".
@@ -92,6 +92,8 @@
     'POLY(OXYETHYLEN)-120-METHYL(D-GLUCOPYRANOSID)DIOLEAT': 'PEG-120 METHYL GLUCOSE DIOLEATE', 'MACROGOLGLYCEROLCOCOATE': 'PEG-7 GLYCERYL COCOATE',
     "1,1'-METHYLENBIS[3-(3-HYDROXYMETHYL-2,5-DIOXOIMIDAZOLIDIN-4-YL)HARNSTOFF]": 'IMIDAZOLIDINYL UREA',
     'N,N-BIS(2-HYDROXYETHYL)COCOSFETTSÄUREAMID': 'COCAMIDE DEA', 'COCOSFETTSÄUREDIETHANOLAMID': 'COCAMIDE DEA',
+    'WOLLWACHS': 'LANOLIN', 'WOLLWACHSALKOHOLE': 'LANOLIN ALCOHOL', 'ARACHIDIS OLEUM': 'ARACHIS HYPOGAEA OIL', 'ARACHIDIS OLEUM RAFFINATUM': 'ARACHIS HYPOGAEA OIL',   // v2.50: medicine labels
+    'ERDNUSSÖL': 'ARACHIS HYPOGAEA OIL', 'RAFFINIERTES ERDNUSSÖL': 'ARACHIS HYPOGAEA OIL', 'SOJAÖL': 'GLYCINE SOJA OIL', 'SESAMÖL': 'SESAMUM INDICUM SEED OIL', 'DEXPANTHENOL': 'PANTHENOL',
     'CITRONENSÄURE': 'CITRIC ACID', 'NATRIUMEDETAT': 'DISODIUM EDTA', 'DINATRIUMEDETAT': 'DISODIUM EDTA', 'POLYSORBAT 80': 'POLYSORBATE 80',
     'BUTYLHYDROXYTOLUOL': 'BHT', 'METHYL-4-HYDROXYBENZOAT': 'METHYLPARABEN', 'PROPYL-4-HYDROXYBENZOAT': 'PROPYLPARABEN',
     'HOCHDISPERSES SILICIUMDIOXID': 'SILICA', 'WEISSES VASELIN': 'PETROLATUM', 'DICKFLÜSSIGES PARAFFIN': 'PARAFFINUM LIQUIDUM',
@@ -107,6 +109,11 @@
   async function load(base, fetchFn) {
     const get = fetchFn || (async u => (await fetch(u)).json());
     [META, COS, FOOD] = await Promise.all(['db-meta.json', 'db-cosmetics.json', 'db-food.json'].map(f => get(base + f)));
+    // v2.50: EU list of medicine fillers with a known effect (EMA). Optional: without it the app works as before.
+    try {
+      EMA = await get(base + 'ema-excipients.json');
+      for (const it of EMA.items) it.rx = new RegExp('(^|[^\\p{L}\\p{N}])(?:' + it.re + ')(?![\\p{L}\\p{N}])', 'iu');
+    } catch (e) { EMA = null; }
     cosIndex = new Map();
     const fragFn = new Set(META.functions.map((f, i) => (/^(Fragrance|Perfuming)$/.test(f.en) ? i : -1)).filter(i => i >= 0));
     for (const it of COS.items) {
@@ -171,8 +178,11 @@
     return String(text || '').replace(/^\s*(ingredients?|ingr[eé]dients?|inci|zutaten|inhaltsstoffe|bestandteile|hilfsstoffe|excipients?|съставки|състав|помощни вещества|други вещества|composition|összetevők|složení|zloženie|sestavine|ingrediente)\s*[:：]\s*/i, '');
   }
   // Split at , ; • · and new lines that are not inside brackets. A comma between digits (1,3-diol) does not split.
+  // v2.50: medicine labels: "Wirkstoff: X 50 mg/g. Sonstige Bestandteile: A, B" -> "X 50 mg/g; A, B" (the headings are no names)
+  const MED_HEAD_RE = /(^|[.;]\s*)(?:wirkstoff(?:e)?|arzneilich wirksame bestandteile|active (?:substance|ingredient)s?|активн(?:о|ото|и|ите) веществ(?:о|а)|sonstige bestandteile|hilfsstoffe|excipients?|помощни вещества|други съставки)\s*[:：]\s*/giu;
+  const medHeads = t => String(t || '').replace(MED_HEAD_RE, (m, pre, off) => (off === 0 && !pre ? '' : '; '));
   function splitIngredients(text) {
-    const s = stripClaims(stripLabelWord(text)), out = [];
+    const s = stripClaims(medHeads(stripLabelWord(text))), out = [];
     let depth = 0, cur = '';
     for (let i = 0; i < s.length; i++) {
       const ch = s[i];
@@ -241,7 +251,7 @@
     if (outside && outside !== s) tries.push(outside);
     const bare = s.replace(/\([^)]*\)|\[[^\]]*\]/g, ' ').trim();   // v2.47: also without [ … ]
     if (bare && bare !== s && bare !== outside) tries.push(bare);
-    const noPct = bare.replace(/\s*\d+(?:[.,]\d+)?\s*%/g, ' ').trim();   // v2.47: "Salzsäure 10%" -> "Salzsäure"
+    const noPct = bare.replace(/\s*\d+(?:[.,]\d+)?\s*(?:%|(?:mg|g|µg|mcg)(?:\/(?:g|ml))?(?![\p{L}]))/gu, ' ').trim();   // v2.47: "Salzsäure 10%" -> "Salzsäure"; v2.50: "Dexpanthenol 50 mg/g"
     if (noPct && noPct !== bare) tries.push(noPct);
     for (const m of s.matchAll(/\(([^)]*)\)/g)) tries.push(m[1]);
     for (const t of tries.slice()) if (t.includes('/')) tries.push(...t.split('/'));
@@ -364,6 +374,28 @@
         pct: Math.round(amount / limit * 100), over: amount > limit });
     }
     return out;
+  }
+
+  // ---------- v2.50: medicines: fillers (excipients) with a known effect, EMA list
+  const MEDICINE_RE = /wirkstoff|sonstige bestandteile|hilfsstoff|arzneimittel|gebrauchsinformation|zul\.?-?nr|ph\.? ?eur|excipient|active (?:substance|ingredient)|each (?:tablet|capsule|film-coated tablet|lozenge|sachet|ml) contains|помощн(?:и|о) веществ|активн(?:о|и|ото) веществ|лекарствен|всяка таблетка съдържа|homöopath|хомеопат|\d\s?mg\/(?:g|ml)(?![\p{L}])/iu;
+  const isMedicine = text => MEDICINE_RE.test(String(text || ''));
+  // route: 'o' = by mouth (food type), 't' = on the skin or in the mouth (cosmetic / household type)
+  // -> [{ id, name, warn, al }] in label order
+  function checkExcipients(text, route, lang) {
+    if (!EMA) return [];
+    const s = String(text || ''), out = [];
+    for (const it of EMA.items) {
+      if (!it.r.includes(route)) continue;
+      const m = it.rx.exec(s);
+      if (!m) continue;
+      const end = m.index + m[0].length;   // a claim is no filler: "paraben-free", "ohne Parabene", "free from lactose"
+      if (/^[\s-]*(?:free|frei|freie?s?)(?![\p{L}])/iu.test(s.slice(end, end + 8))) continue;
+      if (/(?:free from|without|ohne|frei von|без|sans|senza|fără|bez|no)\s+(?:[\p{L}-]+,?\s+){0,3}$/iu.test(s.slice(Math.max(0, m.index - 40), m.index + m[1].length))) continue;
+      const txt = (route === 't' && it.wt) ? it.wt : it.w || null;
+      if (!txt && !(it.al && it.al.length)) continue;
+      out.push({ id: it.id, at: m.index, name: it.n[lang] || it.n.en, warn: txt ? (txt[lang] || txt.en) : '', al: it.al || [] });
+    }
+    return out.sort((x, y) => x.at - y.at);
   }
 
   // ---------- food
@@ -842,6 +874,7 @@
     return out;
   }
 
-  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, checkDoses, suggestCosmetic, closest, wordGuess, guessCosmetic, closestFood, splitGlued, findInside, findNames, checkFood, knownFood, suggestNames, cosAllergens, foodAllergens, search, foodToCosmetic, meta: () => META, SEV };
+  const api = { load, norm, splitIngredients, labelSegments, checkCosmetic, checkDoses, isMedicine, checkExcipients, emaSource: () => EMA && EMA.source,
+    excipientMatch: (id, s) => { const it = EMA && EMA.items.find(x => x.id === id); return !!(it && it.rx.test(String(s || ''))); }, suggestCosmetic, closest, wordGuess, guessCosmetic, closestFood, splitGlued, findInside, findNames, checkFood, knownFood, suggestNames, cosAllergens, foodAllergens, search, foodToCosmetic, meta: () => META, SEV };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.LCDB = api;
 })(typeof window !== 'undefined' ? window : globalThis);

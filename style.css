@@ -1342,3 +1342,8 @@ details.lcard[open] > summary .lct small { white-space: normal; }
 #avoidSub:empty + #algSub:not(:empty)::before { content: ""; }
 #setCard details.fold#rulesFold { border-bottom: 0; margin-top: 8px; }
 #packCard .offl { margin-top: 14px; }
+
+/* v2.50: medicine fillers with a known effect (EMA) in Details */
+.medall ul { margin: 6px 0 0; padding-left: 18px; }
+.medall li { margin: 4px 0; }
+.medall li b { font-weight: 600; color: var(--ink); }

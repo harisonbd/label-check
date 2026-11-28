@@ -290,6 +290,30 @@
       doses = LCDB.checkDoses(doseText, LANG).sort((x, y) => y.pct - x.pct);
       for (const d of doses) if (d.over || d.pct >= DOSE_NEAR) rows.push(doseRow(d));   // user 28 Nov: also "close" (blue i)
     }
+    // v2.50: a medicine: fillers with a known effect (EU list, EMA). Your allergens among them = a red person row
+    // (only when no row has that allergen yet); every filler with its EU warning is in Details.
+    let meds = null;
+    if (LCDB.isMedicine(doseText)) {
+      meds = LCDB.checkExcipients(doseText, p.kind === 'cosmetic' || p.kind === 'household' ? 't' : 'o', LANG);
+      const have = new Set(rows.flatMap(r => (r.allergens || []).concat(r.tickedAllergens || []).map(x => x.id)));
+      const alName = new Map(LCDB.foodAllergens(LANG).map(x => [x.id, x.name]));
+      for (const m of meds) {
+        const hit = m.al.filter(id => state.allergens.food.includes(id) && !have.has(id));
+        if (!hit.length) continue;
+        const row = medRow(m, hit.map(id => ({ id, name: alName.get(id) || id })));
+        const at = rows.findIndex(r => r.pos && LCDB.excipientMatch(m.id, r.text || r.label));   // the ingredient itself turns red, at its place
+        if (at >= 0) rows[at] = Object.assign(row, { pos: rows[at].pos, text: rows[at].text, label: cap(cleanSeg(rows[at].text || rows[at].label)) });
+        else rows.push(row);
+        hit.forEach(id => have.add(id));
+      }
+      // user 28 Nov ("both"): every other filler with an EU warning also gets a blue "i" row on the main screen,
+      // unless that ingredient is already red or orange
+      for (const m of meds) {
+        if (!m.warn || rows.some(r => r.med && r.med.id === m.id)) continue;
+        if (rows.some(r => r.pos && (r.group === 'red' || r.group === 'orange') && LCDB.excipientMatch(m.id, r.text || r.label))) continue;
+        rows.push(medInfoRow(m));
+      }
+    }
     rows.sort((x, y) => (x.pos || 999) - (y.pos || 999));
     rows.forEach((r, i) => { r.i = i; });
     // v2.39 (user 27 Nov, "only on this product"): an orange name you accepted in THIS product is shown for information, not as a concern
@@ -300,7 +324,7 @@
     for (const r of rows) counts[r.group]++;
     // Cosmetics / household: how many names the app knows. With many unknown names "No warnings" would say too much.
     const typedFood = !!(p.read && p.read.typed) && p.kind !== 'cosmetic' && p.kind !== 'household';   // v2.35: typed food names count too
-    const listed = rows.filter(r => r.pos && (r.kind === 'cosmetic' || typedFood));
+    const listed = rows.filter(r => r.pos && (r.kind === 'cosmetic' || typedFood || (r.med && (p.kind === 'cosmetic' || p.kind === 'household'))));   // v2.50: a medicine filler row is a known name
     const unknown = listed.filter(isUnknown).length, known = listed.length - unknown;
     const partial = listed.length >= 3 && known / listed.length < PARTIAL_MIN;
     // v2.13: text read from a photo where the app found no ingredients heading ("Zutaten:", "Съставки:" …) may be the
@@ -312,7 +336,7 @@
     const weak = (p.read && p.read.photo && !noList ? weakRead(text, total + (traces ? traces.n : 0), p.read.conf) : '') || (garbledN >= 2 && garbledN / Math.max(1, total) >= 0.2 ? 'Blur' : '');
     const verdict = counts.red ? 'avoid' : counts.orange || (traces && traces.mine.length) ? 'check' : rows.length ? (partial || noList || weak ? 'partial' : 'ok') : 'unknown';
     return {
-      verdict, rows, counts, known, unknown, noList, weak, traces, doses, supplement: p.kind !== 'cosmetic' && p.kind !== 'household' && isSupplementText(text),
+      verdict, rows, counts, known, unknown, noList, weak, traces, doses, meds, supplement: p.kind !== 'cosmetic' && p.kind !== 'household' && isSupplementText(text),
       summary: summarize(verdict, rows, counts, { n: known, of: listed.length, noList, weak, total }, traces)
         + (rows.some(r => r.accepted) ? ' ' + t('sum.accepted', { names: rows.filter(r => r.accepted).map(r => r.label).join(', ') }) : ''),
       total,
@@ -381,6 +405,16 @@
       pos: null, kind: 'extra', label: d.name, text: '', level: near ? 'r' : 'c', group: near ? 'info' : 'orange', why: near ? 'doseNear' : 'dose', dose: d,
       sub: { lvl: { text: t(near ? 'tag.doseNear' : 'tag.dose'), g: near ? 'info' : 'orange' }, parts: [t('dose.line', { n: numL(d.amount), u: d.unit, max: numL(d.limit) })] }
     };
+  }
+  function medRow(m, ticked) {   // v2.50: a medicine filler that is one of your allergens (EMA list: peanut oil, lactose, wheat starch …)
+    return {
+      pos: null, kind: 'extra', label: m.name, text: '', level: 'n', group: 'red', why: 'allergen', med: m, allergens: ticked, tickedAllergens: ticked,
+      sub: { lvl: { text: t('tag.allergenYours'), g: 'red' }, parts: ticked.map(x => cap(x.name)).concat([t('med.filler')]) }
+    };
+  }
+  function medInfoRow(m) {   // v2.50: a medicine filler with an EU warning (blue i, information)
+    const first = (m.warn.match(/^.*?(?<![\s(.]\p{L})[.!?](?=\s+\p{Lu}\p{Ll})/u) || [m.warn])[0];   // first sentence; "e.g.", "z. B.", "напр." do not end it
+    return { pos: null, kind: 'extra', label: m.name, text: '', level: 'r', group: 'info', why: 'medInfo', med: m, sub: { lvl: { text: t('tag.medInfo'), g: 'info' }, parts: [first] } };
   }
   function personalRow(mine) {
     return {
@@ -1084,7 +1118,7 @@
           el('i', { 'aria-hidden': 'true' }), el('span', {}, el('b', { text: String(a.counts[g]) }), ' ' + t('legend.' + g))))));
     }
     // v2.34: the red and orange names, each with a short "why"; a tap opens the ingredient
-    const hot = a.rows.filter(r => r.group === 'red').concat(a.rows.filter(r => r.group === 'orange'), a.rows.filter(r => r.why === 'doseNear'));   // v2.48: + doses close to the limit
+    const hot = a.rows.filter(r => r.group === 'red').concat(a.rows.filter(r => r.group === 'orange'), a.rows.filter(r => r.why === 'doseNear' || r.why === 'medInfo'));   // v2.48: + doses close to the limit; v2.50: + medicine fillers
     if (hot.length) {
       const shown = hot.slice(0, HOT_MAX);
       card.append(el('ul', { class: 'qlist', id: 'qList' },
@@ -1210,7 +1244,11 @@
     const may = a.traces && a.traces.all.length ? el('p', { class: 'qk1 mayall', id: 'mayAll', text: t('may.all', { names: a.traces.all.map(x => x.name).join(', ') }) }) : null;   // v2.47
     // v2.48: every dose the app found, against the EU upper limit (adults)
     const doseAll = a.doses && a.doses.length ? el('p', { class: 'qk1', id: 'doseAll', text: t('dose.all', { list: a.doses.map(d => d.name + ' ' + numL(d.amount) + ' ' + d.unit + ' (' + d.pct + ' %)').join(', ') }) }) : null;
-    return el('div', { class: 'dtop', id: 'dtop' }, ...answerLines(a, p), may, knownLine(p, a), doseAll, a.supplement ? el('p', { class: 'qk1', id: 'suppNote', text: t('note.supp') }) : null, stripOf(a), legend);
+    // v2.50: a medicine: every filler with a known effect and its EU warning (EMA list)
+    const medAll = a.meds ? el('div', { class: 'qk1 medall', id: 'medAll' },
+      el('strong', { text: t(a.meds.some(m => m.warn) ? 'med.head' : 'med.none') }),
+      a.meds.some(m => m.warn) ? el('ul', {}, a.meds.filter(m => m.warn).map(m => el('li', {}, el('b', { text: m.name + ': ' }), m.warn))) : null) : null;
+    return el('div', { class: 'dtop', id: 'dtop' }, ...answerLines(a, p), may, knownLine(p, a), doseAll, medAll, a.supplement ? el('p', { class: 'qk1', id: 'suppNote', text: t('note.supp') }) : null, stripOf(a), legend);
   }
 
   // The colour strip (label order; a tap jumps to the ingredient). v2.34: at the top of "Details" (it was on the answer card).
@@ -1649,7 +1687,7 @@
   function chipOf(r) {
     if (r.accepted) return t('qa.acceptedLine');   // v2.39
     if (r.why === 'mine' && r.mine && r.mine.item && r.mine.item.preset) return t('chip.mine') + ': ' + cap(r.mine.name);   // v2.41: "Твоят списък: Семенни масла"
-    const k = r.ask ? 'chip.ask' : r.why === 'dose' ? 'tag.dose' : r.why === 'doseNear' ? 'tag.doseNear' : r.why === 'b' ? 'chip.b' : r.why === 'use' ? 'chip.use' : r.why === 'mine' ? 'chip.mine' : r.why === 'allergen' ? (r.traceOnly ? 'chip.traces' : 'chip.yourAlg')
+    const k = r.ask ? 'chip.ask' : r.why === 'dose' ? 'tag.dose' : r.why === 'doseNear' ? 'tag.doseNear' : r.why === 'medInfo' ? 'tag.medInfo' : r.why === 'b' ? 'chip.b' : r.why === 'use' ? 'chip.use' : r.why === 'mine' ? 'chip.mine' : r.why === 'allergen' ? (r.traceOnly ? 'chip.traces' : 'chip.yourAlg')
       : r.why === 'fragrance' ? 'chip.frag' : r.why === 'vegan' ? 'chip.vegan' : r.banCos ? 'chip.banCos'
       : r.group === 'orange' ? (r.level === 'u' ? 'chip.u' : 'chip.c')
       : r.group === 'info' ? (r.level === 'r' ? 'chip.r' : r.traceOnly ? 'chip.traces' : r.allergen || (r.allergens && r.allergens.length) ? 'chip.alg' : 'chip.maybeVegan') : null;

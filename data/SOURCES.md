@@ -22,6 +22,8 @@ Built 2026-11-02 by `tools/build_db.py`. Works offline. Test: `node tools/test_d
 | [EU food additives database](https://ec.europa.eu/food/food-feed-portal/screen/food-additives/search) | which E-numbers are allowed in the EU | 2026-10-20 |
 | [Open Food Facts taxonomies](https://github.com/openfoodfacts/openfoodfacts-server/tree/main/taxonomies) (ODbL) | additive and allergen names in EN/DE/BG, EFSA links, vegan flags | 2026-10-20 |
 | Regulation (EU) 1169/2011, Annex II | the 14 food allergens | – |
+| [EMA / European Commission: Annex to the guideline "Excipients in the labelling and package leaflet of medicinal products for human use" (SANTE-2017-11668), revision 5](https://www.ema.europa.eu/en/annex-european-commission-guideline-excipients-labelling-package-leaflet-medicinal-products-human) – all-languages XLSX, sheets EN/DE/BG | medicines: 45 fillers with a known effect and their package-leaflet warnings → `ema-excipients.json` (built by `tools/build_ema.py`) | 2026-11-28 |
+| [EFSA: Overview on Tolerable Upper Intake Levels](https://www.efsa.europa.eu/sites/default/files/2024-05/ul-summary-report.pdf), version 11 (Aug 2025) | supplements: upper limits for adults (in `db.js`, checkDoses) | 2026-11-28 |
 
 Credit in the app: "Ingredient data: European Commission (CosIng, food additives database), edlists.org, IARC/WHO, Open Food Facts (ODbL)."
 

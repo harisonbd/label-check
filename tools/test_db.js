@@ -241,6 +241,26 @@ const ok = (cond, msg) => { if (!cond) { fails++; console.log('  FAIL: ' + msg);
     ok(LCDB.checkDoses('Magnesium 400 mg, Vitamin B6 1,4 mg', 'de').find(x => x.id === 'magnesium').pct === 160, 'percent of the limit (400 / 250 = 160 %)');
   }
 
+  console.log('\n20 v2.50: medicine fillers with a known effect (EMA list, revision 5)');
+  {
+    const ex = (t, r, lang) => LCDB.checkExcipients(t, r, lang || 'en').map(x => x.id + (x.al.length ? '[' + x.al.join('+') + ']' : '')).join(' ');
+    ok(LCDB.emaSource().includes('revision 5'), 'the EMA list is loaded (revision 5)');
+    ok(LCDB.isMedicine('Wirkstoff: Ketoconazol 20 mg/g. Sonstige Bestandteile: Wasser') && LCDB.isMedicine('Kalium phosphoricum D6 250 mg; помощни вещества: лактоза монохидрат')
+      && LCDB.isMedicine('Each film-coated tablet contains 400 mg ibuprofen. Excipients: lactose') && LCDB.isMedicine('Ketoconazol 20 mg/g; Macrogolglycerolcocoate (Ph.Eur.)'), 'medicine labels are seen (Wirkstoff, помощни вещества, excipients, 20 mg/g, Ph.Eur.)');
+    ok(!LCDB.isMedicine('Zutaten: Zucker, Weizenmehl, Milchpulver') && !LCDB.isMedicine('Ingredients: Aqua, Glycerin, Parfum') && !LCDB.isMedicine('Nahrungsergänzungsmittel. Magnesium 400 mg'), 'food, cosmetics and supplements are no medicine');
+    ok(ex('Sonstige Bestandteile: Arachidis oleum raffinatum, Cetylstearylalkohol (Ph.Eur.), Wollwachs, Propylenglycol', 't') === 'peanutOil[peanuts+soybeans] cetostearyl lanolin propyleneGlycol', 'a cream: peanut oil (Latin name, your allergens peanuts + soy), cetostearyl alcohol, wool fat, propylene glycol (' + ex('Arachidis oleum raffinatum, Cetylstearylalkohol (Ph.Eur.), Wollwachs, Propylenglycol', 't') + ')');
+    ok(ex('Excipients: lactose monohydrate, sucrose, wheat starch, E 110, sodium metabisulfite', 'o') === 'lactose[milk] sucrose wheatStarch[gluten] azo sulphites[sulphur-dioxide-and-sulphites]', 'tablets (by mouth): lactose, sucrose, wheat starch, azo dye E 110, sulphites');
+    ok(ex('Ponceau 4R (E124), Natriummetabisulfit', 't') === '' && ex('Kaliumsorbat, Methylparaben', 'o') === 'parabens', 'the route counts: azo dyes and sulphites only by mouth, sorbates only on the skin; parabens by mouth and on the skin');
+    ok(ex('Kaliumsorbat; Methylparaben, Propyl-4-hydroxybenzoat', 't') === 'sorbic parabens', 'compound names: Kaliumsorbat, Methylparaben, Propyl-4-hydroxybenzoat');
+    ok(ex('Wirkstoff: X. Paraben-free. Ohne Parabene. Free from lactose. Parfum', 't') === 'fragrance', 'claims are no fillers ("Paraben-free", "Ohne Parabene", "Free from lactose")');
+    ok(ex('Benzyl benzoate, Cetostearyl alcohol', 't') === 'cetostearyl' && ex('Ethanol 96 %', 'o') === '', 'benzyl benzoate is no benzoate; ethanol by mouth has no plain warning (amount-only)');
+    const de = LCDB.checkExcipients('Sonstige Bestandteile: Lactose-Monohydrat', 'o', 'de')[0], bg = LCDB.checkExcipients('помощни вещества: лактоза монохидрат', 'o', 'bg')[0];
+    ok(de && de.name === 'Lactose' && de.warn.startsWith('Bitte nehmen Sie dieses Arzneimittel erst nach Rücksprache') && bg && bg.name === 'Лактоза' && bg.warn.startsWith('Ако Вашият лекар Ви е казал'), 'the EU warning in German and Bulgarian');
+    ok(LCDB.splitIngredients('Wirkstoff: Dexpanthenol 50 mg/g. Sonstige Bestandteile: Arachidis oleum raffinatum, Wollwachs').join('|') === 'Dexpanthenol 50 mg/g|Arachidis oleum raffinatum|Wollwachs', '"Wirkstoff:" and "Sonstige Bestandteile:" are headings, not part of a name');
+    const cz = LCDB.checkCosmetic('Dexpanthenol 50 mg/g; Arachidis oleum raffinatum; Wollwachs', 'de').map(r => r.found ? r.name : '?');
+    ok(cz.join('|') === 'PANTHENOL|ARACHIS HYPOGAEA OIL|LANOLIN', 'medicine names: Dexpanthenol 50 mg/g = PANTHENOL, Arachidis oleum = ARACHIS HYPOGAEA OIL, Wollwachs = LANOLIN (' + cz + ')');
+  }
+
   console.log(fails ? `\n${fails} FAILED` : '\nALL PASSED');
   process.exit(fails ? 1 : 0);
 })();

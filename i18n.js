@@ -151,6 +151,8 @@ window.LC_TEXT = {
     'twin.checked': "Already checked: {name}", 'twin.seen': "Photographed before: {name}", 'twin.why': "{n}% of the names are the same", 'twin.open': "Open",
     'prof.lead': "Tap what matters to you. It shows red in every result.", 'prof.alg': "My allergens", 'prof.food': "I avoid in food", 'prof.cos': "I avoid in cosmetics", 'prof.diet': "Diet", 'prof.more': "+ {n} more", 'prof.own': "+ my own word", 'prof.frag': "Fragrance", 'prof.vegan': "Vegan",
     'chk.row': "To check by Claude", 'chk.rowSub.one': "1 photo read waits", 'chk.rowSub.other': "{n} photo reads wait", 'chk.title': "To check", 'chk.lead': "Photo reads that are not marked as correct. Send them to Claude in one file. Claude sends back a file with the correct lists. Import it, and they are in your database.", 'chk.empty': "Nothing to check. Photo reads without ✓ come here.", 'chk.noName': "No name", 'chk.photos.one': "1 photo", 'chk.photos.other': "{n} photos", 'chk.noPhoto': "no photo", 'chk.wait': "waiting", 'chk.sent': "sent", 'chk.s1': "You photograph the label", 'chk.s2': "You send 1 file to Claude", 'chk.s3': "Claude sends back a file with the correct lists", 'chk.s4': "You import it: the products are in your database", 'chk.send.one': "Send 1 to Claude", 'chk.send.other': "Send {n} to Claude", 'chk.import': "Import answer", 'chk.paste': "Claude replied with text? Paste it here", 'chk.pasteGo': "Import the text", 'chk.bad': "This is not a Label Check answer. Ask Claude for the JSON from the note.", 'chk.imported.one': "1 product updated.", 'chk.imported.other': "{n} products updated.", 'chk.skipped.one': "1 was not on this phone.", 'chk.skipped.other': "{n} were not on this phone.", 'chk.last': "Last answer: {date}", 'chk.sentToast': "File ready. Send it to Claude.", 'chk.claudeNote': "Claude: {note}", 'read.okClaude': "Checked by Claude",
+    'tag.medInfo': "Medicine filler (EU list)",
+    'med.filler': "Filler in a medicine", 'med.head': "Medicine – fillers with a known effect (EU list):", 'med.none': "Medicine: no filler from the EU list was found.",
     'tag.doseNear': "Close to the EU limit",
     'tag.dose': "Above the EU limit", 'dose.line': "{n} {u} a day (limit {max} {u})", 'qa.orReasonDose': "Reason: the daily dose is above the EU upper limit for adults (EFSA).", 'sum.dose': "{name}: the daily dose is above the EU upper limit.", 'dose.all': "Daily dose vs. EU upper limit (adults): {list}",
     'may.front.one': "May contain 1 of your allergens", 'may.front.other': "May contain {n} of your allergens",
@@ -374,7 +376,7 @@ window.LC_TEXT = {
     'toast.shareCopied': 'Result copied. Paste it where you want.',
 
     'credit.product': 'Product data: {off} and {obf} contributors, licensed under the {odbl}.',
-    'credit.ingredient': 'Ingredient data: European Commission (CosIng, food additives database), edlists.org, IARC/WHO, Open Food Facts (ODbL). Food names in many languages: Open Food Facts (ODbL).',
+    'credit.ingredient': 'Ingredient data: European Commission (CosIng, food additives database), edlists.org, IARC/WHO, Open Food Facts (ODbL). Food names in many languages: Open Food Facts (ODbL). Medicine fillers: EMA / European Commission. Supplement limits: EFSA.',
     'credit.ocr': 'Label reading on the phone: {tess} (tesseract.js-core, tessdata_fast), licence {apache}.',
     'credit.guide': 'Results are a guide, not medical advice.'
   },
@@ -526,6 +528,8 @@ window.LC_TEXT = {
     'twin.checked': "Schon geprüft: {name}", 'twin.seen': "Schon fotografiert: {name}", 'twin.why': "{n} % der Namen sind gleich", 'twin.open': "Öffnen",
     'prof.lead': "Tippe an, was dir wichtig ist. Es wird in jedem Ergebnis rot.", 'prof.alg': "Meine Allergene", 'prof.food': "Ich meide in Lebensmitteln", 'prof.cos': "Ich meide in Kosmetik", 'prof.diet': "Ernährung", 'prof.more': "+ {n} weitere", 'prof.own': "+ eigenes Wort", 'prof.frag': "Duftstoffe", 'prof.vegan': "Vegan",
     'chk.row': "Zur Prüfung durch Claude", 'chk.rowSub.one': "1 Foto-Lesung wartet", 'chk.rowSub.other': "{n} Foto-Lesungen warten", 'chk.title': "Zur Prüfung", 'chk.lead': "Foto-Lesungen, die nicht als richtig markiert sind. Schick sie Claude in einer Datei. Claude schickt eine Datei mit den richtigen Listen zurück. Importiere sie, dann sind sie in deiner Datenbank.", 'chk.empty': "Nichts zu prüfen. Foto-Lesungen ohne ✓ kommen hierher.", 'chk.noName': "Ohne Namen", 'chk.photos.one': "1 Foto", 'chk.photos.other': "{n} Fotos", 'chk.noPhoto': "kein Foto", 'chk.wait': "wartet", 'chk.sent': "gesendet", 'chk.s1': "Du fotografierst das Etikett", 'chk.s2': "Du schickst 1 Datei an Claude", 'chk.s3': "Claude schickt eine Datei mit den richtigen Listen zurück", 'chk.s4': "Du importierst sie: die Produkte sind in deiner Datenbank", 'chk.send.one': "1 an Claude senden", 'chk.send.other': "{n} an Claude senden", 'chk.import': "Antwort importieren", 'chk.paste': "Claude hat mit Text geantwortet? Hier einfügen", 'chk.pasteGo': "Text importieren", 'chk.bad': "Das ist keine Label-Check-Antwort. Bitte Claude um das JSON aus der Notiz.", 'chk.imported.one': "1 Produkt aktualisiert.", 'chk.imported.other': "{n} Produkte aktualisiert.", 'chk.skipped.one': "1 war nicht auf diesem Handy.", 'chk.skipped.other': "{n} waren nicht auf diesem Handy.", 'chk.last': "Letzte Antwort: {date}", 'chk.sentToast': "Datei fertig. Schick sie an Claude.", 'chk.claudeNote': "Claude: {note}", 'read.okClaude': "Von Claude geprüft",
+    'tag.medInfo': "Hilfsstoff (EU-Liste)",
+    'med.filler': "Hilfsstoff im Arzneimittel", 'med.head': "Arzneimittel – sonstige Bestandteile mit bekannter Wirkung (EU-Liste):", 'med.none': "Arzneimittel: kein Hilfsstoff aus der EU-Liste gefunden.",
     'tag.doseNear': "Nah am EU-Höchstwert",
     'tag.dose': "Über dem EU-Höchstwert", 'dose.line': "{n} {u} pro Tag (Höchstwert {max} {u})", 'qa.orReasonDose': "Grund: Die Tagesdosis liegt über dem EU-Höchstwert für Erwachsene (EFSA).", 'sum.dose': "{name}: Die Tagesdosis liegt über dem EU-Höchstwert.", 'dose.all': "Tagesdosis und EU-Höchstwert (Erwachsene): {list}",
     'may.front.one': "Kann 1 deiner Allergene enthalten", 'may.front.other': "Kann {n} deiner Allergene enthalten",
@@ -749,7 +753,7 @@ window.LC_TEXT = {
     'toast.shareCopied': 'Ergebnis kopiert. Füge es ein, wo du willst.',
 
     'credit.product': 'Produktdaten: {off} und {obf} Mitwirkende, Lizenz {odbl}.',
-    'credit.ingredient': 'Inhaltsstoffdaten: Europäische Kommission (CosIng, Datenbank für Lebensmittelzusatzstoffe), edlists.org, IARC/WHO, Open Food Facts (ODbL). Lebensmittelnamen in vielen Sprachen: Open Food Facts (ODbL).',
+    'credit.ingredient': 'Inhaltsstoffdaten: Europäische Kommission (CosIng, Datenbank für Lebensmittelzusatzstoffe), edlists.org, IARC/WHO, Open Food Facts (ODbL). Lebensmittelnamen in vielen Sprachen: Open Food Facts (ODbL). Hilfsstoffe in Arzneimitteln: EMA / Europäische Kommission. Höchstwerte für Nahrungsergänzungsmittel: EFSA.',
     'credit.ocr': 'Etikett lesen auf dem Handy: {tess} (tesseract.js-core, tessdata_fast), Lizenz {apache}.',
     'credit.guide': 'Die Ergebnisse sind eine Orientierung, keine medizinische Beratung.'
   },
@@ -901,6 +905,8 @@ window.LC_TEXT = {
     'twin.checked': "Вече проверен: {name}", 'twin.seen': "Вече сниман: {name}", 'twin.why': "{n}% от имената са същите", 'twin.open': "Отвори",
     'prof.lead': "Тапни това, което е важно за теб. Става червено във всеки резултат.", 'prof.alg': "Моите алергени", 'prof.food': "Избягвам в храната", 'prof.cos': "Избягвам в козметиката", 'prof.diet': "Диета", 'prof.more': "+ още {n}", 'prof.own': "+ моя дума", 'prof.frag': "Парфюм", 'prof.vegan': "Веган",
     'chk.row': "За проверка от Claude", 'chk.rowSub.one': "1 прочетен етикет чака", 'chk.rowSub.other': "{n} прочетени етикета чакат", 'chk.title': "За проверка", 'chk.lead': "Прочетени етикети, които не са отбелязани като верни. Изпрати ги на Claude в 1 файл. Claude връща файл с верните списъци. Вмъкни го и те са в твоята база.", 'chk.empty': "Няма нищо за проверка. Прочетени етикети без ✓ идват тук.", 'chk.noName': "Без име", 'chk.photos.one': "1 снимка", 'chk.photos.other': "{n} снимки", 'chk.noPhoto': "без снимка", 'chk.wait': "чака", 'chk.sent': "изпратено", 'chk.s1': "Снимаш етикета", 'chk.s2': "Изпращаш 1 файл на Claude", 'chk.s3': "Claude връща файл с верните списъци", 'chk.s4': "Вмъкваш го: продуктите са в твоята база", 'chk.send.one': "Изпрати 1 на Claude", 'chk.send.other': "Изпрати {n} на Claude", 'chk.import': "Вмъкни отговора", 'chk.paste': "Claude отговори с текст? Постави го тук", 'chk.pasteGo': "Вмъкни текста", 'chk.bad': "Това не е отговор за Label Check. Поискай от Claude JSON-а от бележката.", 'chk.imported.one': "1 продукт е обновен.", 'chk.imported.other': "{n} продукта са обновени.", 'chk.skipped.one': "1 не е на този телефон.", 'chk.skipped.other': "{n} не са на този телефон.", 'chk.last': "Последен отговор: {date}", 'chk.sentToast': "Файлът е готов. Изпрати го на Claude.", 'chk.claudeNote': "Claude: {note}", 'read.okClaude': "Проверено от Claude",
+    'tag.medInfo': "Помощно вещество (списък на ЕС)",
+    'med.filler': "Помощно вещество в лекарство", 'med.head': "Лекарство – помощни вещества с известно действие (списък на ЕС):", 'med.none': "Лекарство: не е намерено помощно вещество от списъка на ЕС.",
     'tag.doseNear': "Близо до границата на ЕС",
     'tag.dose': "Над границата на ЕС", 'dose.line': "{n} {u} на ден (граница {max} {u})", 'qa.orReasonDose': "Причина: дневната доза е над горната граница за възрастни в ЕС (EFSA).", 'sum.dose': "{name}: дневната доза е над горната граница в ЕС.", 'dose.all': "Дневна доза спрямо горната граница в ЕС (възрастни): {list}",
     'may.front.one': "Може да съдържа 1 твой алерген", 'may.front.other': "Може да съдържа {n} твои алергена",
@@ -1124,7 +1130,7 @@ window.LC_TEXT = {
     'toast.shareCopied': 'Резултатът е копиран. Постави го, където искаш.',
 
     'credit.product': 'Данни за продуктите: сътрудници на {off} и {obf}, лиценз {odbl}.',
-    'credit.ingredient': 'Данни за съставките: Европейска комисия (CosIng, база за хранителни добавки), edlists.org, IARC/СЗО, Open Food Facts (ODbL). Имена на храни на много езици: Open Food Facts (ODbL).',
+    'credit.ingredient': 'Данни за съставките: Европейска комисия (CosIng, база за хранителни добавки), edlists.org, IARC/СЗО, Open Food Facts (ODbL). Имена на храни на много езици: Open Food Facts (ODbL). Помощни вещества в лекарства: EMA / Европейска комисия. Горни граници за добавки: EFSA.',
     'credit.ocr': 'Четене на етикети на телефона: {tess} (tesseract.js-core, tessdata_fast), лиценз {apache}.',
     'credit.guide': 'Резултатите са ориентир, не медицински съвет.'
   }

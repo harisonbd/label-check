@@ -561,7 +561,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.49' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.50' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -1049,7 +1049,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v67')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v68')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1607,16 +1607,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v67'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v68'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v67' not in keys: break
+        if 'label-check-v68' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v67' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v68' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
 
@@ -2084,6 +2084,40 @@ with sync_playwright() as p:
         ctx.close()
     apk = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'apk', 'MainActivity.java'), encoding='utf-8').read()
     ok('getOnBackPressedDispatcher().addCallback' in apk and 'canGoBack()' in apk and 'goBack()' in apk, 'the Android app sends the Back key to the page (MainActivity: canGoBack -> goBack)')
+
+    # ---- v2.50: medicine fillers with a known effect (EMA list; user 28 Nov: "both" = red for your allergens + blue i for the rest) ----
+    print('v2.50: medicine fillers (EMA)')
+    CREAM = 'Wirkstoff: Dexpanthenol 50 mg/g. Sonstige Bestandteile: Arachidis oleum raffinatum, Cetylstearylalkohol (Ph.Eur.), Wollwachs, Propylenglycol, gereinigtes Wasser.'
+    for lang, w in (('en-GB', 390), ('de-AT', 320), ('bg-BG', 390)):
+        ctx, pg = new_page(b, base, lang, dark=lang != 'de-AT', width=w)
+        pg.evaluate("localStorage.setItem('lc.allergens', JSON.stringify({ food: ['peanuts', 'milk'], cos: [] }))"); reload_ready(pg)
+        read_label(pg, CREAM, 'cosmetic')
+        ql = pg.inner_text('#qList')
+        ok(word(pg) == {'en-GB': 'Avoid', 'de-AT': 'Meiden', 'bg-BG': 'Избягвай'}[lang] and pg.locator('#qList .dot.g-red[data-m=p]').count() == 1 and 'Arachidis oleum raffinatum' in ql
+           and pg.locator('#qList .dot.g-info[data-m=i]').count() == 3 and no_side_scroll(pg) and card_fits(pg),
+           '%s %d px: peanut oil (Latin) in a medicine = red with the person mark at its place; 3 more EU fillers as blue i (%s)' % (lang, w, ql.replace('\n', ' | ')[:160]))
+        if lang == 'en-GB':
+            ok('Your allergen · Peanuts · Filler in a medicine' in ql and 'Medicine filler (EU list) · May cause local skin reactions (e.g. contact dermatitis).' in ql,
+               'EN rows: "Your allergen · Peanuts · Filler in a medicine"; "Medicine filler (EU list) · May cause local skin reactions (e.g. contact dermatitis)."')
+            ok(pg.locator('#readChips .chip').count() == 6 and 'Wirkstoff' not in pg.inner_text('#readChips'), '"Wirkstoff:" / "Sonstige Bestandteile:" are no part of a name (6 names)')
+            open_details(pg)
+            ma = pg.inner_text('#medAll')
+            ok(ma.startswith('Medicine – fillers with a known effect (EU list):') and pg.locator('#medAll li').count() == 4 and 'Arachis oil (peanut oil): If you are allergic to peanut or soya, do not use this medicinal product.' in ma,
+               'Details: all 4 fillers with the EU warning')
+        if lang == 'de-AT':
+            ok('Hilfsstoff (EU-Liste)' in ql, 'DE: "Hilfsstoff (EU-Liste)"')
+        ctx.close()
+    ctx, pg = new_page(b, base, 'bg-BG', width=390)
+    pg.evaluate("localStorage.setItem('lc.allergens', JSON.stringify({ food: ['peanuts'], cos: [] }))"); reload_ready(pg)
+    read_label(pg, 'Kalium phosphoricum D6 250 mg; помощни вещества: лактоза монохидрат', 'food')
+    ok('Лактоза' in pg.inner_text('#qList') and pg.locator('#qList .dot.g-info[data-m=i]').count() == 1, 'tablets with lactose (milk not ticked): a blue i row "Лактоза"')
+    open_details(pg)
+    ok('Лактоза: Ако Вашият лекар Ви е казал, че имате непоносимост към някои захари' in pg.inner_text('#medAll'), 'Details (BG): the EU warning for lactose')
+    pg.click('.tabbar button[data-go=scan]')
+    if pg.is_hidden('#cardLabel'): pg.click('.tabbar button[data-go=scan]')
+    read_label(pg, 'Ingredients: Aqua, Glycerin, Methylparaben, Parfum.', 'cosmetic')
+    ok(pg.locator('#medAll').count() == 0 and pg.locator('#qList .dot.g-info[data-m=i]').count() == 0, 'a cosmetic (no medicine words): no filler rows')
+    ctx.close()
 
     # ---- v2.41: Profile tab (user 27 Nov: allergens and things to avoid, "like seed oils, gluten", easy to open) ----
     print('v2.41: Profile tab')
