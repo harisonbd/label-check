@@ -6,6 +6,8 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.util.Base64;
 import android.webkit.JavascriptInterface;
+import android.webkit.WebView;
+import androidx.activity.OnBackPressedCallback;
 import androidx.core.content.FileProvider;
 import com.getcapacitor.BridgeActivity;
 import java.io.File;
@@ -19,6 +21,22 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getBridge().getWebView().addJavascriptInterface(new Native(), "LCNative");
+        // v2.49 (user 28 Nov: "Back closes the app"): the phone's Back key goes one step back in the page (product ->
+        // start screen), as in a browser. Only on the first screen does it close the app. Capacitor has no Back handling
+        // of its own (it is in the @capacitor/app plugin, which this app does not use).
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                WebView web = getBridge() == null ? null : getBridge().getWebView();
+                if (web != null && web.canGoBack()) {
+                    web.goBack();
+                    return;
+                }
+                setEnabled(false);                          // first screen: Android's normal Back (leave the app)
+                getOnBackPressedDispatcher().onBackPressed();
+                setEnabled(true);
+            }
+        });
     }
 
     public class Native {

@@ -232,9 +232,8 @@ with sync_playwright() as p:
     ok(pg.locator('#groups .grp.empty').count() == 0, 'v2.8: empty groups are not shown')
     menu_pick(pg, '#favBtn')
     pg.go_back(); pg.wait_for_timeout(200)
-    ok(pg.is_visible('#labelPanel') and pg.is_hidden('#result'), 'Back from a label result shows the label screen')
-    pg.go_back(); pg.wait_for_timeout(200)
-    ok(pg.is_visible('#scanner') and pg.is_visible('#cardScan') and pg.locator('.startcards .scard').count() == 2, 'Back again shows the start screen with the 2 big buttons (v2.8)')
+    ok(pg.is_hidden('#labelPanel') and pg.is_hidden('#result') and pg.is_visible('#scanner') and pg.is_visible('#cardScan') and pg.locator('.startcards .scard').count() == 2,
+       'v2.49: Back from a label result shows the start screen with the 2 big buttons (one step, not the label screen)')
     ok('Fastest way' in pg.inner_text('#cardScan') and 'No barcode' in pg.inner_text('#cardLabel') and pg.inner_text('.startq') == 'What do you want to check?', 'v2.34: start B: question + 2 tiles with a short line')
     ok(pg.is_hidden('#manualForm') and pg.is_visible('#codeLink') and pg.is_visible('#topSearch'), 'v2.8: barcode numbers behind a link, search icon in the top bar')
     ok(pg.locator('#recentList li').count() == 1 and 'Shower gel' in pg.inner_text('#recent'), 'start screen: Recent shows the product')
@@ -562,7 +561,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.48' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.49' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -1050,7 +1049,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v66')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v67')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1608,16 +1607,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v66'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v67'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v66' not in keys: break
+        if 'label-check-v67' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v66' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v67' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
 
@@ -2057,6 +2056,34 @@ with sync_playwright() as p:
     read_label(pg, 'Ingredients: oats, sugar, salt. Nutrition per 100 g: magnesium 300 mg, iron 14 mg', 'food')
     ok(pg.locator('#qList .dot.g-orange').count() == 0 and pg.locator('#doseAll').count() == 0, 'a food with a "per 100 g" table: no dose rows')
     ctx.close()
+
+    # ---- v2.49: Back (user 28 Nov: "Back closes the app" / "no back button on the product, keep what I did") ----
+    print('v2.49: Back on the result')
+    for lang, w in (('en-GB', 390), ('bg-BG', 320)):
+        ctx, pg = new_page(b, base, lang, dark=True, width=w)
+        read_label(pg, 'Ingredients: sunflower seeds 97%, salt 3%, packed in a protective atmosphere.', 'food', 'Sunflower seeds')
+        ok(pg.is_visible('#resBack') and pg.inner_text('#resBack').strip() == {'en-GB': 'Back', 'bg-BG': 'Назад'}[lang] and no_side_scroll(pg) and card_fits(pg),
+           '%s %d px: the result has the "‹ Back" button of the other screens (%s)' % (lang, w, pg.inner_text('#resBack')))
+        if lang != 'en-GB': ctx.close(); continue
+        pg.click('#readChips .chip:has-text("packed in a protective atmosphere")'); pg.wait_for_timeout(400)
+        pg.click('#resBack'); pg.wait_for_timeout(400)
+        ok(pg.is_visible('#cardLabel') and pg.is_hidden('#result') and pg.is_hidden('#labelPanel'), '"‹ Back" after "Read a label" = the start screen (not the label screen)')
+        pg.click('.tabbar button[data-go=history]'); pg.wait_for_timeout(300)
+        pg.click('#historyList li:has-text("Sunflower seeds") .open'); pg.wait_for_selector('#result:not([hidden]) #answer'); pg.wait_for_timeout(300)
+        p0 = pg.evaluate("LC.state.current.p")
+        ok(p0['name'] == 'Sunflower seeds' and 'protective' not in p0['ingredientsText'] and pg.locator('#readChips .chip').count() == 2,
+           'what you did on the result is kept after Back: the name, the name you took out (%s)' % p0['ingredientsText'])
+        pg.click('#resBack'); pg.wait_for_timeout(400)
+        ok(pg.is_visible('#historyList') and pg.is_hidden('#result'), 'opened from History: "‹ Back" returns to History')
+        pg.click('.tabbar button[data-go=scan]'); pg.wait_for_timeout(200)
+        read_label(pg, 'Ingredients: oats, salt.', 'food')
+        pg.go_back(); pg.wait_for_timeout(400)
+        ok(pg.is_visible('#cardLabel') and pg.is_hidden('#result') and pg.is_hidden('#labelPanel'), 'the phone\'s Back after "Read a label" = the start screen too (one step)')
+        pg.click('#cardLabel'); pg.wait_for_timeout(200); pg.click('#labelPanel .panel-back'); pg.wait_for_timeout(300)
+        ok(pg.is_visible('#cardLabel') and pg.is_hidden('#labelPanel'), '"‹ Back" on Read a label still goes to the start screen')
+        ctx.close()
+    apk = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'apk', 'MainActivity.java'), encoding='utf-8').read()
+    ok('getOnBackPressedDispatcher().addCallback' in apk and 'canGoBack()' in apk and 'goBack()' in apk, 'the Android app sends the Back key to the page (MainActivity: canGoBack -> goBack)')
 
     # ---- v2.41: Profile tab (user 27 Nov: allergens and things to avoid, "like seed oils, gluten", easy to open) ----
     print('v2.41: Profile tab')

@@ -869,6 +869,7 @@
   }
   const ICON = {
     chev: 'M9 6l6 6-6 6',
+    back: 'M15 5l-7 7 7 7',
     cam: 'M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.5-2h6l1.5 2h2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5zM12 16.5a3.5 3.5 0 1 0 0-7a3.5 3.5 0 0 0 0 7z',
     info: 'M21 12a9 9 0 1 1-18 0a9 9 0 1 1 18 0zM12 11v6M12 7.5h.01',
     again: 'M4 12a8 8 0 0 1 13.7-5.6L20 8.7M20 4v4.7h-4.7M20 12a8 8 0 0 1-13.7 5.6L4 15.3M4 20v-4.7h4.7',
@@ -965,7 +966,8 @@
   function pushState(st, hash) {
     try {
       const cur = history.state || {};
-      if (st.view === 'result' && !st.detail && cur.view === 'result' && !cur.detail) history.replaceState(st, '');
+      // v2.49 (user 28 Nov): a result after "Read a label" / "Type the list" takes that step's place, so one Back = the start screen
+      if (st.view === 'result' && !st.detail && ((cur.view === 'result' && !cur.detail) || cur.view === 'label' || cur.view === 'type')) history.replaceState(st, '');
       else history.pushState(st, '', hash || undefined);
     } catch (e) { /* ignore */ }
   }
@@ -1019,6 +1021,8 @@
       el('span', { text: t(typedP ? 'type.edit' : p.source === 'label' ? 'btn.again' : 'btn.photoLabel') }));
     const next = el('button', { class: 'btn ' + (grey ? 'btn-ghost' : 'btn-primary'), id: 'nextBtn', type: 'button', text: t('btn.nextProduct'), onclick: scanNext });
     r.replaceChildren(...[
+      // v2.49 (user 28 Nov): a visible Back on the result, like the other screens. Everything here is saved at once.
+      el('button', { class: 'iconbtn panel-back', id: 'resBack', type: 'button', onclick: resultBack }, icon(ICON.back), el('span', { text: t('d.back') })),
       answerCard(p, a),
       known ? el('button', {
         class: 'qmore', id: 'detBtn', type: 'button', 'aria-expanded': String(state.detailsOpen), 'aria-controls': 'details',
@@ -1804,6 +1808,11 @@
   }
 
   // From a result: go back to the scanner (the state below a result is always the scanner).
+  function resultBack() {
+    if (history.state && history.state.view === 'result' && history.length > 1) { try { history.back(); return; } catch (e) { /* fall through */ } }
+    try { history.replaceState({ tab: 'scan' }, ''); } catch (e) { /* ignore */ }
+    showScanner();
+  }
   function scanNext() {
     try { history.replaceState({ tab: 'scan' }, ''); } catch (e) { /* ignore */ }
     showScanner();
@@ -2012,7 +2021,8 @@
   }
 
   function openSaved(code) {
-    go('scan');
+    hideDetail();
+    if (currentTab !== 'scan') setTab('scan');   // v2.49: no extra "scan" step, so Back returns to History (or the start screen)
     const p = productBy(code);
     if (p) showProduct(p);
     else lookup(code);
@@ -4726,7 +4736,7 @@
     if (st.view !== 'code' && !$('manualForm').hidden) hideCodeForm();
     if (!st.detail) hideDetail();
     if (st.tab !== currentTab) setTab(st.tab);
-    if (st.tab !== 'scan') return;
+    if (st.tab !== 'scan') { if (!$('result').hidden) showScanner(); return; }   // v2.49: Back past a product closes it (Scan shows the start screen again)
     if (st.view === 'result') {
       const p = state.current && state.current.p.code === st.code ? state.current.p : productBy(st.code);
       if (!p || !DBINFO) showScanner();
