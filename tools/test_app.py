@@ -275,11 +275,10 @@ with sync_playwright() as p:
     ok(word(pg) == 'Check', 'sausage: Check (nitrite, trans fat)')
     ok('Instead: Shower gel' not in pg.inner_text('#answer'), '"Instead" only lists products of the same type (food)')
     pg.click('.tabbar button[data-go=list]')
-    ok(not pg.eval_on_selector('#foodAlgBox', 'd => d.open') and not pg.eval_on_selector('#moreFold', 'd => d.open'), 'My list: allergens and "More" start folded')
-    open_card(pg, 'algCard'); pg.click('#foodAlgBox summary')
+    ok(not pg.eval_on_selector('#foodAlgBox', 'd => d.open') and not pg.eval_on_selector('#avoidCard', 'd => d.open'), 'Profile: "My list and allergens" and the allergen lists start folded (v2.46)')
+    open_card(pg, 'avoidCard'); pg.click('#foodAlgBox summary')
     pg.click('#foodAlgList label:has-text("Mustard") input')
-    pg.click('#moreFold summary')
-    pg.click('#veganSwitch')
+    pg.click('#profDiet .pchip[data-p=vegan]')
     pg.click('#profCos .pchip[data-p=frag]')
     ok(pg.eval_on_selector('#profCos .pchip[data-p=frag]', 'b => b.getAttribute("aria-pressed")') == 'true' and pg.inner_text('#profCos .pchip[data-p=frag]').startswith('✓'), 'fragrance chip (Profile) is pressed after a tap')
     pg.click('.tabbar button[data-go=history]')
@@ -563,7 +562,7 @@ with sync_playwright() as p:
     for loc, dark, width in (('en-GB', False, 390), ('bg-BG', True, 320), ('de-AT', False, 360), ('bg-BG', False, 360)):
         ctx, pg = new_page(b, base, loc, dark=dark, width=width); tag = '%s %s %d px' % (loc, 'dark' if dark else 'light', width)
         top = pg.evaluate("() => { const h = document.querySelector('.topbar h1').getBoundingClientRect(), s = document.getElementById('langSwitch').getBoundingClientRect(); return [h.height, h.right <= s.left]; }")
-        ok(pg.inner_text('.topbar .ver') == 'v2.45' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
+        ok(pg.inner_text('.topbar .ver') == 'v2.46' and top[0] < 32 and top[1] and no_side_scroll(pg), '%s: "v2.20.3" next to the title, one line, left of EN | BG' % tag)
         pg.click('#cardLabel')
         bg, fg, h = pg.evaluate(TINT, '#labelPanel .panel-back')
         ok(bg not in ('rgba(0, 0, 0, 0)', 'transparent') and h >= 44, '%s: Back on "Read a label" is a tinted pill (%s, %d px high)' % (tag, bg, h))
@@ -591,13 +590,13 @@ with sync_playwright() as p:
         h = pg.evaluate("document.getElementById('tab-list').getBoundingClientRect().height")
         ok(h < 2700 and no_side_scroll(pg), '%s: Profile is short (%d px, was about 4500; v2.41 added the profile chips, about 900 px) and has no sideways scroll' % (tag, h))
         ok(pg.locator('#fragSwitch').count() == 0 and pg.locator('#profCos .pchip[data-p=frag]').count() == 1, '%s: fragrance is a Profile chip (v2.41), no separate switch' % tag)
-        ok(all(not pg.eval_on_selector(f, 'd => d.open') for f in ('#foodAlgBox', '#cosAlgBox', '#rulesFold', '#moreFold')), '%s: allergens, "What the app checks" and "More" start closed' % tag)
-        ok('ODbL' in pg.text_content('#rulesFold') and pg.text_content('#moreFold summary').strip() != '', '%s: credit line (ODbL) is still in "What the app checks"; "More" has a title' % tag)
+        ok(all(not pg.eval_on_selector(f, 'd => d.open') for f in ('#foodAlgBox', '#cosAlgBox', '#rulesFold', '#ghCard', '#setCard')), '%s: allergens, "What the app checks", Backup and Settings start closed' % tag)
+        ok('ODbL' in pg.text_content('#rulesFold') and pg.text_content('#ghCard summary').strip() != '' and pg.locator('#setCard #rulesFold').count() == 1, '%s: credit line (ODbL) is still in "What the app checks" (v2.46: inside Settings); Backup has a title' % tag)
         pg.click('#profCos .pchip[data-p=frag]'); pg.click('#profCos .pchip[data-p=frag]')
         ok(pg.eval_on_selector('#profCos .pchip[data-p=frag]', 'b => b.getAttribute("aria-pressed")') == 'false' and pg.evaluate("!LC.state.avoidFragrance"), '%s: second tap switches fragrance off again' % tag)
-        pg.click('#rulesFold summary')
-        ok(pg.is_visible('#rulesBox .levels'), '%s: tapping "What the app checks" opens it' % tag)
-        pg.evaluate("document.querySelector('#rulesFold').open = false; scrollTo(0, 0)")
+        open_card(pg, 'setCard'); pg.click('#rulesFold summary')
+        ok(pg.is_visible('#rulesBox .levels'), '%s: Settings -> tapping "What the app checks" opens it' % tag)
+        pg.evaluate("document.querySelector('#rulesFold').open = false; document.getElementById('setCard').open = false; scrollTo(0, 0)")
         pg.screenshot(path=os.path.join(SHOTS, 'v27-mylist-%s-%s-%d.png' % (loc, 'dark' if dark else 'light', width)), full_page=True)
         ctx.close()
 
@@ -904,7 +903,7 @@ with sync_playwright() as p:
     ok(pg.locator('.strip .g-nodata').count() == 0 and pg.text_content('#legend') == '4 нищо открито' and card_fits(pg), 'food: no grey blocks; legend "4 нищо открито"')
     # My list: taught names (incl. "не поправяй"), delete; backup
     with pg.expect_download() as dl:
-        pg.click('.tabbar button[data-go=list]'); pg.click('#moreFold summary'); pg.click('#exportBtn')
+        pg.click('.tabbar button[data-go=list]'); open_card(pg, 'ghCard'); pg.click('#exportBtn')
     bk = json.load(open(dl.value.path(), encoding='utf-8'))
     ok(bk.get('taught', {}).get('glycern', {}).get('no') == 'GLYCERIN' and bk.get('vibrate') is True, 'backup file includes the taught names and the vibration setting')
     pg.click('#taughtBox summary'); pg.wait_for_timeout(200)
@@ -1038,7 +1037,7 @@ with sync_playwright() as p:
     pg.goto(base); pg.evaluate('navigator.serviceWorker.ready'); reload_ready(pg)
     ok(pg.evaluate('!!navigator.serviceWorker.controller'), 'service worker controls the page')
     pg.click('#cardLabel'); read_photo(pg)
-    cached = pg.evaluate("async () => (await (await caches.open('label-check-v63')).keys()).map(r => r.url.split('/').pop())")
+    cached = pg.evaluate("async () => (await (await caches.open('label-check-v64')).keys()).map(r => r.url.split('/').pop())")
     ok(all(f in cached for f in ('ocr-worker-2.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'eng.traineddata.gz')) and 'deu.traineddata.gz' not in cached,
        'after first use: worker, program and only the used language are on the phone')
     ctx.set_offline(True)
@@ -1046,7 +1045,7 @@ with sync_playwright() as p:
     ok(pg.inner_text('#ocrStatus').startswith('Done in') and 'palm oil' in pg.input_value('#labelText').lower(), 'offline: Read text still works')
     ctx.set_offline(False)
     print('v2.8: label reader without internet (My list)')
-    pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(300); open_card(pg, 'setCard')
+    pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(300); open_card(pg, 'packCard')   # v2.46: the label reader is in "Without internet"
     ok(pg.inner_text('#offState').startswith('On this phone: EN (1 of 7)') and 'Download all languages' in pg.inner_text('#offGet'), 'My list: "On this phone: EN (1 of 7)" + download button (%s / %s)' % (pg.inner_text('#offState'), pg.inner_text('#offGet')))
     pg.click('#offGet')
     pg.wait_for_function("() => document.getElementById('offState').textContent.startsWith('All 7')", timeout=60000)
@@ -1454,7 +1453,7 @@ with sync_playwright() as p:
       s['label-99'] = { code: 'label-99', kind: 'food', source: 'label', name: 'No barcode', ingredientsText: 'Mehl', texts: ['Mehl'], fetchedAt: 2 };
       s['5000000000017'] = { code: '5000000000017', kind: 'food', source: 'off', name: 'From the list', ingredientsText: 'Milch', texts: ['Milch'], fetchedAt: 3 };
       localStorage.setItem('lc.products', JSON.stringify(s)); }""")
-    pg.click('.tabbar button[data-go=list]'); pg.click('#moreFold summary')
+    pg.click('.tabbar button[data-go=list]'); open_card(pg, 'ghCard')
     with pg.expect_download() as dl:
         pg.click('#shareProdBtn')
     shared = os.path.join(SHOTS, 'shared-products.json'); dl.value.save_as(shared)
@@ -1462,7 +1461,7 @@ with sync_playwright() as p:
     ok(sh.get('kind') == 'products' and [x['code'] for x in sh['products']] == ['4005808123456'] and 'image' not in sh['products'][0] and 'avoid' not in sh, 'v2.28: the products file has only the read product with a barcode: no photo, no settings, no online-list products (%s)' % [x.get('code') for x in sh.get('products', [])])
     ctx.close(); ctx, pg = new_page(b, base, 'en-GB')
     ok(pg.evaluate("Object.keys(LC.state.products).length") == 0, 'v2.28: fresh phone has no products')
-    pg.click('.tabbar button[data-go=list]'); pg.click('#moreFold summary')
+    pg.click('.tabbar button[data-go=list]'); open_card(pg, 'ghCard')
     pg.set_input_files('#prodInput', shared); pg.wait_for_timeout(600)
     got = pg.evaluate("LC.state.products['4005808123456']")
     ok(got and got['ingredientsText'] == 'Zucker, Wasser, Salz' and got['source'] == 'label' and got['name'] == 'Test Riegel', 'v2.28: import adds the product (%s)' % (got or {}).get('name'))
@@ -1596,16 +1595,16 @@ with sync_playwright() as p:
     ok(pg.evaluate('!!navigator.serviceWorker.controller') and pg.is_hidden('#updBar'), 'copy of the app: controlled, no update line yet')
     # v2.14.1: other apps on the same website (Pocket Docs, Sun Launcher) keep their offline copies after an update
     pg.evaluate("Promise.all(['pocketdocs-v7', 'sunlauncher-v1'].map(n => caches.open(n).then(c => c.put('/x', new Response('x')))))")
-    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v63'", "label-check-test-update'")
+    swp = os.path.join(tmp, 'sw.js'); new_sw = open(swp, encoding='utf-8').read().replace("label-check-v64'", "label-check-test-update'")
     open(swp, 'w', encoding='utf-8').write(new_sw)
     pg.evaluate('navigator.serviceWorker.getRegistration().then(r => r.update())')
     pg.wait_for_selector('#updBar:not([hidden])', timeout=30000)
     ok(pg.is_visible('#updBar') and pg.inner_text('#updReload') == 'Reload', 'after a new version took over: "A new version is ready. Reload"')
     for i in range(50):   # the new worker takes over first; the old cache goes a moment later (after its reader files are copied)
         keys = pg.evaluate('caches.keys()')
-        if 'label-check-v63' not in keys: break
+        if 'label-check-v64' not in keys: break
         pg.wait_for_timeout(300)
-    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v63' not in keys and 'label-check-test-update' in keys,
+    ok('pocketdocs-v7' in keys and 'sunlauncher-v1' in keys and 'label-check-v64' not in keys and 'label-check-test-update' in keys,
        'v2.14.1: the update deletes only the old Label Check cache; Pocket Docs / Sun Launcher caches stay (%s)' % keys)
     ctx.close(); srv2.shutdown(); shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1763,7 +1762,7 @@ with sync_playwright() as p:
         ok(len(tops) == 3 and len(set((t[0], t[1]) for t in tops)) == 1 and all(t[2] for t in tops) and pg.is_hidden('#labelLead'), '%s %d px: Read a label = 3 cards in one row, same size, text fits; no general line (%s)' % (lang, w, tops))
         pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(300)
         cards = pg.evaluate("[...document.querySelectorAll('#tab-list > details.lcard')].filter(d => !d.hidden).map(d => [d.id, d.open])")
-        ok(cards == [['avoidCard', True], ['algCard', False], ['packCard', False], ['ghCard', False], ['setCard', False], ['rulesFold', False], ['moreFold', False]], '%s: My list = 7 cards (v2.37: + products without internet, v2.44: + GitHub backup), only the avoid list open; "Taught names" hidden while empty (%s)' % (lang, cards))
+        ok(cards == [['avoidCard', False], ['ghCard', False], ['packCard', False], ['setCard', False]], '%s: v2.46: Profile = 4 cards (My list and allergens, Backup, Without internet, Settings), all closed; "Taught names" hidden while empty (%s)' % (lang, cards))
         subs = [pg.inner_text(q) for q in ('#avoidSub', '#algSub', '#setSub')]
         ok(subs[0].endswith('+1') and subs[0].count(',') == 2 and ('+ 1' in subs[1]) and '·' in subs[2], '%s: the closed cards say what is inside (%s)' % (lang, subs))
         ok(no_side_scroll(pg) and pg.evaluate("document.documentElement.scrollHeight") < 2500, '%s %d px: no sideways scroll; the page is short (%d px; v2.41: + profile chips)' % (lang, w, pg.evaluate("document.documentElement.scrollHeight")))
@@ -1773,7 +1772,9 @@ with sync_playwright() as p:
             ok('Светли' in pg.inner_text('#setSub') or 'Светл' in pg.inner_text('#setSub'), 'changing Colours updates the line under "Настройки" (%s)' % pg.inner_text('#setSub'))
             pg.select_option('#themeSelect', 'dark')
             pg.click('#avoidCard > summary'); pg.wait_for_timeout(100)
-            ok(not pg.eval_on_selector('#avoidCard', 'd => d.open') and pg.is_hidden('#avoidInput'), 'a tap on the title closes the avoid list card')
+            ok(pg.eval_on_selector('#avoidCard', 'd => d.open') and pg.is_visible('#avoidInput') and pg.is_visible('#foodAlgBox'), 'a tap on the title opens "My list and allergens": your words and the allergen lists')
+            pg.click('#avoidCard > summary'); pg.wait_for_timeout(100)
+            ok(not pg.eval_on_selector('#avoidCard', 'd => d.open') and pg.is_hidden('#avoidInput'), 'a second tap closes it')
             pg.screenshot(path=os.path.join(SHOTS, 'v236-mylist-bg.png'), full_page=True)
         ctx.close()
 
@@ -2021,7 +2022,7 @@ with sync_playwright() as p:
         if lang == 'bg-BG':
             pg.click('#profFood .pchip[data-p=seed]'); pg.wait_for_timeout(200)
             it = pg.evaluate("LC.state.avoid.find(i => i.preset === 'seed')")
-            ok(it and it['text'].startswith('семенни масла, sunflower oil') and 'слънчогледово масло' in it['text'] and 'семенни масла' in pg.inner_text('#avoidList').lower(), 'Семенни масла: one tap adds one list entry with all the oil names (EN/DE/BG/RO)')
+            ok(it and it['text'].startswith('семенни масла, sunflower oil') and 'слънчогледово масло' in it['text'] and 'семенни масла' in pg.text_content('#avoidList').lower(), 'Семенни масла: one tap adds one list entry with all the oil names (EN/DE/BG/RO)')
             ctx2 = None
             pg.click('.tabbar button[data-go=scan]'); pg.wait_for_timeout(200)
             read_label(pg, 'Съставки: пшенично брашно, слънчогледово масло, сол', 'food')
@@ -2034,7 +2035,7 @@ with sync_playwright() as p:
             pg.click('#profAlgMore'); pg.wait_for_timeout(150)
             ok(pg.locator('#profAlg .pchip:not(.more)').count() == 14 and pg.locator('#profAlgMore').count() == 0, '"+ още 6": all 14 EU allergens')
             pg.click('#profDiet .pchip[data-p=vegan]'); pg.wait_for_timeout(150)
-            ok(pg.evaluate("LC.state.vegan") and pg.evaluate("document.getElementById('veganSwitch').checked"), 'Веган chip = the vegan switch')
+            ok(pg.evaluate("LC.state.vegan") and pg.locator('#veganSwitch').count() == 0, 'Веган chip switches vegan on; v2.46: no second vegan switch')
             pg.click('#profOwn'); pg.wait_for_timeout(500)
             ok(pg.evaluate("document.activeElement.id") == 'avoidInput' and pg.eval_on_selector('#avoidCard', 'd => d.open'), '"+ моя дума" opens your list and puts the cursor in the field')
             pg.screenshot(path=os.path.join(SHOTS, 'v241-profile-bg.png'), full_page=True)
@@ -2147,14 +2148,14 @@ with sync_playwright() as p:
     ok('add' in pg.get_attribute('#frontBtn', 'class') and not pg.evaluate("LC.state.products['%s'].front || LC.frontOf('%s')" % (code, code)), '"Махни": back to the dashed tile')
     with pg.expect_file_chooser() as fc: pg.click('#frontBtn')
     fc.value.set_files(JPG); pg.wait_for_function("() => document.querySelector('#frontBtn img')", timeout=8000)
-    pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(200); open_card(pg, 'moreFold')
+    pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(200); open_card(pg, 'ghCard')
     with pg.expect_download() as dl: pg.click('#exportBtn')
     bkfile = os.path.join(SHOTS, 'v244-backup.json'); dl.value.save_as(bkfile)
     data = json.load(open(bkfile, encoding='utf-8'))
     ok(str(data.get('fronts', {}).get(code, '')).startswith('data:image/jpeg') and 'packWant' in data, 'the backup file has the product photo and your countries')
     ctx.close()
     ctx, pg = new_page(b, base, 'bg-BG', dark=True)
-    pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(200); open_card(pg, 'moreFold')
+    pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(200); open_card(pg, 'ghCard')
     pg.once('dialog', lambda d: d.accept())
     pg.set_input_files('#importInput', bkfile); pg.wait_for_function("(c) => !!LC.frontOf(c)", arg=code, timeout=8000)
     ok(pg.evaluate("!!LC.state.products['%s'].front" % code), 'import on a new phone: the product and its photo come back')
@@ -2191,7 +2192,7 @@ with sync_playwright() as p:
     with pg.expect_file_chooser() as fc: pg.click('#frontBtn')
     fc.value.set_files(JPG); pg.wait_for_function("() => document.querySelector('#frontBtn img')", timeout=8000)
     pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(200)
-    ok(pg.inner_text('#ghSub') == 'Не е настроено' and not pg.eval_on_selector('#ghCard', 'd => d.open'), 'Profile: card "Резервно копие в GitHub", closed, "Не е настроено"')
+    ok(pg.inner_text('#ghSub') == 'Автоматичното копие не е настроено' and not pg.eval_on_selector('#ghCard', 'd => d.open'), 'Profile: card "Резервно копие", closed, "Автоматичното копие не е настроено"')
     open_card(pg, 'ghCard')
     hrefs = pg.eval_on_selector_all('#ghSetup .ghsteps a', 'a => a.map(x => x.href)')
     ok(pg.is_visible('#ghSetup') and pg.is_hidden('#ghOn') and hrefs[0].startswith('https://github.com/new') and hrefs[1] == 'https://github.com/settings/personal-access-tokens/new',
@@ -2210,7 +2211,7 @@ with sync_playwright() as p:
     ok(pg.inner_text('#ghOkTitle') == 'Свързано: harisonbd/label-check-backup' and code in js and 'photos/%s.jpg' % code in GH['puts'],
        'connected (a full GitHub address also works): first backup + the product photo are on GitHub (%s)' % GH['puts'])
     ok(KEY not in js and 'github_pat' not in js and pg.input_value('#ghToken') == '', 'the key is never in the backup, and the field is emptied')
-    ok('Само всеки ден' in pg.inner_text('#ghSub') and 'продукти: ' in pg.inner_text('#ghOkSub') and 'снимки: 1' in pg.inner_text('#ghOkSub'), 'the card says when and what (%s)' % pg.inner_text('#ghOkSub'))
+    ok('Автоматично в GitHub' in pg.inner_text('#ghSub') and 'продукти: ' in pg.inner_text('#ghOkSub') and 'снимки: 1' in pg.inner_text('#ghOkSub'), 'the card says when and what (%s)' % pg.inner_text('#ghOkSub'))
     n = len(GH['puts'])
     pg.evaluate("LC.ghMaybe()"); pg.wait_for_timeout(500)
     ok(len(GH['puts']) == n, 'by itself: not again on the same day')
@@ -2259,6 +2260,24 @@ with sync_playwright() as p:
         pg.screenshot(path=os.path.join(SHOTS, 'v244-cards-%s-%d.png' % (lang[:2], w)), full_page=True)
         ctx.close()
 
+    # ---- v2.46: Profile = 4 cards (user OK, picture 23 "A") ----
+    print('v2.46: Profile with 4 cards')
+    ctx, pg = new_page(b, base, 'en-GB', dark=True)
+    pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(200)
+    titles = pg.eval_on_selector_all('#tab-list > details.lcard:not([hidden]) > summary .lct strong', 'e => e.map(x => x.textContent)')
+    ok(titles == ['My list and allergens', 'Backup', 'Without internet', 'Settings'], '4 cards: %s' % titles)
+    ok(pg.locator('#avoidCard #foodAlgBox').count() == 1 and pg.locator('#avoidCard #cosAlgBox').count() == 1, '1: your words and all allergens are in one card')
+    ok(all(pg.locator('#ghCard ' + q).count() == 1 for q in ('#ghSetup', '#exportBtn', '#importInput', '#shareProdBtn', '#prodInput')), '2: Backup = GitHub + backup file + share products')
+    ok(pg.locator('#packCard #offline').count() == 1 and pg.locator('#setCard #offline').count() == 0, '3: the label reader download is in "Without internet"')
+    ok(pg.locator('#setCard #rulesFold').count() == 1 and pg.locator('#veganSwitch').count() == 0, '4: "What the app checks" is in Settings; the second vegan switch is gone')
+    pg.click('#profFood .pchip[data-p=seed]'); pg.wait_for_timeout(150)
+    open_card(pg, 'avoidCard'); pg.click('#foodAlgBox summary'); pg.click('#foodAlgList label:has-text("Mustard") input'); pg.wait_for_timeout(200)
+    sub = pg.inner_text('#avoidCard summary small'); sep = pg.evaluate("getComputedStyle(document.getElementById('algSub'), '::before').content")
+    ok('seed oil' in sub.lower() and 'Mustard' in sub and sep == '" · "', 'the card line shows your words · your allergens (%s, %s)' % (sub, sep))
+    ok(no_side_scroll(pg), 'no sideways scroll')
+    pg.screenshot(path=os.path.join(SHOTS, 'v246-profile-en.png'), full_page=True)
+    ctx.close()
+
     # ---- v2.45: inside the Android app (APK): files and texts go to the Android share menu (LCNative) ----
     print('v2.45: Android app bridge')
     ctx = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, locale='bg-BG', color_scheme='dark', service_workers='block',
@@ -2276,7 +2295,7 @@ with sync_playwright() as p:
     pg.click('#moreBtn'); pg.wait_for_selector('#moreMenu'); pg.click('#mShare'); pg.wait_for_timeout(400)
     sh = pg.evaluate("window.__shared")
     ok(sh and sh[-1][0] == 'text' and 'Тест апп' in sh[-1][1], '"Сподели" -> the Android share menu with the text')
-    pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(200); open_card(pg, 'moreFold')
+    pg.click('.tabbar button[data-go=list]'); pg.wait_for_timeout(200); open_card(pg, 'ghCard')
     pg.click('#exportBtn'); pg.wait_for_timeout(800)
     sh = pg.evaluate("window.__shared")
     import base64 as _b64b

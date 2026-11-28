@@ -4127,7 +4127,10 @@
         $('avoidCard').open = true; $('avoidCard').scrollIntoView({ block: 'start', behavior: 'smooth' }); setTimeout(() => $('avoidInput').focus(), 350); } }));
     $('profCos').replaceChildren(pchip(!!state.avoidFragrance, t('prof.frag'), () => setFragrance(!state.avoidFragrance), { 'data-p': 'frag' }),
       ...PRESETS.cos.map(ps => pchip(!!presetItem(ps), ps.name[LANG] || ps.name.en, () => togglePreset(ps), { 'data-p': ps.key })));
-    $('profDiet').replaceChildren(pchip(!!state.vegan, t('prof.vegan'), () => { $('veganSwitch').checked = !state.vegan; $('veganSwitch').dispatchEvent(new Event('change')); }, { 'data-p': 'vegan' }));
+    // v2.46: the Vegan chip is the only vegan switch (the second switch in "Data and more" is gone)
+    $('profDiet').replaceChildren(pchip(!!state.vegan, t('prof.vegan'), () => {
+      state.vegan = !state.vegan; store.set('vegan', state.vegan); renderProfile(); settingsChanged();
+    }, { 'data-p': 'vegan' }));
   }
 
   // ---------- My list: allergens ----------
@@ -4591,7 +4594,6 @@
   }
 
   function syncSettingsControls() {
-    $('veganSwitch').checked = !!state.vegan;
     $('bigSwitch').checked = !!state.bigText;
     $('vibSwitch').checked = !!state.vibrate;
     $('camStartSwitch').checked = !!store.get('camStart', false);
@@ -4794,12 +4796,6 @@
       e.preventDefault();
       addAvoid($('avoidInput').value);
       $('avoidInput').value = '';
-    });
-    $('veganSwitch').addEventListener('change', e => {
-      state.vegan = e.target.checked;
-      store.set('vegan', state.vegan);
-      renderProfile();
-      settingsChanged();
     });
     $('cosAlgSearch').addEventListener('input', filterCosAllergens);
     $('cosAlgClear').addEventListener('click', () => {

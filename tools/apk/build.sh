@@ -41,21 +41,11 @@ echo "== version $VER ($RUN)"
 sed -i -E "s/versionCode [0-9]+/versionCode $RUN/; s/versionName \"[^\"]*\"/versionName \"$VER\"/" "$APPDIR/build.gradle"
 grep -E 'versionCode|versionName' "$APPDIR/build.gradle"
 
-echo "== icon and start screen"
-IM="$(command -v magick || command -v convert || true)"
-if [ -n "$IM" ]; then
-  rm -rf "$RES/mipmap-anydpi-v26"
-  for d in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
-    n="${d%%:*}"; s="${d##*:}"; mkdir -p "$RES/mipmap-$n"
-    "$IM" "$ROOT/icon-512.png" -resize "${s}x${s}" "$RES/mipmap-$n/ic_launcher.png"
-    cp "$RES/mipmap-$n/ic_launcher.png" "$RES/mipmap-$n/ic_launcher_round.png"
-  done
-  find "$RES" -name 'splash.png' | while read -r f; do
-    sz="$(identify -format '%wx%h' "$f")"; m="$(identify -format '%[fx:int(min(w,h)/3)]' "$f")"
-    "$IM" -size "$sz" xc:'#121417' \( "$ROOT/icon-512.png" -resize "${m}x${m}" \) -gravity center -composite "$f"
-  done
+echo "== icon and start screen (from icon-512.png; Pillow in a small venv, no ImageMagick needed)"
+if python3 -m venv "$W/venv" && "$W/venv/bin/pip" install --quiet pillow && "$W/venv/bin/python" -I "$HERE/icons.py" "$ROOT/icon-512.png" "$RES"; then
+  echo "icon ok"
 else
-  echo "::warning::ImageMagick not found: the default Capacitor icon stays"
+  echo "::warning::The icon step failed: the default Capacitor icon stays"
 fi
 
 echo "== build"

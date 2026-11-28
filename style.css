@@ -1335,3 +1335,9 @@ details.lcard[open] > summary .lct small { white-space: normal; }
 .ghwarn { margin: 8px 0 0; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--red, #e5534b) 16%, transparent); font-size: 0.88rem; }
 .ghwarn[hidden] { display: none; }
 .ghbtns { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+
+/* ---------- v2.46: Profile tab = 4 cards (user OK, picture 23 "A") ---------- */
+#algSub:not(:empty)::before { content: " · "; }
+#avoidSub:empty + #algSub:not(:empty)::before { content: ""; }
+#setCard details.fold#rulesFold { border-bottom: 0; margin-top: 8px; }
+#packCard .offl { margin-top: 14px; }
